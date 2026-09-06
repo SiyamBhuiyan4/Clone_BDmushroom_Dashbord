@@ -13,20 +13,25 @@ import {
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
 import { Badge, Button, Card, EmptyState, Input, Select, cx } from "../components/ui";
+import { Pagination, SortSelect, usePagination } from "../components/Pagination";
+import { useT } from "../lib/i18n";
 import { ProductDialog } from "../components/ProductDialog";
 import { SellDialog } from "../components/SellDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { gradientFor, initialOf } from "../lib/avatar";
-import { plural } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedQuery, useAuthedMutation } from "../lib/session";
 
+type SortKey = "newest" | "name" | "stockLow" | "stockHigh" | "costHigh";
+
 export function ProductsPage() {
-  const { fmt } = useSettings();
+  const { fmt, fmtNum } = useSettings();
+  const t = useT();
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
+  const [sort, setSort] = useState<SortKey>("newest");
   const [showArchived, setShowArchived] = useState(false);
 
   const products = useAuthedQuery(api.products.list, { search, includeArchived: showArchived });
@@ -41,10 +46,18 @@ export function ProductsPage() {
   const [selling, setSelling] = useState<Doc<"products"> | null>(null);
   const [deleting, setDeleting] = useState<Doc<"products"> | null>(null);
 
-  const visible = useMemo(
-    () => (products ?? []).filter((p) => !category || p.category === category),
-    [products, category],
-  );
+  const visible = useMemo(() => {
+    const filtered = (products ?? []).filter((p) => !category || p.category === category);
+    return [...filtered].sort((a, b) => {
+      if (sort === "name") return a.name.localeCompare(b.name);
+      if (sort === "stockLow") return a.quantity - b.quantity;
+      if (sort === "stockHigh") return b.quantity - a.quantity;
+      if (sort === "costHigh") return b.costPrice - a.costPrice;
+      return b.createdAt - a.createdAt;
+    });
+  }, [products, category, sort]);
+
+  const pager = usePagination(visible, `${search}|${category}|${sort}|${showArchived}`, 25);
 
   async function adjust(product: Doc<"products">, delta: number) {
     try {
@@ -58,19 +71,23 @@ export function ProductsPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-[28px] leading-9 font-bold tracking-tight text-ink">Products</h1>
-          <p className="mt-1 text-[14px] text-ink-3">
-            What you have, what it cost you, and how many are left.
-          </p>
+          <h1 className="text-[24px] leading-8 font-bold tracking-tight text-ink sm:text-[28px] sm:leading-9">
+            {t("products.title")}
+          </h1>
+          <p className="mt-1 text-[13.5px] text-ink-3 sm:text-[14px]">{t("products.subtitle")}</p>
         </div>
-        <Button variant="primary" onClick={() => setAddOpen(true)}>
+        <Button
+          variant="primary"
+          onClick={() => setAddOpen(true)}
+          className="w-full sm:w-auto"
+        >
           <PackagePlus size={17} />
-          Add product
+          {t("dash.addProduct")}
         </Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-60 max-w-md flex-1">
+        <div className="relative w-full min-w-0 sm:min-w-60 sm:max-w-md sm:flex-1">
           <Search
             size={17}
             className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-3"
@@ -79,33 +96,48 @@ export function ProductsPage() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, details or category"
+            placeholder={t("products.searchPlaceholder")}
             className="pl-10.5"
-            aria-label="Search products"
+            aria-label={t("common.search")}
           />
         </div>
-        <div className="w-full sm:w-56">
-          <Select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            aria-label="Filter by category"
-          >
-            <option value="">All categories</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </Select>
+        <div className="flex w-full gap-3 sm:w-auto">
+          <div className="flex-1 sm:w-48 sm:flex-none">
+            <Select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              aria-label={t("common.category")}
+            >
+              <option value="">{t("common.allCategories")}</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="flex-1 sm:flex-none">
+            <SortSelect
+              value={sort}
+              onChange={setSort}
+              options={[
+                { value: "newest", label: t("products.sortNewest") },
+                { value: "name", label: t("products.sortName") },
+                { value: "stockLow", label: t("products.sortStockLow") },
+                { value: "stockHigh", label: t("products.sortStockHigh") },
+                { value: "costHigh", label: t("products.sortCostHigh") },
+              ]}
+            />
+          </div>
         </div>
-        <label className="flex h-11 cursor-pointer items-center gap-2.5 rounded-xl border border-line-strong bg-page px-3.5 text-[13.5px] font-medium text-ink-2">
+        <label className="flex h-11 w-full cursor-pointer items-center gap-2.5 rounded-xl border border-line-strong bg-page px-3.5 text-[13.5px] font-medium text-ink-2 sm:w-auto">
           <input
             type="checkbox"
             checked={showArchived}
             onChange={(e) => setShowArchived(e.target.checked)}
             className="size-4 accent-[var(--accent)]"
           />
-          Show archived
+          {t("products.showArchived")}
         </label>
       </div>
 
@@ -138,16 +170,11 @@ export function ProductsPage() {
       ) : (
         <>
           <p className="-mt-1 text-[13px] font-medium text-ink-3">
-            {plural(visible.length, "product")}
-            {" · "}
-            {plural(
-              visible.reduce((sum, p) => sum + p.quantity, 0),
-              "unit",
-            )}{" "}
-            in stock
+            {fmtNum(visible.length)} · {fmtNum(visible.reduce((sum, p) => sum + p.quantity, 0))}{" "}
+            {t("common.units")} {t("products.inStock")}
           </p>
           <div className="ac-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {visible.map((product) => (
+            {pager.pageRows.map((product) => (
               <ProductCard
                 key={product._id}
                 product={product}
@@ -165,6 +192,19 @@ export function ProductsPage() {
               />
             ))}
           </div>
+          {pager.pageCount > 1 && (
+            <Card>
+              <Pagination
+                page={pager.page}
+                pageCount={pager.pageCount}
+                pageSize={pager.pageSize}
+                total={pager.total}
+                onPage={pager.setPage}
+                onPageSize={pager.setPageSize}
+                itemLabel="products"
+              />
+            </Card>
+          )}
         </>
       )}
 
@@ -179,7 +219,7 @@ export function ProductsPage() {
         open={deleting !== null}
         onClose={() => setDeleting(null)}
         title={`Delete ${deleting?.name ?? "product"}?`}
-        body="This removes the product from your inventory. Sales already recorded for it are kept, with the name and cost they were sold at, so your profit history does not change."
+        body="This removes the product and its stock lots, so it stops counting toward projected profit. Sales already recorded are kept, with the name and cost they were sold at, so your profit history does not change."
         onConfirm={async () => {
           if (!deleting) return;
           try {

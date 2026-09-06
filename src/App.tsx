@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useSettings, type ThemeChoice } from "./lib/settings";
 import { useSession } from "./lib/session";
+import { useT, type MessageKey } from "./lib/i18n";
 import { cx } from "./components/ui";
 import { DashboardPage } from "./pages/Dashboard";
 import { ProductsPage } from "./pages/Products";
@@ -24,11 +25,11 @@ import { ProfitPage } from "./pages/Profit";
 
 type Route = "dashboard" | "products" | "sales" | "profit";
 
-const NAV: { route: Route; label: string; icon: typeof LayoutDashboard }[] = [
-  { route: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { route: "products", label: "Products", icon: Package },
-  { route: "sales", label: "Sales", icon: Receipt },
-  { route: "profit", label: "Profit", icon: PieChart },
+const NAV: { route: Route; key: MessageKey; icon: typeof LayoutDashboard }[] = [
+  { route: "dashboard", key: "nav.dashboard", icon: LayoutDashboard },
+  { route: "products", key: "nav.products", icon: Package },
+  { route: "sales", key: "nav.sales", icon: Receipt },
+  { route: "profit", key: "nav.profit", icon: PieChart },
 ];
 
 const THEMES: { value: ThemeChoice; icon: typeof Sun; label: string }[] = [
@@ -43,6 +44,7 @@ function routeFromHash(): Route {
 }
 
 export default function App() {
+  const t = useT();
   const [route, setRoute] = useState<Route>(routeFromHash);
   // Separate from the sidebar's collapsed state: this is the mobile drawer,
   // which is always full width and never a rail.
@@ -86,7 +88,10 @@ export default function App() {
             <Menu size={20} />
           </button>
           <span className="text-[15px] font-bold tracking-tight">
-            {NAV.find((n) => n.route === route)?.label}
+            {(() => {
+              const item = NAV.find((n) => n.route === route);
+              return item ? t(item.key) : "";
+            })()}
           </span>
         </header>
 
@@ -117,6 +122,7 @@ function Sidebar({
   onCloseDrawer: () => void;
 }) {
   const { navCollapsed, toggleNav } = useSettings();
+  const t = useT();
   // The rail only applies from `lg` up — below that the sidebar is a drawer
   // and always shows its full width.
   const rail = navCollapsed;
@@ -159,7 +165,7 @@ function Sidebar({
           )}
         >
           <p className="text-[16px] font-bold tracking-tight text-ink">Ledger</p>
-          <p className="text-[11.5px] text-ink-3">Account management</p>
+          <p className="text-[11.5px] text-ink-3">{t("nav.tagline")}</p>
         </div>
         <button
           onClick={onCloseDrawer}
@@ -178,10 +184,11 @@ function Sidebar({
             rail ? "lg:max-h-0 lg:pb-0 lg:opacity-0" : "max-h-5 pb-2 opacity-100",
           )}
         >
-          Menu
+          {t("nav.menu")}
         </p>
-        {NAV.map(({ route: r, label, icon: Icon }) => {
+        {NAV.map(({ route: r, key, icon: Icon }) => {
           const active = route === r;
+          const label = t(key);
           return (
             <button
               key={r}
@@ -211,6 +218,7 @@ function Sidebar({
       </nav>
 
       <div className="flex shrink-0 flex-col gap-2 border-t border-line px-3 py-4">
+        <LanguageToggle rail={rail} />
         <ThemeToggle rail={rail} />
         <SignOutButton collapsed={rail} />
         <CollapseButton collapsed={rail} onToggle={toggleNav} />
@@ -284,8 +292,67 @@ function ThemeToggle({ rail }: { rail: boolean }) {
   );
 }
 
+/**
+ * Switching language also switches numerals and date formats, so the whole
+ * screen changes script — not just the labels around Bengali product names.
+ */
+function LanguageToggle({ rail }: { rail: boolean }) {
+  const { lang, setLang } = useSettings();
+  const options: { value: "en" | "bn"; short: string; label: string }[] = [
+    { value: "en", short: "EN", label: "English" },
+    { value: "bn", short: "বাং", label: "বাংলা" },
+  ];
+  const other = options.find((o) => o.value !== lang)!;
+
+  return (
+    <div className="relative h-11">
+      <div
+        className={cx(
+          "absolute inset-0 grid grid-cols-2 gap-1 rounded-xl border border-line bg-page p-1",
+          "transition-opacity duration-200 ease-[var(--ease-out)]",
+          rail ? "lg:pointer-events-none lg:opacity-0" : "opacity-100",
+        )}
+      >
+        {options.map((o) => (
+          <button
+            key={o.value}
+            onClick={() => setLang(o.value)}
+            aria-pressed={lang === o.value}
+            aria-hidden={rail}
+            tabIndex={rail ? -1 : 0}
+            className={cx(
+              "flex items-center justify-center rounded-lg text-[12.5px] font-bold transition-all",
+              lang === o.value
+                ? "bg-surface text-accent shadow-[var(--shadow-sm)]"
+                : "text-ink-3 hover:text-ink",
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={() => setLang(other.value)}
+        aria-label={`Switch to ${other.label}`}
+        title={other.label}
+        aria-hidden={!rail}
+        tabIndex={rail ? 0 : -1}
+        className={cx(
+          "absolute inset-0 flex items-center justify-center rounded-xl border border-line bg-page",
+          "text-[12px] font-bold text-accent transition-opacity duration-200 hover:bg-surface-2",
+          rail ? "lg:opacity-100" : "pointer-events-none opacity-0",
+        )}
+      >
+        {options.find((o) => o.value === lang)!.short}
+      </button>
+    </div>
+  );
+}
+
 function SignOutButton({ collapsed }: { collapsed: boolean }) {
   const { signOut, expiresAt } = useSession();
+  const t = useT();
   const hint = expiresAt
     ? `Session ends ${new Date(expiresAt).toLocaleString(undefined, {
         weekday: "short",
@@ -298,7 +365,7 @@ function SignOutButton({ collapsed }: { collapsed: boolean }) {
     <button
       onClick={signOut}
       title={hint}
-      aria-label="Sign out"
+      aria-label={t("nav.signOut")}
       className={cx(
         "flex h-11 items-center overflow-hidden rounded-xl px-3 text-[13.5px] font-semibold",
         "text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink",
@@ -311,7 +378,7 @@ function SignOutButton({ collapsed }: { collapsed: boolean }) {
           collapsed ? "lg:ml-0 lg:max-w-0 lg:opacity-0" : "ml-3 max-w-40 opacity-100",
         )}
       >
-        Sign out
+        {t("nav.signOut")}
       </span>
     </button>
   );

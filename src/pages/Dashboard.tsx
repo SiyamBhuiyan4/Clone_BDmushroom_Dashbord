@@ -18,8 +18,9 @@ import { TopProductsChart, type TopProduct } from "../components/charts/TopProdu
 import { ProductDialog } from "../components/ProductDialog";
 import { SellDialog } from "../components/SellDialog";
 import { useSettings } from "../lib/settings";
+import { useT } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
-import { percent, plural, relativeTime, startOfLocalDay } from "../lib/format";
+import { plural, relativeTime, startOfLocalDay } from "../lib/format";
 import { useAuthedQuery } from "../lib/session";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -37,7 +38,8 @@ function change(current: number, previous: number): number | null {
 }
 
 export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sales") => void }) {
-  const { fmt } = useSettings();
+  const { fmt, fmtNum, fmtPercent } = useSettings();
+  const t = useT();
   const data = useAuthedQuery(api.dashboard.overview);
   const [rangeDays, setRangeDays] = useState(30);
   const [sellOpen, setSellOpen] = useState(false);
@@ -121,22 +123,29 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-[28px] leading-9 font-bold tracking-tight text-ink">Dashboard</h1>
-          <p className="mt-1 text-[14px] text-ink-3">Profit, sales and stock at a glance.</p>
+          <h1 className="text-[24px] leading-8 font-bold tracking-tight text-ink sm:text-[28px] sm:leading-9">
+            {t("dash.title")}
+          </h1>
+          <p className="mt-1 text-[13.5px] text-ink-3 sm:text-[14px]">{t("dash.subtitle")}</p>
         </div>
-        <div className="flex items-center gap-2.5">
-          <Button variant="secondary" onClick={() => setProductOpen(true)}>
+        <div className="flex w-full items-center gap-2.5 sm:w-auto">
+          <Button
+            variant="secondary"
+            onClick={() => setProductOpen(true)}
+            className="flex-1 sm:flex-none"
+          >
             <PackagePlus size={17} />
-            Add product
+            {t("dash.addProduct")}
           </Button>
           <Button
             variant="primary"
             onClick={() => setSellOpen(true)}
             disabled={inventory.inStockCount === 0}
             title={inventory.inStockCount === 0 ? "Add a product with stock first" : undefined}
+            className="flex-1 sm:flex-none"
           >
             <Plus size={17} />
-            Record sale
+            {t("dash.recordSale")}
           </Button>
         </div>
       </div>
@@ -160,7 +169,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
           {/* One filter row, above everything it scopes. */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-[13.5px] text-ink-3">
-              Showing the <span className="font-semibold text-ink-2">{range.full}</span>
+              {t("dash.showing")} <span className="font-semibold text-ink-2">{range.full}</span>
             </p>
             <div
               className="flex items-center gap-1 rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow-sm)]"
@@ -191,7 +200,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
             <StatTile
               hero
               accent="violet"
-              label="Profit"
+              label={t("dash.realisedProfit")}
               value={
                 <AnimatedNumber
                   value={scoped.profit}
@@ -200,46 +209,58 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
               }
               icon={<TrendingUp size={17} />}
               delta={vs(scoped.deltaProfit)}
-              sub={scoped.revenue > 0 ? `${percent(scoped.margin)} margin` : undefined}
+              sub={
+                scoped.revenue > 0
+                  ? `${fmtPercent(scoped.margin)} ${t("dash.margin")}`
+                  : t("profit.realisedHint")
+              }
             />
             <StatTile
               accent="sky"
-              label="Revenue"
+              label={t("dash.revenue")}
               value={<AnimatedNumber value={scoped.revenue} format={fmt} />}
               icon={<CircleDollarSign size={17} />}
               delta={vs(scoped.deltaRevenue)}
-              sub={`${fmt(allTime.revenue)} all time`}
+              sub={`${fmt(allTime.revenue)} ${t("dash.allTime")}`}
             />
             <StatTile
               accent="amber"
-              label="Sales"
-              value={<AnimatedNumber value={scoped.count} format={(n) => n.toLocaleString()} />}
+              label={t("dash.sales")}
+              value={<AnimatedNumber value={scoped.count} format={fmtNum} />}
               icon={<Receipt size={17} />}
               delta={vs(scoped.deltaCount)}
-              sub={scoped.count > 0 ? `${fmt(scoped.averageSale)} avg` : "No sales yet"}
+              sub={
+                scoped.count > 0 ? `${fmt(scoped.averageSale)} ${t("dash.avg")}` : t("dash.noSales")
+              }
             />
             <StatTile
               accent="emerald"
-              label="Available stock"
+              label={t("dash.availableStock")}
               value={
                 <AnimatedNumber
                   value={inventory.unitsInStock}
-                  format={(n) => `${n.toLocaleString()} units`}
+                  format={(n) => `${fmtNum(n)} ${t("common.units")}`}
                 />
               }
               icon={<Boxes size={17} />}
-              sub={`${plural(inventory.inStockCount, "product")} · ${fmt(inventory.inventoryCost)} at cost`}
+              sub={`${fmtNum(inventory.inStockCount)} · ${fmt(inventory.inventoryCost)} ${t("dash.atCost")}`}
             />
           </div>
 
           <div className="ac-stagger grid gap-4 lg:grid-cols-3">
             <Card className="lg:col-span-2">
-              <CardHeader title="Revenue and profit" subtitle={`Per day, ${range.full}`} />
+              <CardHeader
+                title={t("dash.revenueAndProfit")}
+                subtitle={`${t("dash.perDay")}, ${range.full}`}
+              />
               <TrendChart points={scoped.points} />
             </Card>
 
             <Card>
-              <CardHeader title="Top products" subtitle={`By profit, ${range.full}`} />
+              <CardHeader
+                title={t("dash.topProducts")}
+                subtitle={`${t("dash.byProfit")}, ${range.full}`}
+              />
               {scoped.topProducts.length === 0 ? (
                 <EmptyState
                   icon={<Receipt size={22} />}
@@ -255,9 +276,9 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
           <div className="grid gap-4 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader
-                title="Recent sales"
-                subtitle="Latest activity"
-                action={<CardAction onClick={() => onNavigate("sales")}>View all</CardAction>}
+                title={t("dash.recentSales")}
+                subtitle={t("dash.latestActivity")}
+                action={<CardAction onClick={() => onNavigate("sales")}>{t("common.viewAll")}</CardAction>}
               />
               {recentSales.length === 0 ? (
                 <EmptyState
@@ -315,16 +336,16 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
 
             <Card className="self-start">
               <CardHeader
-                title="Inventory"
+                title={t("dash.inventory")}
                 subtitle={plural(inventory.productCount, "active product")}
-                action={<CardAction onClick={() => onNavigate("products")}>Manage</CardAction>}
+                action={<CardAction onClick={() => onNavigate("products")}>{t("common.manage")}</CardAction>}
               />
               <div className="px-6 pb-6">
                 <dl className="grid grid-cols-2 gap-3">
-                  <MiniStat label="In stock" value={String(inventory.inStockCount)} />
+                  <MiniStat label={t("dash.inStock")} value={fmtNum(inventory.inStockCount)} />
                   <MiniStat
-                    label="Out of stock"
-                    value={String(inventory.outOfStockCount)}
+                    label={t("dash.outOfStock")}
+                    value={fmtNum(inventory.outOfStockCount)}
                     alarm={inventory.outOfStockCount > 0}
                   />
                 </dl>
@@ -333,7 +354,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
                   <div className="mt-5">
                     <p className="flex items-center gap-1.5 text-[12.5px] font-bold text-ink-2">
                       <AlertTriangle size={14} className="text-warning" aria-hidden />
-                      Running low
+                      {t("dash.runningLow")}
                     </p>
                     <ul className="mt-2.5 flex flex-col gap-2">
                       {inventory.lowStock.map((p) => (
@@ -347,7 +368,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
                 ) : (
                   inventory.outOfStockCount === 0 && (
                     <p className="mt-5 text-[13px] leading-6 text-ink-3">
-                      Every product has stock on hand. Nothing needs restocking.
+                      {t("dash.allStocked")}
                     </p>
                   )
                 )}

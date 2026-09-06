@@ -2,32 +2,48 @@
 export const CURRENCY_CODE = "BDT";
 export const CURRENCY_SYMBOL = "৳";
 
+export type Lang = "en" | "bn";
+
+/*
+  Bengali renders its own digits (০১২৩৪৫৬৭৮৯) and its own date names. Passing
+  the locale through every formatter means switching language changes the
+  numbers on screen too, not just the labels around them.
+*/
+export function localeFor(lang: Lang) {
+  return lang === "bn" ? "bn-BD" : "en-GB";
+}
+
 /** Full money string, e.g. "৳1,250.00". Poisha are dropped for whole amounts. */
-export function money(value: number) {
+export function money(value: number, lang: Lang = "en") {
   const whole = Number.isInteger(value);
-  return `${CURRENCY_SYMBOL}${value.toLocaleString(undefined, {
+  return `${CURRENCY_SYMBOL}${value.toLocaleString(localeFor(lang), {
     minimumFractionDigits: whole ? 0 : 2,
     maximumFractionDigits: 2,
   })}`;
 }
 
+/** Plain number in the active script, for counts and quantities. */
+export function num(value: number, lang: Lang = "en") {
+  return value.toLocaleString(localeFor(lang), { maximumFractionDigits: 2 });
+}
+
 /** Short money for axis ticks and tight tiles, e.g. "৳12.5k". */
-export function moneyCompact(value: number) {
+export function moneyCompact(value: number, lang: Lang = "en") {
   const abs = Math.abs(value);
   const sign = value < 0 ? "-" : "";
-  if (abs >= 1_000_000) return `${sign}${CURRENCY_SYMBOL}${trim(abs / 1_000_000)}m`;
-  if (abs >= 1_000) return `${sign}${CURRENCY_SYMBOL}${trim(abs / 1_000)}k`;
-  return `${sign}${CURRENCY_SYMBOL}${trim(abs)}`;
+  const k = lang === "bn" ? "হা" : "k";
+  const m = lang === "bn" ? "মি" : "m";
+  if (abs >= 1_000_000) return `${sign}${CURRENCY_SYMBOL}${trim(abs / 1_000_000, lang)}${m}`;
+  if (abs >= 1_000) return `${sign}${CURRENCY_SYMBOL}${trim(abs / 1_000, lang)}${k}`;
+  return `${sign}${CURRENCY_SYMBOL}${trim(abs, lang)}`;
 }
 
-function trim(n: number) {
-  return n
-    .toLocaleString(undefined, { maximumFractionDigits: 1 })
-    .replace(/\.0$/, "");
+function trim(n: number, lang: Lang = "en") {
+  return n.toLocaleString(localeFor(lang), { maximumFractionDigits: 1 }).replace(/\.0$/, "");
 }
 
-export function percent(fraction: number) {
-  return `${(fraction * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
+export function percent(fraction: number, lang: Lang = "en") {
+  return `${(fraction * 100).toLocaleString(localeFor(lang), { maximumFractionDigits: 1 })}%`;
 }
 
 export function plural(n: number, one: string, many = `${one}s`) {
@@ -50,22 +66,22 @@ export function startOfLocalDay(ts: number) {
   return d.getTime();
 }
 
-export function formatDate(ts: number) {
-  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+export function formatDate(ts: number, lang: Lang = "en") {
+  return new Date(ts).toLocaleDateString(localeFor(lang), { month: "short", day: "numeric" });
 }
 
-export function formatDateFull(ts: number) {
-  return new Date(ts).toLocaleDateString(undefined, {
-    month: "short",
+export function formatDateFull(ts: number, lang: Lang = "en") {
+  return new Date(ts).toLocaleDateString(localeFor(lang), {
     day: "numeric",
+    month: "short",
     year: "numeric",
   });
 }
 
-export function formatDateTime(ts: number) {
-  return new Date(ts).toLocaleString(undefined, {
-    month: "short",
+export function formatDateTime(ts: number, lang: Lang = "en") {
+  return new Date(ts).toLocaleString(localeFor(lang), {
     day: "numeric",
+    month: "short",
     hour: "numeric",
     minute: "2-digit",
   });

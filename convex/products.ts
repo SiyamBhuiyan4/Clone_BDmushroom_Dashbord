@@ -132,13 +132,23 @@ export const setArchived = mutation({
 });
 
 /**
- * Deletes the product. Past sales keep their own snapshot of the name and
- * cost, so revenue and profit history are unaffected.
+ * Deletes the product and its stock lots.
+ *
+ * Sales are deliberately kept: they snapshot the name and cost they were sold
+ * at, so revenue and profit history stay true. Stock lots are the opposite —
+ * they describe inventory you hold, so leaving them behind would keep counting
+ * a product you no longer stock toward your projected profit.
  */
 export const remove = mutation({
   args: { token: v.string(), id: v.id("products") },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    const lots = await ctx.db
+      .query("stockBatches")
+      .withIndex("by_product", (q) => q.eq("productId", args.id))
+      .collect();
+    for (const lot of lots) await ctx.db.delete(lot._id);
     await ctx.db.delete(args.id);
+    return { removedLots: lots.length };
   },
 });
