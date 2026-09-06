@@ -15,6 +15,7 @@ import { Badge, Button, Card, CardHeader, EmptyState, cx } from "../components/u
 import { StatTile } from "../components/StatTile";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { BatchDialog, type BatchRow } from "../components/BatchDialog";
+import { DateRangeControls, rangeLabel, useDateRange } from "../components/DateRange";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT, type MessageKey } from "../lib/i18n";
@@ -45,14 +46,64 @@ export function ProfitPage() {
   const removeBatch = useAuthedMutation(api.profit.removeBatch);
 
   const [basis, setBasis] = useState<Basis>("projected");
+  const range = useDateRange();
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<BatchRow | null>(null);
   const [deleting, setDeleting] = useState<BatchRow | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  /*
+    Both sides of the page answer to the same range: lots by their purchase
+    date, sales by the date they were sold. A split scoped to one but not the
+    other would be quietly wrong.
+  */
+  const { from, to } = range.bounds;
+  const scoped = useMemo(() => {
+    if (!data) return null;
+    // Depend on the bounds, not the hook's return value — that object is new
+    // on every render and would defeat the memo entirely.
+    const within = (ts: number) => ts >= from && ts <= to;
+    const batches = data.batches.filter((b) => within(b.purchasedAt));
+    const sales = data.sales.filter((s) => within(s.soldAt));
+
+    let projected = 0;
+    let cost = 0;
+    let revenue = 0;
+    for (const b of batches) {
+      projected += b.totalProfit;
+      cost += b.totalCost;
+      revenue += b.totalRevenue;
+    }
+
+    let realisedProfit = 0;
+    let realisedRevenue = 0;
+    const byProduct = new Map<string, { profit: number; units: number }>();
+    for (const s of sales) {
+      realisedProfit += s.profit;
+      realisedRevenue += s.revenue;
+      const e = byProduct.get(s.productId) ?? { profit: 0, units: 0 };
+      e.profit += s.profit;
+      e.units += s.units;
+      byProduct.set(s.productId, e);
+    }
+
+    return {
+      batches,
+      byProduct,
+      totals: {
+        profit: projected,
+        cost,
+        revenue,
+        lots: batches.length,
+        margin: revenue > 0 ? projected / revenue : 0,
+      },
+      realised: { profit: realisedProfit, revenue: realisedRevenue, sales: sales.length },
+    };
+  }, [data, from, to]);
+
   const products = useMemo(() => {
-    if (!data) return [];
-    const realised = new Map(data.realisedByProduct.map((r) => [r.productId, r]));
+    if (!data || !scoped) return [];
+    const realised = scoped.byProduct;
     const map = new Map<
       string,
       {
@@ -65,7 +116,7 @@ export function ProfitPage() {
         batches: typeof data.batches;
       }
     >();
-    for (const b of data.batches) {
+    for (const b of scoped.batches) {
       const entry = map.get(b.productId) ?? {
         productId: b.productId,
         name: b.productName,
@@ -83,16 +134,17 @@ export function ProfitPage() {
     return [...map.values()].sort((a, b) =>
       basis === "realised" ? b.realised - a.realised : b.projected - a.projected,
     );
-  }, [data, basis]);
+  }, [data, scoped, basis]);
 
-  if (!data) return <ProfitSkeleton />;
+  if (!data || !scoped) return <ProfitSkeleton />;
 
-  const { buckets, totals } = data;
+  const { buckets } = data;
+  const { totals } = scoped;
   const empty = data.batches.length === 0;
   // The split runs on whichever basis is selected. Budgeting a share of profit
   // that has not been earned yet is the easy way to overspend, so the two are
   // never merged into one number.
-  const splitBase = basis === "realised" ? data.realised.profit : totals.profit;
+  const splitBase = basis === "realised" ? scoped.realised.profit : totals.profit;
 
   return (
     <div className="flex flex-col gap-6">
@@ -108,6 +160,16 @@ export function ProfitPage() {
           {t("profit.addLot")}
         </Button>
       </div>
+
+      {!empty && (
+        <div className="flex flex-wrap items-center gap-3">
+          <DateRangeControls range={range} className="w-full sm:w-44" />
+          <p className="text-[12.5px] text-ink-3">
+            {t("dash.showing")}{" "}
+            <span className="font-semibold text-ink-2">{rangeLabel(range, t)}</span>
+          </p>
+        </div>
+      )}
 
       {empty ? (
         <Card>
@@ -137,7 +199,7 @@ export function ProfitPage() {
             <StatTile
               accent="emerald"
               label={t("profit.realisedProfit")}
-              value={<AnimatedNumber value={data.realised.profit} format={fmt} />}
+              value={<AnimatedNumber value={scoped.realised.profit} format={fmt} />}
               icon={<Wallet size={17} />}
               sub={t("profit.realisedHint")}
             />

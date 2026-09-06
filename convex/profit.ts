@@ -227,32 +227,21 @@ export const summary = query({
       and inventing one would make the numbers look more precise than they are.
     */
     const sales = await ctx.db.query("sales").collect();
-    const realisedByProduct = new Map<string, { profit: number; revenue: number; units: number }>();
-    let realisedProfit = 0;
-    let realisedRevenue = 0;
-    let realisedUnits = 0;
-
-    for (const s of sales) {
-      const profit = (s.unitPrice - s.unitCost) * s.quantity;
-      const revenue = s.unitPrice * s.quantity;
-      realisedProfit += profit;
-      realisedRevenue += revenue;
-      realisedUnits += s.quantity;
-
-      const key = s.productId as string;
-      const entry = realisedByProduct.get(key) ?? { profit: 0, revenue: 0, units: 0 };
-      entry.profit += profit;
-      entry.revenue += revenue;
-      entry.units += s.quantity;
-      realisedByProduct.set(key, entry);
-    }
 
     return {
       buckets,
       batches,
-      realisedByProduct: [...realisedByProduct.entries()].map(([productId, v]) => ({
-        productId,
-        ...v,
+      /*
+        One dated row per sale rather than a pre-aggregated total. The page
+        filters by date, and a figure summed here could not be re-scoped
+        client-side without a second round trip.
+      */
+      sales: sales.map((s) => ({
+        productId: s.productId as string,
+        soldAt: s.soldAt,
+        units: s.quantity,
+        revenue: s.unitPrice * s.quantity,
+        profit: (s.unitPrice - s.unitCost) * s.quantity,
       })),
       totals: {
         profit: totalProfit,
@@ -260,13 +249,6 @@ export const summary = query({
         revenue: totalRevenue,
         lots: batches.length,
         margin: totalRevenue > 0 ? totalProfit / totalRevenue : 0,
-      },
-      realised: {
-        profit: realisedProfit,
-        revenue: realisedRevenue,
-        units: realisedUnits,
-        sales: sales.length,
-        margin: realisedRevenue > 0 ? realisedProfit / realisedRevenue : 0,
       },
     };
   },
