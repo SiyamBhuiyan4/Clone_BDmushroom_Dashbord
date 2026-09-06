@@ -1,0 +1,339 @@
+import { useMemo, useState } from "react";
+import {
+  ArchiveRestore,
+  Archive,
+  Minus,
+  Package,
+  PackagePlus,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
+import { api } from "../../convex/_generated/api";
+import type { Doc } from "../../convex/_generated/dataModel";
+import { Badge, Button, Card, EmptyState, Input, Select, cx } from "../components/ui";
+import { ProductDialog } from "../components/ProductDialog";
+import { SellDialog } from "../components/SellDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useSettings } from "../lib/settings";
+import { gradientFor, initialOf } from "../lib/avatar";
+import { plural } from "../lib/format";
+import { errorMessage, useToast } from "../lib/toast";
+import { useAuthedQuery, useAuthedMutation } from "../lib/session";
+
+export function ProductsPage() {
+  const { fmt } = useSettings();
+  const toast = useToast();
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+
+  const products = useAuthedQuery(api.products.list, { search, includeArchived: showArchived });
+  const categories = useAuthedQuery(api.products.categories) ?? [];
+
+  const restock = useAuthedMutation(api.products.restock);
+  const setArchived = useAuthedMutation(api.products.setArchived);
+  const remove = useAuthedMutation(api.products.remove);
+
+  const [editing, setEditing] = useState<Doc<"products"> | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [selling, setSelling] = useState<Doc<"products"> | null>(null);
+  const [deleting, setDeleting] = useState<Doc<"products"> | null>(null);
+
+  const visible = useMemo(
+    () => (products ?? []).filter((p) => !category || p.category === category),
+    [products, category],
+  );
+
+  async function adjust(product: Doc<"products">, delta: number) {
+    try {
+      await restock({ id: product._id, delta });
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-[28px] leading-9 font-bold tracking-tight text-ink">Products</h1>
+          <p className="mt-1 text-[14px] text-ink-3">
+            What you have, what it cost you, and how many are left.
+          </p>
+        </div>
+        <Button variant="primary" onClick={() => setAddOpen(true)}>
+          <PackagePlus size={17} />
+          Add product
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-60 max-w-md flex-1">
+          <Search
+            size={17}
+            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-3"
+            aria-hidden
+          />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, details or category"
+            className="pl-10.5"
+            aria-label="Search products"
+          />
+        </div>
+        <div className="w-full sm:w-56">
+          <Select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            aria-label="Filter by category"
+          >
+            <option value="">All categories</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <label className="flex h-11 cursor-pointer items-center gap-2.5 rounded-xl border border-line-strong bg-page px-3.5 text-[13.5px] font-medium text-ink-2">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => setShowArchived(e.target.checked)}
+            className="size-4 accent-[var(--accent)]"
+          />
+          Show archived
+        </label>
+      </div>
+
+      {products === undefined ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-hidden>
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="ac-skeleton h-60 rounded-card border border-line bg-surface" />
+          ))}
+        </div>
+      ) : visible.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={<Package size={24} />}
+            title={search || category ? "No matches" : "No products yet"}
+            body={
+              search || category
+                ? "Try a different search term or clear the category filter."
+                : "Add a product with a name, a cost price and however many units you have."
+            }
+            action={
+              !search && !category ? (
+                <Button variant="primary" onClick={() => setAddOpen(true)}>
+                  <PackagePlus size={17} />
+                  Add product
+                </Button>
+              ) : undefined
+            }
+          />
+        </Card>
+      ) : (
+        <>
+          <p className="-mt-1 text-[13px] font-medium text-ink-3">
+            {plural(visible.length, "product")}
+            {" · "}
+            {plural(
+              visible.reduce((sum, p) => sum + p.quantity, 0),
+              "unit",
+            )}{" "}
+            in stock
+          </p>
+          <div className="ac-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {visible.map((product) => (
+              <ProductCard
+                key={product._id}
+                product={product}
+                onSell={() => setSelling(product)}
+                onEdit={() => setEditing(product)}
+                onDelete={() => setDeleting(product)}
+                onArchiveToggle={async () => {
+                  await setArchived({ id: product._id, archived: !product.archived });
+                  toast.ok(
+                    product.archived ? `${product.name} restored.` : `${product.name} archived.`,
+                  );
+                }}
+                onAdjust={(delta) => adjust(product, delta)}
+                fmt={fmt}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      <ProductDialog open={addOpen} onClose={() => setAddOpen(false)} />
+      <ProductDialog open={editing !== null} onClose={() => setEditing(null)} product={editing} />
+      <SellDialog
+        open={selling !== null}
+        onClose={() => setSelling(null)}
+        presetProductId={selling?._id}
+      />
+      <ConfirmDialog
+        open={deleting !== null}
+        onClose={() => setDeleting(null)}
+        title={`Delete ${deleting?.name ?? "product"}?`}
+        body="This removes the product from your inventory. Sales already recorded for it are kept, with the name and cost they were sold at, so your profit history does not change."
+        onConfirm={async () => {
+          if (!deleting) return;
+          try {
+            await remove({ id: deleting._id });
+            toast.ok(`${deleting.name} deleted.`);
+          } catch (err) {
+            toast.error(errorMessage(err));
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+function ProductCard({
+  product,
+  onSell,
+  onEdit,
+  onDelete,
+  onArchiveToggle,
+  onAdjust,
+  fmt,
+}: {
+  product: Doc<"products">;
+  onSell: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onArchiveToggle: () => void;
+  onAdjust: (delta: number) => void;
+  fmt: (v: number) => string;
+}) {
+  const out = product.quantity === 0;
+  const low = product.quantity > 0 && product.quantity <= 3;
+
+  return (
+    <Card
+      className={cx(
+        "group relative flex flex-col transition-all duration-300 ease-[var(--ease-out)]",
+        "hover:-translate-y-1 hover:shadow-[var(--shadow-pop)]",
+        product.archived && "opacity-55",
+      )}
+    >
+      {/*
+        The action cluster is taken out of flow — while hidden it would still
+        reserve its width and force the product name to truncate early.
+      */}
+      <div className="absolute top-3.5 right-3.5 z-10 flex items-center gap-0.5 rounded-xl bg-surface/90 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <IconButton label="Edit" onClick={onEdit}>
+          <Pencil size={15} />
+        </IconButton>
+        <IconButton label={product.archived ? "Restore" : "Archive"} onClick={onArchiveToggle}>
+          {product.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
+        </IconButton>
+        <IconButton label="Delete" onClick={onDelete} danger>
+          <Trash2 size={15} />
+        </IconButton>
+      </div>
+
+      <div className="flex items-start gap-3 px-5 pt-5">
+        <span
+          className="flex size-11 shrink-0 items-center justify-center rounded-2xl text-[16px] font-bold text-white shadow-[var(--shadow-sm)]"
+          style={{ background: gradientFor(product.name) }}
+          aria-hidden
+        >
+          {initialOf(product.name)}
+        </span>
+        <h3 className="mt-0.5 line-clamp-2 min-w-0 flex-1 text-[15.5px] leading-5.5 font-bold tracking-tight text-ink">
+          {product.name}
+        </h3>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 px-5">
+        {product.archived && <Badge>Archived</Badge>}
+        {product.category && <Badge tone="accent">{product.category}</Badge>}
+        {out ? (
+          <Badge tone="critical">Out of stock</Badge>
+        ) : low ? (
+          <Badge tone="warning">{product.quantity} left</Badge>
+        ) : (
+          <Badge tone="good">{product.quantity} in stock</Badge>
+        )}
+      </div>
+
+      <p
+        className={cx(
+          "mt-4 min-h-10 px-5 text-[13.5px] leading-[1.6] whitespace-pre-wrap",
+          product.details ? "line-clamp-3 text-ink-2" : "text-ink-3 italic",
+        )}
+        title={product.details || undefined}
+      >
+        {product.details || "No details."}
+      </p>
+
+      <div className="mt-auto flex items-end justify-between gap-3 border-t border-line px-5 pt-4 pb-5">
+        <div>
+          <p className="text-[10.5px] font-bold tracking-[0.08em] text-ink-3 uppercase">
+            Cost price
+          </p>
+          <p className="mt-1 text-[20px] leading-7 font-bold tracking-tight text-ink">
+            {fmt(product.costPrice)}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex h-10 items-center rounded-xl border border-line-strong bg-page">
+            <button
+              onClick={() => onAdjust(-1)}
+              disabled={product.quantity === 0}
+              aria-label={`Remove one unit of ${product.name}`}
+              className="flex size-9 items-center justify-center rounded-l-xl text-ink-3 transition-colors hover:text-ink disabled:opacity-30"
+            >
+              <Minus size={14} />
+            </button>
+            <span className="min-w-7 text-center text-[13.5px] font-bold tabular-nums text-ink">
+              {product.quantity}
+            </span>
+            <button
+              onClick={() => onAdjust(1)}
+              aria-label={`Add one unit of ${product.name}`}
+              className="flex size-9 items-center justify-center rounded-r-xl text-ink-3 transition-colors hover:text-ink"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+          <Button size="sm" variant="primary" onClick={onSell} disabled={out}>
+            Sell
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function IconButton({
+  label,
+  onClick,
+  danger,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={cx(
+        "rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2",
+        danger ? "hover:text-critical" : "hover:text-ink",
+      )}
+    >
+      {children}
+    </button>
+  );
+}

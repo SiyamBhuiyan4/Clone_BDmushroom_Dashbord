@@ -1,0 +1,462 @@
+@import "tailwindcss";
+
+/*
+  Light is the base scope. Dark is declared twice on purpose: the media query
+  covers the OS setting, the [data-theme] scope covers the in-app toggle, and
+  the :not() guard lets an explicit light choice beat OS dark.
+
+  The two chart series (violet = revenue, emerald = profit) are validated for
+  lightness band, chroma, colorblind separation and 3:1 contrast against the
+  surface they actually render on — separately for each mode.
+*/
+:root {
+  color-scheme: light;
+
+  /*
+    Cream. The page is the warmest plane and cards sit lighter than it, so
+    elevation reads as "closer to the light" rather than as a grey box. Ink
+    is warm-black too — a neutral grey over cream looks dirty.
+  */
+  --page: #f6f2e9;
+  --surface: #fffdf8;
+  --surface-2: #f1ebdf;
+  --surface-3: #e7dfd0;
+
+  --ink: #1b1712;
+  --ink-2: #57504a;
+  --ink-3: #8b8279;
+
+  --line: rgba(27, 23, 18, 0.09);
+  --line-strong: rgba(27, 23, 18, 0.16);
+  --grid: #eae3d5;
+  --axis: #d8cfbe;
+
+  --series-1: #7c3aed;
+  --series-2: #059669;
+
+  --accent: #7c3aed;
+  --accent-strong: #6d28d9;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(124, 58, 237, 0.1);
+  --accent-soft-strong: rgba(124, 58, 237, 0.16);
+
+  --good: #059669;
+  --good-ink: #047857;
+  --good-soft: rgba(5, 150, 105, 0.12);
+  --warning: #d97706;
+  /* Badge text sits on --warning-soft over cream; the base amber is too light there. */
+  --warning-ink: #b45309;
+  --warning-soft: rgba(217, 119, 6, 0.14);
+  /* Warm scrim — a blue-black overlay over cream looks like a bruise. */
+  --scrim: rgba(43, 33, 20, 0.42);
+  --critical: #dc2626;
+  --critical-ink: #b91c1c;
+  --critical-soft: rgba(220, 38, 38, 0.1);
+  /* Filled-button red. --critical is tuned for text, and white on it fails. */
+  --critical-solid: #dc2626;
+
+  --ring: rgba(124, 58, 237, 0.28);
+
+  /* Warm-tinted shadows — a cool grey shadow on cream reads as grime. */
+  --shadow-sm: 0 1px 2px rgba(72, 55, 34, 0.06);
+  --shadow-card: 0 1px 3px rgba(72, 55, 34, 0.07), 0 8px 24px -12px rgba(72, 55, 34, 0.16);
+  --shadow-pop: 0 24px 60px -12px rgba(60, 45, 28, 0.3), 0 4px 12px rgba(60, 45, 28, 0.12);
+  --shadow-hero: 0 12px 32px -8px rgba(124, 58, 237, 0.38);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+
+    --page: #08080d;
+    --surface: #14141c;
+    --surface-2: #1d1d28;
+    --surface-3: #282836;
+
+    --ink: #ffffff;
+    --ink-2: #a8a5c4;
+    --ink-3: #78759a;
+
+    --line: rgba(255, 255, 255, 0.08);
+    --line-strong: rgba(255, 255, 255, 0.14);
+    --grid: #232331;
+    --axis: #2e2e3e;
+
+    --series-1: #8b5cf6;
+    --series-2: #0da97d;
+
+    --accent: #8b5cf6;
+    --accent-strong: #7c3aed;
+    --accent-ink: #ffffff;
+    --accent-soft: rgba(139, 92, 246, 0.16);
+    --accent-soft-strong: rgba(139, 92, 246, 0.24);
+
+    --good: #0da97d;
+    --good-ink: #34d399;
+    --good-soft: rgba(13, 169, 125, 0.16);
+    --warning: #f59e0b;
+    --warning-ink: #f59e0b;
+    --warning-soft: rgba(245, 158, 11, 0.16);
+    --scrim: rgba(4, 4, 8, 0.66);
+    --critical: #f0616d;
+    --critical-ink: #f0616d;
+    --critical-soft: rgba(240, 97, 109, 0.16);
+    --critical-solid: #dc2626;
+
+    --ring: rgba(139, 92, 246, 0.4);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.6), 0 8px 24px -12px rgba(0, 0, 0, 0.8);
+    --shadow-pop: 0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 4px 12px rgba(0, 0, 0, 0.6);
+    --shadow-hero: 0 12px 32px -8px rgba(109, 40, 217, 0.55);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --page: #08080d;
+  --surface: #14141c;
+  --surface-2: #1d1d28;
+  --surface-3: #282836;
+
+  --ink: #ffffff;
+  --ink-2: #a8a5c4;
+  --ink-3: #78759a;
+
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --grid: #232331;
+  --axis: #2e2e3e;
+
+  --series-1: #8b5cf6;
+  --series-2: #0da97d;
+
+  --accent: #8b5cf6;
+  --accent-strong: #7c3aed;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(139, 92, 246, 0.16);
+  --accent-soft-strong: rgba(139, 92, 246, 0.24);
+
+  --good: #0da97d;
+  --good-ink: #34d399;
+  --good-soft: rgba(13, 169, 125, 0.16);
+  --warning: #f59e0b;
+  --warning-ink: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.16);
+  --scrim: rgba(4, 4, 8, 0.66);
+  --critical: #f0616d;
+  --critical-ink: #f0616d;
+  --critical-soft: rgba(240, 97, 109, 0.16);
+  --critical-solid: #dc2626;
+
+  --ring: rgba(139, 92, 246, 0.4);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.6), 0 8px 24px -12px rgba(0, 0, 0, 0.8);
+  --shadow-pop: 0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 4px 12px rgba(0, 0, 0, 0.6);
+  --shadow-hero: 0 12px 32px -8px rgba(109, 40, 217, 0.55);
+}
+
+/*
+  Decorative gradients. These are chrome, never data encoding — no chart mark
+  is ever painted from this list. Mode-invariant, because they always carry
+  white text on top of them.
+*/
+:root {
+  --grad-violet: linear-gradient(135deg, #7c3aed 0%, #a21caf 100%);
+  --grad-emerald: linear-gradient(135deg, #047857 0%, #0f766e 100%);
+  --grad-amber: linear-gradient(135deg, #d97706 0%, #ea580c 100%);
+  --grad-sky: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
+}
+
+@theme inline {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Inter", sans-serif;
+
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-grid: var(--grid);
+  --color-axis: var(--axis);
+
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-good: var(--good);
+  --color-good-ink: var(--good-ink);
+  --color-good-soft: var(--good-soft);
+  --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
+  --color-warning-soft: var(--warning-soft);
+  --color-scrim: var(--scrim);
+  --color-critical: var(--critical);
+  --color-critical-ink: var(--critical-ink);
+  --color-critical-soft: var(--critical-soft);
+  --color-critical-solid: var(--critical-solid);
+
+  --radius-card: 20px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+/*
+  Native form chrome is the main thing that makes a form look unfinished:
+  spinner arrows on number inputs, the OS chevron on selects, and a
+  black-on-black calendar glyph in dark mode. All three get replaced.
+*/
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+select {
+  appearance: none;
+}
+
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 120ms ease;
+}
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+:root[data-theme="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"]))
+    input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+  }
+}
+
+/* Utility: paint text with the brand gradient. */
+.grad-text {
+  background: var(--grad-violet);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ------------------------------------------------------------------ Motion
+
+   Every animation below moves only `transform` and `opacity`, so each one
+   runs on the compositor and never triggers layout. Durations stay short
+   (140–420ms) — the point is for the UI to feel immediate, not animated.
+*/
+
+:root {
+  /* Decelerate hard: fast off the line, gentle landing. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Slight overshoot, for things that "pop" into place. */
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+@keyframes ac-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ac-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ac-pop-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ac-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translate3d(16px, 0, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ac-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes ac-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.ac-fade-in {
+  animation: ac-fade-in 160ms var(--ease-out) both;
+}
+.ac-rise {
+  animation: ac-rise 380ms var(--ease-out) both;
+}
+.ac-pop-in {
+  animation: ac-pop-in 260ms var(--ease-spring) both;
+}
+.ac-slide-in-right {
+  animation: ac-slide-in-right 260ms var(--ease-spring) both;
+}
+
+/*
+  Staggered entrance. Children animate in sequence off one class on the
+  parent, so no per-item JS or inline delay is needed.
+*/
+.ac-stagger > * {
+  animation: ac-rise 400ms var(--ease-out) both;
+}
+.ac-stagger > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.ac-stagger > *:nth-child(2) {
+  animation-delay: 45ms;
+}
+.ac-stagger > *:nth-child(3) {
+  animation-delay: 90ms;
+}
+.ac-stagger > *:nth-child(4) {
+  animation-delay: 135ms;
+}
+.ac-stagger > *:nth-child(5) {
+  animation-delay: 180ms;
+}
+.ac-stagger > *:nth-child(6) {
+  animation-delay: 210ms;
+}
+.ac-stagger > *:nth-child(7) {
+  animation-delay: 235ms;
+}
+.ac-stagger > *:nth-child(8) {
+  animation-delay: 255ms;
+}
+.ac-stagger > *:nth-child(n + 9) {
+  animation-delay: 270ms;
+}
+
+/* SVG line that draws itself. Paths must carry pathLength="1". */
+.ac-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: ac-draw 900ms var(--ease-out) both;
+}
+
+/* Loading placeholder with a travelling highlight. */
+.ac-skeleton {
+  position: relative;
+  overflow: hidden;
+}
+.ac-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--ink) 6%, transparent),
+    transparent
+  );
+  animation: ac-shimmer 1.4s infinite;
+}
+
+/* Press feedback — cheap, and makes every control feel physical. */
+.ac-press {
+  transition:
+    transform 120ms var(--ease-out),
+    filter 120ms var(--ease-out),
+    background-color 120ms var(--ease-out),
+    border-color 120ms var(--ease-out),
+    box-shadow 200ms var(--ease-out);
+}
+.ac-press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ac-fade-in,
+  .ac-rise,
+  .ac-pop-in,
+  .ac-slide-in-right,
+  .ac-stagger > *,
+  .ac-draw {
+    animation: none;
+  }
+  .ac-draw {
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+  }
+  .ac-skeleton::after {
+    animation: none;
+  }
+  .ac-press:active:not(:disabled) {
+    transform: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
+}
