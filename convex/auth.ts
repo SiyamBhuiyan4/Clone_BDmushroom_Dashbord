@@ -144,26 +144,44 @@ async function issueSession(ctx: MutationCtx) {
 }
 
 /**
- * First-run setup. Only works while no passcode exists; after that the
- * passcode can only be changed through `change`, which requires the current one.
+ * Sets or replaces the passcode. Internal on purpose: there is no public
+ * "set a passcode" endpoint, so a stranger reaching a fresh deployment cannot
+ * claim it. Running this needs the Convex admin credentials for the
+ * deployment — the CLI, or the dashboard's function runner.
+ *
+ *   npx convex run auth:setPasscode '{"passcode":"your-new-one"}'
+ *   npx convex run --prod auth:setPasscode '{"passcode":"your-new-one"}'
+ *
+ * Every existing session is revoked, so anyone signed in has to enter the new
+ * passcode.
  */
-export const setup = mutation({
+export const setPasscode = internalMutation({
   args: { passcode: v.string() },
   handler: async (ctx, args) => {
-    const existing = await ctx.db.query("authConfig").first();
-    if (existing) throw new ConvexError("A passcode is already set.");
     if (args.passcode.length < MIN_PASSCODE_LENGTH) {
       throw new ConvexError(`Passcode must be at least ${MIN_PASSCODE_LENGTH} characters.`);
     }
 
     const saltHex = randomHex(16);
-    await ctx.db.insert("authConfig", {
+    const record = {
       saltHex,
       hashHex: await derive(args.passcode, saltHex, PBKDF2_ITERATIONS),
       iterations: PBKDF2_ITERATIONS,
       updatedAt: Date.now(),
-    });
-    return await issueSession(ctx);
+    };
+
+    const existing = await ctx.db.query("authConfig").first();
+    if (existing) await ctx.db.patch(existing._id, record);
+    else await ctx.db.insert("authConfig", record);
+
+    let revoked = 0;
+    for (const s of await ctx.db.query("sessions").collect()) {
+      await ctx.db.delete(s._id);
+      revoked++;
+    }
+    for (const f of await ctx.db.query("loginFailures").collect()) await ctx.db.delete(f._id);
+
+    return `Passcode ${existing ? "changed" : "set"}. Revoked ${revoked} session(s).`;
   },
 });
 

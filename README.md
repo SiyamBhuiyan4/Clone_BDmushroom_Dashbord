@@ -31,13 +31,13 @@ of failing blank.
 
 ## Dev and production are separate databases
 
-This repo is linked to the Convex project **`acmanagement`**, which has two
+This repo is linked to the Convex project **`bdmushroom`**, which has two
 independent deployments with their own data and their own passcode:
 
 | | Deployment | Used by |
 |---|---|---|
-| Development | `tidy-zebra-69` | `npm run dev` on your machine |
-| Production | `fastidious-civet-245` | the Vercel deployment |
+| Development | `bright-dog-341` | `npm run dev` on your machine |
+| Production | `stoic-mule-88` | the Vercel deployment |
 
 Adding a product locally does **not** put it in production. Add `--prod` to any
 command to target production instead:
@@ -72,17 +72,37 @@ How it is stored and checked:
 - Eight failed attempts in ten minutes locks logins for the rest of the window.
 - Changing the passcode revokes every existing session.
 
+### Changing the passcode
+
+**You cannot change it by editing the database row.** `authConfig` stores a
+PBKDF2 hash, not the passcode — typing a new value into `hashHex` would just
+lock you out, because nothing you type will hash to itself. Use this instead:
+
+```bash
+npx convex run auth:setPasscode '{"passcode":"your-new-one"}'          # development
+npx convex run --prod auth:setPasscode '{"passcode":"your-new-one"}'   # production
+```
+
+It hashes the new passcode with a fresh salt and revokes every active session,
+so anyone signed in has to enter the new one.
+
+To avoid leaving the passcode in your shell history, run it from the Convex
+dashboard instead: **Functions → `auth:setPasscode` → Run function**, and type
+the passcode into the argument box.
+
 | Command | What it does |
 |---|---|
-| `npx convex run auth:reset` | Forgot the passcode — clears it and revokes all sessions, so the app shows the setup screen again. Product and sale data is untouched. |
+| `npx convex run auth:setPasscode '{"passcode":"…"}'` | Set or change the passcode; revokes all sessions |
+| `npx convex run auth:reset` | Clear the passcode entirely and revoke all sessions |
+| `npx convex run seed:count` | Row counts, passcode state, active sessions |
 
-`auth:reset` is an internal function: it cannot be called from a browser, only
-from a machine holding your Convex admin credentials.
+Both are internal functions: they cannot be called from a browser, only from a
+machine holding your Convex admin credentials. There is deliberately **no
+in-app way to set a passcode** — otherwise whoever reached a fresh deployment
+first could claim it.
 
 ### Known limits
 
-- The first-run setup screen is open to whoever reaches the deployment first.
-  Set your passcode immediately after deploying.
 - The brute-force throttle is global, not per-IP (Convex does not expose a
   client address), so a determined attacker can lock *you* out for ten minutes.
   Reasonable for a single-tenant dashboard; not for a multi-user product.

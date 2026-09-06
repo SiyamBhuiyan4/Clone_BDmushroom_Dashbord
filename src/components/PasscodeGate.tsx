@@ -16,7 +16,10 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
 
   if (status === "loading" || configured === undefined) return <Booting />;
   if (status === "signedIn") return <>{children}</>;
-  return <PasscodeScreen firstRun={!configured} onSignedIn={signIn} />;
+  // A deployment with no passcode cannot be claimed from the browser — it has
+  // to be set with admin credentials. See NotConfigured.
+  if (!configured) return <NotConfigured />;
+  return <PasscodeScreen onSignedIn={signIn} />;
 }
 
 function Booting() {
@@ -27,25 +30,53 @@ function Booting() {
   );
 }
 
+/**
+ * Shown when a deployment has no passcode yet. Deliberately offers no way to
+ * set one: the endpoint that does is internal, so whoever reaches a fresh
+ * deployment first cannot take it over.
+ */
+function NotConfigured() {
+  return (
+    <div className="flex min-h-full items-center justify-center bg-page p-4">
+      <div className="ac-pop-in w-full max-w-md text-center">
+        <span
+          className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl text-white shadow-[var(--shadow-hero)]"
+          style={{ background: "var(--grad-violet)" }}
+        >
+          <ShieldCheck size={24} />
+        </span>
+        <h1 className="text-[22px] leading-7 font-bold tracking-tight text-ink">
+          No passcode set
+        </h1>
+        <p className="mx-auto mt-2 max-w-sm text-[13.5px] leading-6 text-ink-3">
+          This deployment has no passcode yet, and one cannot be set from here.
+          Run this with your Convex credentials:
+        </p>
+        <pre className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface px-4 py-3 text-left text-[12.5px] text-ink">
+          npx convex run auth:setPasscode {"'"}
+          {'{"passcode":"…"}'}
+          {"'"}
+        </pre>
+        <p className="mt-3 text-[12px] leading-5 text-ink-3">
+          Add <code className="text-ink-2">--prod</code> to target production.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function PasscodeScreen({
-  firstRun,
   onSignedIn,
 }: {
-  firstRun: boolean;
   onSignedIn: (token: string, expiresAt: number) => void;
 }) {
   const login = useMutation(api.auth.login);
-  const setup = useMutation(api.auth.setup);
 
   const [passcode, setPasscode] = useState("");
-  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const tooShort = firstRun && passcode.length > 0 && passcode.length < 6;
-  const mismatch = firstRun && confirm.length > 0 && passcode !== confirm;
-  const canSubmit =
-    passcode.length > 0 && !busy && (!firstRun || (passcode.length >= 6 && passcode === confirm));
+  const canSubmit = passcode.length > 0 && !busy;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -53,12 +84,11 @@ function PasscodeScreen({
     setBusy(true);
     setError(null);
     try {
-      const result = firstRun ? await setup({ passcode }) : await login({ passcode });
+      const result = await login({ passcode });
       onSignedIn(result.token, result.expiresAt);
     } catch (err) {
       setError(errorMessage(err));
       setPasscode("");
-      setConfirm("");
     } finally {
       setBusy(false);
     }
@@ -74,13 +104,9 @@ function PasscodeScreen({
           >
             <Wallet size={24} />
           </span>
-          <h1 className="text-[22px] leading-7 font-bold tracking-tight text-ink">
-            {firstRun ? "Set a passcode" : "Ledger"}
-          </h1>
+          <h1 className="text-[22px] leading-7 font-bold tracking-tight text-ink">Ledger</h1>
           <p className="mt-1.5 max-w-xs text-[13.5px] leading-6 text-ink-3">
-            {firstRun
-              ? "Choose a passcode for this dashboard. It is hashed before it is stored — nobody can read it back, so keep it somewhere safe."
-              : "Enter your passcode to continue."}
+            Enter your passcode to continue.
           </p>
         </div>
 
@@ -90,9 +116,7 @@ function PasscodeScreen({
         >
           <div className="flex flex-col gap-4">
             <label className="flex flex-col gap-2">
-              <span className="text-[13px] font-semibold text-ink-2">
-                {firstRun ? "New passcode" : "Passcode"}
-              </span>
+              <span className="text-[13px] font-semibold text-ink-2">Passcode</span>
               <div className="relative">
                 <KeyRound
                   size={16}
@@ -106,32 +130,13 @@ function PasscodeScreen({
                     setPasscode(e.target.value);
                     setError(null);
                   }}
-                  placeholder={firstRun ? "At least 6 characters" : "••••••••"}
-                  autoComplete={firstRun ? "new-password" : "current-password"}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
                   autoFocus
                   className="pl-10"
                 />
               </div>
-              {tooShort && (
-                <p className="text-[12px] text-critical-ink">Use at least 6 characters.</p>
-              )}
             </label>
-
-            {firstRun && (
-              <label className="flex flex-col gap-2">
-                <span className="text-[13px] font-semibold text-ink-2">Confirm passcode</span>
-                <Input
-                  type="password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  placeholder="Type it again"
-                  autoComplete="new-password"
-                />
-                {mismatch && (
-                  <p className="text-[12px] text-critical-ink">Passcodes do not match.</p>
-                )}
-              </label>
-            )}
 
             {error && (
               <p
@@ -146,7 +151,7 @@ function PasscodeScreen({
             )}
 
             <Button type="submit" variant="primary" disabled={!canSubmit} className="w-full">
-              {busy ? "Checking…" : firstRun ? "Set passcode & continue" : "Unlock"}
+              {busy ? "Checking…" : "Unlock"}
             </Button>
           </div>
         </form>
