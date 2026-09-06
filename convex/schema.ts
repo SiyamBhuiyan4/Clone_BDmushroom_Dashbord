@@ -34,6 +34,23 @@ export default defineSchema({
   }).index("by_at", ["at"]),
 
   /*
+    Rows removed through an erase action are copied here first. Nothing in the
+    app reads this table — it exists so a mistake is recoverable from the CLI,
+    not so the interface can offer an undo. `batchId` groups one erase, which
+    is the unit a restore works on.
+  */
+  archive: defineTable({
+    table: v.string(),
+    originalId: v.string(),
+    data: v.any(),
+    archivedAt: v.number(),
+    batchId: v.string(),
+    reason: v.string(),
+  })
+    .index("by_archivedAt", ["archivedAt"])
+    .index("by_batch", ["batchId"]),
+
+  /*
     A purchase lot ("ষ্টক"). Profit is always derived as
     (unitPrice - unitCost) * quantity rather than stored, so a lot can never
     disagree with its own arithmetic.

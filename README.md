@@ -72,6 +72,36 @@ How it is stored and checked:
 - Eight failed attempts in ten minutes locks logins for the rest of the window.
 - Changing the passcode revokes every existing session.
 
+## Erasing data, and getting it back
+
+The Sales page has a danger zone with two actions: erase the selected date
+range, or erase everything. Both require the passcode to be typed again — a
+live session is not enough, because a confirmation a passer-by can click
+through is not a confirmation.
+
+The interface offers **no undo**, and says so. But nothing is actually dropped:
+every erased row is copied into an `archive` table first, keyed by a `batchId`
+for that one operation. No app code reads that table. It exists so a mistake is
+recoverable from the CLI by whoever holds the Convex admin credentials.
+
+```bash
+npx convex run danger:archiveList                         # what has been erased
+npx convex run danger:archiveRestore '{"batchId":"…"}'    # put one batch back
+npx convex run danger:archivePurge  '{"batchId":"…"}'     # really delete it
+```
+
+Add `--prod` to target production.
+
+Two things to know. `eraseRange` is **date-only** — the search box is not
+applied, so what gets erased is exactly what the dialog states rather than
+whatever happened to be filtered on screen. And it does **not** return units to
+stock: it is for clearing an old period, not for reversing individual sales,
+and putting units back would silently inflate current inventory.
+
+If you want an erase to be genuinely irreversible, run `archivePurge` after it.
+Until you do, treat the archive as live data for retention purposes — it still
+contains buyer names.
+
 ### Changing the passcode
 
 **You cannot change it by editing the database row.** `authConfig` stores a

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   CircleDollarSign,
   Download,
   Pencil,
@@ -16,6 +17,7 @@ import { Button, Card, EmptyState, Input, Select, cx } from "../components/ui";
 import { StatTile } from "../components/StatTile";
 import { Pagination, SortSelect, usePagination } from "../components/Pagination";
 import { SellDialog } from "../components/SellDialog";
+import { EraseDialog, type EraseScope } from "../components/EraseDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -41,8 +43,12 @@ export function SalesPage() {
   const [sellOpen, setSellOpen] = useState(false);
   const [editing, setEditing] = useState<Doc<"sales"> | null>(null);
   const [deleting, setDeleting] = useState<Doc<"sales"> | null>(null);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [erase, setErase] = useState<EraseScope | null>(null);
 
   const RANGES = [
+    { days: -1, label: t("sales.custom") },
     { days: 0, label: t("dash.allTime") },
     { days: 7, label: "7d" },
     { days: 30, label: "30d" },
@@ -50,11 +56,32 @@ export function SalesPage() {
     { days: 365, label: "12m" },
   ];
 
+  /*
+    One place decides what "the current range" means, so the list on screen
+    and the range an erase would remove can never drift apart.
+  */
+  const bounds = useMemo(() => {
+    if (rangeDays === -1) {
+      const from = customFrom ? new Date(`${customFrom}T00:00:00`).getTime() : 0;
+      const to = customTo
+        ? new Date(`${customTo}T23:59:59.999`).getTime()
+        : Number.MAX_SAFE_INTEGER;
+      return { from, to, custom: true };
+    }
+    if (rangeDays > 0) {
+      return {
+        from: startOfLocalDay(Date.now() - (rangeDays - 1) * DAY),
+        to: Number.MAX_SAFE_INTEGER,
+        custom: false,
+      };
+    }
+    return { from: 0, to: Number.MAX_SAFE_INTEGER, custom: false };
+  }, [rangeDays, customFrom, customTo]);
+
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const since = rangeDays > 0 ? startOfLocalDay(Date.now() - (rangeDays - 1) * DAY) : 0;
     const filtered = (sales ?? []).filter((s) => {
-      if (s.soldAt < since) return false;
+      if (s.soldAt < bounds.from || s.soldAt > bounds.to) return false;
       if (!term) return true;
       return (
         s.productName.toLowerCase().includes(term) ||
@@ -70,7 +97,7 @@ export function SalesPage() {
       if (sort === "revenue") return b.unitPrice * b.quantity - a.unitPrice * a.quantity;
       return b.soldAt - a.soldAt;
     });
-  }, [sales, search, rangeDays, sort]);
+  }, [sales, search, bounds, sort]);
 
   const totals = useMemo(() => {
     let revenue = 0;
@@ -84,8 +111,10 @@ export function SalesPage() {
     return { revenue, cost, profit: revenue - cost, units };
   }, [rows]);
 
-  const pager = usePagination(rows, `${search}|${rangeDays}|${sort}`);
+  const pager = usePagination(rows, `${search}|${rangeDays}|${customFrom}|${customTo}|${sort}`);
   const hasStock = (products ?? []).some((p) => !p.archived && p.quantity > 0);
+  const rangeLabel =
+    RANGES.find((r) => r.days === rangeDays)?.label ?? t("dash.allTime");
 
   function exportCsv() {
     const header = [
@@ -196,6 +225,49 @@ export function SalesPage() {
             />
           </div>
         </div>
+
+        {bounds.custom && (
+          <div className="ac-fade-in flex w-full flex-wrap items-center gap-3">
+            <label className="flex flex-1 items-center gap-2 sm:flex-none">
+              <span className="shrink-0 text-[12.5px] font-semibold text-ink-3">
+                {t("sales.from")}
+              </span>
+              <Input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                max={customTo || undefined}
+                aria-label={t("sales.from")}
+                className="sm:w-44"
+              />
+            </label>
+            <label className="flex flex-1 items-center gap-2 sm:flex-none">
+              <span className="shrink-0 text-[12.5px] font-semibold text-ink-3">
+                {t("sales.to")}
+              </span>
+              <Input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                min={customFrom || undefined}
+                aria-label={t("sales.to")}
+                className="sm:w-44"
+              />
+            </label>
+            {(customFrom || customTo) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setCustomFrom("");
+                  setCustomTo("");
+                }}
+              >
+                {t("sales.clearDates")}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="ac-stagger grid gap-4 sm:grid-cols-3">
@@ -431,6 +503,57 @@ export function SalesPage() {
           </>
         )}
       </Card>
+
+      {/*
+        Kept at the bottom, visually separated and in the critical colour, so
+        it is never adjacent to something you click routinely.
+      */}
+      <Card className="border-[color-mix(in_srgb,var(--critical)_25%,transparent)]">
+        <div className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 text-[15px] font-bold tracking-tight text-ink">
+              <AlertTriangle size={16} className="text-critical" aria-hidden />
+              {t("sales.dangerZone")}
+            </h2>
+            <p className="mt-1.5 max-w-lg text-[13px] leading-6 text-ink-3">
+              {t("sales.dangerBody")}
+            </p>
+          </div>
+          <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row">
+            <Button
+              variant="secondary"
+              onClick={() =>
+                setErase({
+                  kind: "range",
+                  from: bounds.from,
+                  to: Math.min(bounds.to, Date.now() + DAY),
+                  label: rangeLabel,
+                })
+              }
+              disabled={rows.length === 0}
+              className="text-critical-ink"
+            >
+              <Trash2 size={16} />
+              {t("sales.eraseRange")}
+            </Button>
+            <Button variant="danger" onClick={() => setErase({ kind: "all" })}>
+              <Trash2 size={16} />
+              {t("sales.eraseAll")}
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      <EraseDialog
+        open={erase !== null}
+        onClose={() => setErase(null)}
+        scope={erase}
+        onDone={() => {
+          setCustomFrom("");
+          setCustomTo("");
+          setRangeDays(0);
+        }}
+      />
 
       <SellDialog open={sellOpen} onClose={() => setSellOpen(false)} />
       <SellDialog open={editing !== null} onClose={() => setEditing(null)} sale={editing} />

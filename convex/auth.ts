@@ -99,6 +99,33 @@ export async function requireSession(ctx: QueryCtx | MutationCtx, token: string)
   return session;
 }
 
+/**
+ * Re-checks the passcode for an action a live session alone should not
+ * authorise. Throws on failure and records the attempt against the same
+ * throttle as the login screen, so this cannot be used as an oracle to
+ * guess the passcode faster.
+ */
+export async function verifyPasscode(ctx: MutationCtx, passcode: string) {
+  const config = await ctx.db.query("authConfig").first();
+  if (!config) throw new ConvexError("No passcode has been set yet.");
+
+  const since = Date.now() - FAILURE_WINDOW_MS;
+  const recent = await ctx.db
+    .query("loginFailures")
+    .withIndex("by_at", (q) => q.gte("at", since))
+    .collect();
+  if (recent.length >= MAX_FAILURES) {
+    throw new ConvexError("Too many failed attempts. Try again shortly.");
+  }
+
+  const candidate = await derive(passcode, config.saltHex, config.iterations);
+  if (!timingSafeEqual(candidate, config.hashHex)) {
+    await ctx.db.insert("loginFailures", { at: Date.now() });
+    throw new ConvexError("Incorrect passcode.");
+  }
+  for (const f of recent) await ctx.db.delete(f._id);
+}
+
 /* ---------------------------------------------------------------- public */
 
 /** Whether a passcode has been set yet, so the client knows which screen to show. */

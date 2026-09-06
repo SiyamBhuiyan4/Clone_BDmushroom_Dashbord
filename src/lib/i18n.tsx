@@ -104,6 +104,15 @@ const EN = {
   "sales.sortProfitHigh": "Profit: high to low",
   "sales.sortRevenueHigh": "Revenue: high to low",
 
+  "sales.custom": "Custom range",
+  "sales.from": "From",
+  "sales.to": "To",
+  "sales.clearDates": "Clear dates",
+  "sales.dangerZone": "Danger zone",
+  "sales.dangerBody": "Erasing removes records permanently. You will not be able to recover them from the app, and every page's totals will change to match. Your passcode is required.",
+  "sales.eraseRange": "Erase this range",
+  "sales.eraseAll": "Erase all data",
+
   "profit.title": "Profit",
   "profit.subtitle": "Profit per stock lot, split across your categories.",
   "profit.addLot": "Add stock lot",
@@ -223,6 +232,15 @@ const BN: Partial<Record<MessageKey, string>> = {
   "sales.sortOldest": "পুরনো আগে",
   "sales.sortProfitHigh": "লাভ: বেশি থেকে কম",
   "sales.sortRevenueHigh": "আয়: বেশি থেকে কম",
+
+  "sales.custom": "নিজের সময়সীমা",
+  "sales.from": "শুরু",
+  "sales.to": "শেষ",
+  "sales.clearDates": "তারিখ মুছুন",
+  "sales.dangerZone": "বিপজ্জনক অংশ",
+  "sales.dangerBody": "মুছে ফেললে তথ্য স্থায়ীভাবে চলে যাবে। অ্যাপ থেকে আর ফেরত পাওয়া যাবে না, এবং সব পাতার হিসাব সেই অনুযায়ী বদলে যাবে। পাসকোড দিতে হবে।",
+  "sales.eraseRange": "এই সময়ের তথ্য মুছুন",
+  "sales.eraseAll": "সব তথ্য মুছুন",
 
   "profit.title": "লাভ",
   "profit.subtitle": "প্রতি স্টকের লাভ, খাত অনুযায়ী ভাগ করা।",

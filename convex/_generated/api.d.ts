@@ -10,6 +10,7 @@
 
 import type * as auth from "../auth.js";
 import type * as catalogue from "../catalogue.js";
+import type * as danger from "../danger.js";
 import type * as dashboard from "../dashboard.js";
 import type * as products from "../products.js";
 import type * as profit from "../profit.js";
@@ -25,6 +26,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   catalogue: typeof catalogue;
+  danger: typeof danger;
   dashboard: typeof dashboard;
   products: typeof products;
   profit: typeof profit;
