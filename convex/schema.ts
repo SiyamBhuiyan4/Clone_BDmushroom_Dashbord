@@ -33,6 +33,35 @@ export default defineSchema({
     at: v.number(),
   }).index("by_at", ["at"]),
 
+  /*
+    A purchase lot ("ষ্টক"). Profit is always derived as
+    (unitPrice - unitCost) * quantity rather than stored, so a lot can never
+    disagree with its own arithmetic.
+  */
+  stockBatches: defineTable({
+    productId: v.id("products"),
+    productName: v.string(),
+    label: v.string(),
+    purchasedAt: v.number(),
+    quantity: v.number(),
+    unitCost: v.number(),
+    unitPrice: v.number(),
+    note: v.optional(v.string()),
+  })
+    .index("by_purchasedAt", ["purchasedAt"])
+    .index("by_product", ["productId"]),
+
+  /*
+    How each taka of profit is divided. Percentages are validated to total
+    100 on write, so the split can never silently lose or invent money.
+  */
+  allocationBuckets: defineTable({
+    name: v.string(),
+    nameBn: v.string(),
+    percent: v.number(),
+    order: v.number(),
+  }).index("by_order", ["order"]),
+
   products: defineTable({
     name: v.string(),
     // What it costs you to acquire one unit.

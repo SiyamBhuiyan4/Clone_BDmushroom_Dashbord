@@ -146,6 +146,39 @@ price** at the moment it is recorded. Reprice or rename a product later, or
 delete it entirely, and your historical revenue and profit do not move. Profit is
 always `(sale price − cost at time of sale) × quantity`.
 
+## Profit allocation
+
+The **Profit** page models the hand-kept calculation sheet. A *stock lot* is one
+purchase: a date, a quantity, a buy price and a sell price. Its profit is
+
+```
+(sell price − buy price) × quantity
+```
+
+That profit is treated as 100% and divided across seven categories, shown per
+unit and per lot, and again across every lot on the page:
+
+| % | Category |
+|---|---|
+| 30 | Re-investment (production expansion) — রি-ইনভেস্টমেন্ট |
+| 20 | Marketing & distribution — মার্কেটিং ও ডিস্ট্রিবিউশন |
+| 15 | Management & operations — ম্যানেজমেন্ট ও পরিচালন ব্যয় |
+| 15 | Emergency fund / cash reserve — জরুরি তহবিল |
+| 10 | Tax & VAT provision — ট্যাক্স ও ভ্যাট প্রভিশন |
+| 7 | Owner / shareholder dividend — মালিক/শেয়ারহোল্ডার লভ্যাংশ |
+| 3 | Social responsibility (charity) — সামাজিক দায়বদ্ধতা |
+
+The percentages are stored in `allocationBuckets` and validated to total 100 on
+write, so a split can never lose or invent money.
+
+**Profit is derived, never stored.** A lot cannot end up disagreeing with its
+own arithmetic the way a spreadsheet can — which is how the fogger discrepancy
+below was caught.
+
+`npx convex run seed:profitSheet` loads the categories and the sheet's ten
+stock lots (add `--prod` for production). It clears existing lots first, so it
+is safe to re-run; products, sales and the passcode are untouched.
+
 ### Pages
 
 - **Dashboard** — profit, revenue, sale count and available stock, a
@@ -156,6 +189,8 @@ always `(sale price − cost at time of sale) × quantity`.
   edits, restocks (± buttons), archives or deletes.
 - **Sales** — full ledger with search, date range, running totals, inline
   edit/delete, and CSV export.
+- **Profit** — stock lots per product, each with its profit split across the
+  seven categories, plus the split of the combined total.
 
 All amounts are in Bangladeshi taka (৳). Theme (light / dark / system) and the
 sidebar's collapsed state live in the sidebar footer and persist in

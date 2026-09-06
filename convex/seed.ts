@@ -1,6 +1,7 @@
 import { internalMutation, internalQuery, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { CATALOGUE } from "./catalogue";
+import { ensureBuckets } from "./profit";
 
 /**
  * Development helpers. These are internal functions — not reachable from the
@@ -136,6 +137,132 @@ export const count = internalQuery({
       passcodeSet: config !== null,
       activeSessions: sessions.filter((s) => s.expiresAt > Date.now()).length,
     };
+  },
+});
+
+/*
+  The stock lots from the hand-kept profit sheet. Dates are DD/MM/YY.
+
+  Profit is deliberately not copied across — it is derived from sell minus
+  buy, which is why one row here differs from the sheet: the fogger's 2nd lot
+  reads "sell 180, buy 90, profit 70", but 180 - 90 is 90. The sheet's own
+  arithmetic disagrees with itself there, so the prices win.
+
+  The agar's 2nd lot had "ক্রয়" and "বিক্রয়" the wrong way round (buy 9000,
+  sell 3200); the stated profit of 5800 only works as sell 9000 / buy 3200,
+  which is what is used.
+*/
+const SHEET: {
+  product: string;
+  category: string;
+  lots: { label: string; date: string; qty: number; buy: number; sell: number }[];
+}[] = [
+  {
+    product: "Hygrometer / হাইড্রোমিটার",
+    category: "Farming Equipment",
+    lots: [
+      { label: "1st stock", date: "2026-08-01", qty: 20, buy: 280, sell: 560 },
+      { label: "2nd stock", date: "2026-08-10", qty: 30, buy: 290, sell: 560 },
+    ],
+  },
+  {
+    product: "এগার এগার পাউডার/Agar Agar Powder",
+    category: "Farmer Products",
+    lots: [
+      { label: "1st stock", date: "2026-08-01", qty: 2, buy: 2800, sell: 9000 },
+      { label: "2nd stock", date: "2026-08-10", qty: 2.5, buy: 3200, sell: 9000 },
+    ],
+  },
+  {
+    product: "Fogger 4 nozzle / ফগার ৪ নজেল",
+    category: "Farming Equipment",
+    lots: [
+      { label: "1st stock", date: "2026-09-01", qty: 50, buy: 100, sell: 180 },
+      { label: "2nd stock", date: "2026-09-05", qty: 80, buy: 90, sell: 180 },
+    ],
+  },
+  {
+    product: "Fogger 5 nozzle / ফগার ৫ নজেল",
+    category: "Farming Equipment",
+    lots: [{ label: "1st stock", date: "2026-09-01", qty: 50, buy: 120, sell: 220 }],
+  },
+  {
+    product: "Single 12v DC Motor / সিঙ্গেল ১২ভি ডিসি মোটর",
+    category: "Farming Equipment",
+    lots: [{ label: "1st stock", date: "2026-09-01", qty: 50, buy: 400, sell: 650 }],
+  },
+  {
+    product: "Double 12v DC Motor / ডাবল ১২ভি ডিসি মোটর",
+    category: "Farming Equipment",
+    lots: [{ label: "1st stock", date: "2026-09-01", qty: 50, buy: 800, sell: 1200 }],
+  },
+  {
+    product: "DGDR Heater / ডিজিডিআর হিটার",
+    category: "Farming Equipment",
+    lots: [{ label: "1st stock", date: "2026-09-01", qty: 50, buy: 800, sell: 1200 }],
+  },
+];
+
+/**
+ * Loads the allocation split and the profit sheet's stock lots.
+ *
+ *   npx convex run seed:profitSheet
+ *   npx convex run --prod seed:profitSheet
+ *
+ * Existing stock lots are cleared first so it is safe to re-run. Products,
+ * sales and the passcode are untouched; a product named in the sheet that is
+ * not in the catalogue is created.
+ */
+export const profitSheet = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    await ensureBuckets(ctx);
+
+    let cleared = 0;
+    for (const b of await ctx.db.query("stockBatches").collect()) {
+      await ctx.db.delete(b._id);
+      cleared++;
+    }
+
+    const all = await ctx.db.query("products").collect();
+    let createdProducts = 0;
+    let lots = 0;
+
+    for (const entry of SHEET) {
+      let product = all.find((p) => p.name === entry.product);
+      if (!product) {
+        const id = await ctx.db.insert("products", {
+          name: entry.product,
+          costPrice: entry.lots[0].buy,
+          details: "Added from the profit calculation sheet.",
+          category: entry.category,
+          quantity: entry.lots.reduce((sum, l) => sum + l.qty, 0),
+          archived: false,
+          createdAt: Date.parse(entry.lots[0].date),
+        });
+        product = (await ctx.db.get(id))!;
+        all.push(product);
+        createdProducts++;
+      }
+
+      for (const lot of entry.lots) {
+        await ctx.db.insert("stockBatches", {
+          productId: product._id,
+          productName: product.name,
+          label: lot.label,
+          purchasedAt: Date.parse(lot.date),
+          quantity: lot.qty,
+          unitCost: lot.buy,
+          unitPrice: lot.sell,
+        });
+        lots++;
+      }
+    }
+
+    return (
+      `Cleared ${cleared} old lots. Seeded ${lots} stock lots across ${SHEET.length} products ` +
+      `(${createdProducts} newly created) and the 7 allocation categories.`
+    );
   },
 });
 

@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as catalogue from "../catalogue.js";
 import type * as dashboard from "../dashboard.js";
 import type * as products from "../products.js";
+import type * as profit from "../profit.js";
 import type * as sales from "../sales.js";
 import type * as seed from "../seed.js";
 
@@ -26,6 +27,7 @@ declare const fullApi: ApiFromModules<{
   catalogue: typeof catalogue;
   dashboard: typeof dashboard;
   products: typeof products;
+  profit: typeof profit;
   sales: typeof sales;
   seed: typeof seed;
 }>;

@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Package,
   Receipt,
+  PieChart,
   Menu,
   X,
   Monitor,
@@ -19,13 +20,15 @@ import { cx } from "./components/ui";
 import { DashboardPage } from "./pages/Dashboard";
 import { ProductsPage } from "./pages/Products";
 import { SalesPage } from "./pages/Sales";
+import { ProfitPage } from "./pages/Profit";
 
-type Route = "dashboard" | "products" | "sales";
+type Route = "dashboard" | "products" | "sales" | "profit";
 
 const NAV: { route: Route; label: string; icon: typeof LayoutDashboard }[] = [
   { route: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { route: "products", label: "Products", icon: Package },
   { route: "sales", label: "Sales", icon: Receipt },
+  { route: "profit", label: "Profit", icon: PieChart },
 ];
 
 const THEMES: { value: ThemeChoice; icon: typeof Sun; label: string }[] = [
@@ -94,6 +97,7 @@ export default function App() {
             {route === "dashboard" && <DashboardPage onNavigate={go} />}
             {route === "products" && <ProductsPage />}
             {route === "sales" && <SalesPage />}
+            {route === "profit" && <ProfitPage />}
           </div>
         </main>
       </div>
