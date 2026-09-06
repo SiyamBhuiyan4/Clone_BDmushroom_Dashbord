@@ -1,4 +1,4 @@
-import { internalMutation, type MutationCtx } from "./_generated/server";
+import { internalMutation, internalQuery, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { CATALOGUE } from "./catalogue";
 
@@ -112,6 +112,30 @@ export const demo = internalMutation({
       `Cleared ${removed.products} products and ${removed.sales} sales. ` +
       `Seeded ${created.length} products from bdmushroom.com and ${sold} sales.`
     );
+  },
+});
+
+/**
+ * Row counts for whichever deployment you point it at, without needing a
+ * session. Handy for telling dev and prod apart:
+ *
+ *   npx convex run seed:count          # dev
+ *   npx convex run --prod seed:count   # production
+ */
+export const count = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const products = await ctx.db.query("products").collect();
+    const sales = await ctx.db.query("sales").collect();
+    const config = await ctx.db.query("authConfig").first();
+    const sessions = await ctx.db.query("sessions").collect();
+    return {
+      products: products.length,
+      sales: sales.length,
+      categories: [...new Set(products.map((p) => p.category).filter(Boolean))].length,
+      passcodeSet: config !== null,
+      activeSessions: sessions.filter((s) => s.expiresAt > Date.now()).length,
+    };
   },
 });
 

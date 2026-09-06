@@ -26,7 +26,30 @@ of failing blank.
 | `npm run lint` | Typecheck only |
 | `npx convex run seed:demo` | Load the bdmushroom.com catalogue + sample sales (clears first) |
 | `npx convex run seed:clear` | Delete every product and sale |
+| `npx convex run seed:count` | Row counts, passcode state, active sessions |
 | `npx convex dashboard` | Open the Convex data browser |
+
+## Dev and production are separate databases
+
+This repo is linked to the Convex project **`acmanagement`**, which has two
+independent deployments with their own data and their own passcode:
+
+| | Deployment | Used by |
+|---|---|---|
+| Development | `tidy-zebra-69` | `npm run dev` on your machine |
+| Production | `fastidious-civet-245` | the Vercel deployment |
+
+Adding a product locally does **not** put it in production. Add `--prod` to any
+command to target production instead:
+
+```bash
+npx convex run seed:count           # development
+npx convex run --prod seed:count    # production
+npx convex run --prod seed:demo     # reseed production's catalogue
+```
+
+Each deployment also needs its own passcode — setting one locally does not set
+it in production.
 
 ## Passcode lock
 
