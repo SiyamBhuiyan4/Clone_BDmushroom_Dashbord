@@ -46,7 +46,7 @@ export function ProfitPage() {
   const removeBatch = useAuthedMutation(api.profit.removeBatch);
 
   const [basis, setBasis] = useState<Basis>("projected");
-  const range = useDateRange();
+  const range = useDateRange(0, "ac.range.profit");
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<BatchRow | null>(null);
   const [deleting, setDeleting] = useState<BatchRow | null>(null);

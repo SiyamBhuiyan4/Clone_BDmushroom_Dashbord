@@ -22,6 +22,8 @@ type Session = {
   expiresAt: number | null;
   signIn: (token: string, expiresAt: number) => void;
   signOut: () => void;
+  /** Extends a live session by another day. */
+  renew: () => Promise<void>;
 };
 
 const SessionContext = createContext<Session | null>(null);
@@ -34,6 +36,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // The server is the authority — a token in localStorage proves nothing.
   const check = useQuery(api.auth.validate, token ? { token } : "skip");
   const logoutMutation = useMutation(api.auth.logout);
+  const renewMutation = useMutation(api.auth.renew);
 
   const signIn = useCallback((next: string, nextExpiresAt: number) => {
     localStorage.setItem(TOKEN_KEY, next);
@@ -48,6 +51,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setExpiresAt(null);
     if (current) void logoutMutation({ token: current });
   }, [logoutMutation]);
+
+  const renew = useCallback(async () => {
+    const current = localStorage.getItem(TOKEN_KEY);
+    if (!current) return;
+    const result = await renewMutation({ token: current });
+    setExpiresAt(result.expiresAt);
+  }, [renewMutation]);
 
   // Drop a token the server rejects, so we never sit in a half-signed-in state.
   useEffect(() => {
@@ -87,8 +97,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       expiresAt,
       signIn,
       signOut,
+      renew,
     }),
-    [token, status, config, expiresAt, signIn, signOut],
+    [token, status, config, expiresAt, signIn, signOut, renew],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

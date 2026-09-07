@@ -117,6 +117,11 @@ export const addBatch = mutation({
     if (!product) throw new ConvexError("That product no longer exists.");
     validateBatch(args.quantity, args.unitCost, args.unitPrice);
 
+    // A lot is stock arriving, so it moves the product's stock with it.
+    // Without this the app holds two independent answers to "how many do I
+    // have": one the sales decrement, one that only feeds projected profit.
+    await ctx.db.patch(args.productId, { quantity: product.quantity + args.quantity });
+
     const note = (args.note ?? "").trim();
     return await ctx.db.insert("stockBatches", {
       productId: args.productId,
@@ -148,6 +153,21 @@ export const updateBatch = mutation({
     if (!batch) throw new ConvexError("That stock lot no longer exists.");
     validateBatch(args.quantity, args.unitCost, args.unitPrice);
 
+    // Move stock by the difference only. A deleted product has no stock left
+    // to adjust; the lot still edits so history stays intact.
+    const delta = args.quantity - batch.quantity;
+    if (delta !== 0) {
+      const product = await ctx.db.get(batch.productId);
+      if (product) {
+        if (product.quantity + delta < 0) {
+          throw new ConvexError(
+            `Reducing this lot would take stock below zero — ${product.quantity} unit(s) remain, and some have already been sold.`,
+          );
+        }
+        await ctx.db.patch(batch.productId, { quantity: product.quantity + delta });
+      }
+    }
+
     const note = (args.note ?? "").trim();
     await ctx.db.patch(args.id, {
       label: args.label.trim() || "Stock",
@@ -164,6 +184,18 @@ export const removeBatch = mutation({
   args: { token: v.string(), id: v.id("stockBatches") },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    const batch = await ctx.db.get(args.id);
+    if (!batch) return;
+
+    const product = await ctx.db.get(batch.productId);
+    if (product) {
+      if (product.quantity - batch.quantity < 0) {
+        throw new ConvexError(
+          `Deleting this lot would take stock below zero — only ${product.quantity} unit(s) remain, so some of this lot has already been sold.`,
+        );
+      }
+      await ctx.db.patch(batch.productId, { quantity: product.quantity - batch.quantity });
+    }
     await ctx.db.delete(args.id);
   },
 });

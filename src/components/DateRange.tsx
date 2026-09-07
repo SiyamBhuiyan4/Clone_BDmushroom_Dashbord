@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button, Input, Select } from "./ui";
+import { usePersistedState } from "../lib/persist";
 import { useT } from "../lib/i18n";
 import { startOfLocalDay } from "../lib/format";
 
@@ -15,8 +16,12 @@ export type DateBounds = { from: number; to: number; custom: boolean };
  * anything derived from it — totals, a profit split, an erase — can never
  * disagree about which rows are in scope.
  */
-export function useDateRange(initialDays = 0) {
-  const [rangeDays, setRangeDays] = useState(initialDays);
+export function useDateRange(initialDays = 0, storageKey?: string) {
+  // Persisted when a key is given: a range is a preference, not transient UI
+  // state, and re-picking it on every visit is friction for nothing.
+  const persisted = usePersistedState(storageKey ?? "ac.range.unused", initialDays);
+  const local = useState(initialDays);
+  const [rangeDays, setRangeDays] = storageKey ? persisted : local;
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 

@@ -10,6 +10,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Card, CardAction, CardHeader, EmptyState, cx } from "../components/ui";
 import { StatTile, type Delta } from "../components/StatTile";
 import { AnimatedNumber } from "../components/AnimatedNumber";
@@ -17,8 +18,10 @@ import { TrendChart, type TrendPoint } from "../components/charts/TrendChart";
 import { TopProductsChart, type TopProduct } from "../components/charts/TopProductsChart";
 import { ProductDialog } from "../components/ProductDialog";
 import { SellDialog } from "../components/SellDialog";
+import { ProductDetailDialog } from "../components/ProductDetailDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
+import { usePersistedState } from "../lib/persist";
 import { gradientFor, initialOf } from "../lib/avatar";
 import { plural, relativeTime, startOfLocalDay } from "../lib/format";
 import { useAuthedQuery } from "../lib/session";
@@ -41,9 +44,10 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
   const { fmt, fmtNum, fmtPercent } = useSettings();
   const t = useT();
   const data = useAuthedQuery(api.dashboard.overview);
-  const [rangeDays, setRangeDays] = useState(30);
+  const [rangeDays, setRangeDays] = usePersistedState("ac.range.dashboard", 30);
   const [sellOpen, setSellOpen] = useState(false);
   const [productOpen, setProductOpen] = useState(false);
+  const [viewing, setViewing] = useState<Id<"products"> | null>(null);
 
   const range = RANGES.find((r) => r.days === rangeDays)!;
 
@@ -291,10 +295,11 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
                   {recentSales.map((s) => {
                     const profit = (s.unitPrice - s.unitCost) * s.quantity;
                     return (
-                      <li
-                        key={s._id}
-                        className="flex items-center justify-between gap-4 rounded-xl px-2.5 py-2.5 transition-colors hover:bg-surface-2"
-                      >
+                      <li key={s._id}>
+                       <button
+                        onClick={() => setViewing(s.productId)}
+                        className="flex w-full items-center justify-between gap-4 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-surface-2"
+                       >
                         <div className="flex min-w-0 items-center gap-3">
                           <span
                             className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[13px] font-bold text-white"
@@ -327,6 +332,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
                             {profit < 0 ? `−${fmt(Math.abs(profit))}` : `+${fmt(profit)}`}
                           </p>
                         </div>
+                       </button>
                       </li>
                     );
                   })}
@@ -357,10 +363,19 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
                       {t("dash.runningLow")}
                     </p>
                     <ul className="mt-2.5 flex flex-col gap-2">
+                      {/* Clickable: a warning that makes you navigate away and
+                          find the product yourself is only half a warning. */}
                       {inventory.lowStock.map((p) => (
-                        <li key={p._id} className="flex items-center justify-between gap-3">
-                          <span className="truncate text-[13.5px] text-ink-2">{p.name}</span>
-                          <Badge tone="warning">{p.quantity} left</Badge>
+                        <li key={p._id}>
+                          <button
+                            onClick={() => setViewing(p._id)}
+                            className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-1.5 -mx-2 text-left transition-colors hover:bg-surface-2"
+                          >
+                            <span className="truncate text-[13.5px] text-ink-2">{p.name}</span>
+                            <Badge tone="warning">
+                              {fmtNum(p.quantity)} {t("products.left")}
+                            </Badge>
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -378,6 +393,11 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
         </>
       )}
 
+      <ProductDetailDialog
+        open={viewing !== null}
+        onClose={() => setViewing(null)}
+        productId={viewing}
+      />
       <ProductDialog open={productOpen} onClose={() => setProductOpen(false)} />
       <SellDialog open={sellOpen} onClose={() => setSellOpen(false)} />
     </div>

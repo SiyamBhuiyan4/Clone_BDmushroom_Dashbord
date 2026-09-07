@@ -152,3 +152,64 @@ export const remove = mutation({
     return { removedLots: lots.length };
   },
 });
+
+/**
+ * Everything about one product: its stock lots, its sales, and the totals
+ * that follow. Backs the product detail view, so "how has this actually
+ * done" is answerable without scanning the whole ledger by eye.
+ */
+export const detail = query({
+  args: { token: v.string(), id: v.id("products") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const product = await ctx.db.get(args.id);
+    if (!product) return null;
+
+    const [lots, sales] = await Promise.all([
+      ctx.db
+        .query("stockBatches")
+        .withIndex("by_product", (q) => q.eq("productId", args.id))
+        .collect(),
+      ctx.db
+        .query("sales")
+        .withIndex("by_product", (q) => q.eq("productId", args.id))
+        .collect(),
+    ]);
+
+    let revenue = 0;
+    let profit = 0;
+    let unitsSold = 0;
+    for (const s of sales) {
+      revenue += s.unitPrice * s.quantity;
+      profit += (s.unitPrice - s.unitCost) * s.quantity;
+      unitsSold += s.quantity;
+    }
+
+    let projected = 0;
+    let purchased = 0;
+    for (const l of lots) {
+      projected += (l.unitPrice - l.unitCost) * l.quantity;
+      purchased += l.quantity;
+    }
+
+    return {
+      product,
+      lots: [...lots].sort((a, b) => b.purchasedAt - a.purchasedAt),
+      sales: [...sales].sort((a, b) => b.soldAt - a.soldAt).slice(0, 50),
+      totals: {
+        revenue,
+        profit,
+        unitsSold,
+        salesCount: sales.length,
+        projected,
+        purchased,
+        margin: revenue > 0 ? profit / revenue : 0,
+        lastSoldAt: sales.length > 0 ? Math.max(...sales.map((s) => s.soldAt)) : null,
+        lastPrice:
+          sales.length > 0
+            ? sales.reduce((a, b) => (a.soldAt > b.soldAt ? a : b)).unitPrice
+            : null,
+      },
+    };
+  },
+});

@@ -295,6 +295,24 @@ export const reset = internalMutation({
   },
 });
 
+/**
+ * Extends a live session by a fresh day. Called when someone answers the
+ * "about to sign out" prompt, so a session cannot lapse mid-form and throw
+ * away whatever was typed.
+ *
+ * Only a session that is still valid can be renewed — an expired token has to
+ * go through the passcode again.
+ */
+export const renew = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.token);
+    const expiresAt = Date.now() + SESSION_TTL_MS;
+    await ctx.db.patch(session._id, { expiresAt });
+    return { expiresAt };
+  },
+});
+
 export const logout = mutation({
   args: { token: v.string() },
   handler: async (ctx, args) => {

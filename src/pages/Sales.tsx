@@ -25,6 +25,7 @@ import { gradientFor, initialOf } from "../lib/avatar";
 import { CURRENCY_CODE, plural, startOfLocalDay } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
+import { usePersistedState } from "../lib/persist";
 
 const DAY = 24 * 60 * 60 * 1000;
 type SortKey = "newest" | "oldest" | "profit" | "revenue";
@@ -36,10 +37,14 @@ export function SalesPage() {
   const sales = useAuthedQuery(api.sales.list, {});
   const products = useAuthedQuery(api.products.list, { includeArchived: true });
   const remove = useAuthedMutation(api.sales.remove);
+  const recreate = useAuthedMutation(api.sales.create);
+  const categories = useAuthedQuery(api.products.categories) ?? [];
 
   const [search, setSearch] = useState("");
   const [rangeDays, setRangeDays] = useState(0);
-  const [sort, setSort] = useState<SortKey>("newest");
+  const [sort, setSort] = usePersistedState<SortKey>("ac.sort.sales", "newest");
+  const [productId, setProductId] = useState("");
+  const [category, setCategory] = useState("");
   const [sellOpen, setSellOpen] = useState(false);
   const [editing, setEditing] = useState<Doc<"sales"> | null>(null);
   const [deleting, setDeleting] = useState<Doc<"sales"> | null>(null);
@@ -80,8 +85,16 @@ export function SalesPage() {
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
+    // Category has to be resolved through the product, since a sale only
+    // snapshots the name.
+    const inCategory = new Set(
+      (products ?? []).filter((p) => !category || p.category === category).map((p) => p._id as string),
+    );
+
     const filtered = (sales ?? []).filter((s) => {
       if (s.soldAt < bounds.from || s.soldAt > bounds.to) return false;
+      if (productId && (s.productId as string) !== productId) return false;
+      if (category && !inCategory.has(s.productId as string)) return false;
       if (!term) return true;
       return (
         s.productName.toLowerCase().includes(term) ||
@@ -97,7 +110,7 @@ export function SalesPage() {
       if (sort === "revenue") return b.unitPrice * b.quantity - a.unitPrice * a.quantity;
       return b.soldAt - a.soldAt;
     });
-  }, [sales, search, bounds, sort]);
+  }, [sales, products, search, bounds, sort, productId, category]);
 
   const totals = useMemo(() => {
     let revenue = 0;
@@ -111,7 +124,10 @@ export function SalesPage() {
     return { revenue, cost, profit: revenue - cost, units };
   }, [rows]);
 
-  const pager = usePagination(rows, `${search}|${rangeDays}|${customFrom}|${customTo}|${sort}`);
+  const pager = usePagination(
+    rows,
+    `${search}|${rangeDays}|${customFrom}|${customTo}|${sort}|${productId}|${category}`,
+  );
   const hasStock = (products ?? []).some((p) => !p.archived && p.quantity > 0);
   const rangeLabel =
     RANGES.find((r) => r.days === rangeDays)?.label ?? t("dash.allTime");
@@ -210,6 +226,36 @@ export function SalesPage() {
                   {r.label}
                 </option>
               ))}
+            </Select>
+          </div>
+          <div className="flex-1 sm:w-48 sm:flex-none">
+            <Select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              aria-label={t("common.category")}
+            >
+              <option value="">{t("common.allCategories")}</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="flex-1 sm:w-56 sm:flex-none">
+            <Select
+              value={productId}
+              onChange={(e) => setProductId(e.target.value)}
+              aria-label={t("sales.product")}
+            >
+              <option value="">{t("sales.allProducts")}</option>
+              {(products ?? [])
+                .filter((p) => !category || p.category === category)
+                .map((p) => (
+                  <option key={p._id} value={p._id}>
+                    {p.name}
+                  </option>
+                ))}
             </Select>
           </div>
           <div className="flex-1 sm:flex-none">
@@ -560,7 +606,7 @@ export function SalesPage() {
       <ConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}
-        title="Delete this sale?"
+        title={t("confirm.deleteSale")}
         body={
           deleting
             ? `The ${plural(deleting.quantity, "unit")} of ${deleting.productName} go back into stock, and the revenue and profit come off your totals.`
@@ -568,9 +614,30 @@ export function SalesPage() {
         }
         onConfirm={async () => {
           if (!deleting) return;
+          const snapshot = deleting;
           try {
-            await remove({ id: deleting._id });
-            toast.ok("Sale deleted and stock restored.");
+            await remove({ id: snapshot._id });
+            // Deleting a sale is the most frequent destructive action and had
+            // the least protection. Re-recording restores the same figures;
+            // the row gets a new id, which nothing else references.
+            toast.undoable(t("toast.saleDeleted"), {
+              label: t("toast.undo"),
+              run: async () => {
+                try {
+                  await recreate({
+                    productId: snapshot.productId,
+                    unitPrice: snapshot.unitPrice,
+                    quantity: snapshot.quantity,
+                    buyer: snapshot.buyer ?? "",
+                    note: snapshot.note ?? "",
+                    soldAt: snapshot.soldAt,
+                  });
+                  toast.ok(t("toast.saleRestored"));
+                } catch (err) {
+                  toast.error(errorMessage(err));
+                }
+              },
+            });
           } catch (err) {
             toast.error(errorMessage(err));
           }

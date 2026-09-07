@@ -16,6 +16,7 @@ import { Badge, Button, Card, EmptyState, Input, Select, cx } from "../component
 import { Pagination, SortSelect, usePagination } from "../components/Pagination";
 import { useT } from "../lib/i18n";
 import { ProductDialog } from "../components/ProductDialog";
+import { ProductDetailDialog } from "../components/ProductDetailDialog";
 import { SellDialog } from "../components/SellDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useSettings } from "../lib/settings";
@@ -45,6 +46,7 @@ export function ProductsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [selling, setSelling] = useState<Doc<"products"> | null>(null);
   const [deleting, setDeleting] = useState<Doc<"products"> | null>(null);
+  const [viewing, setViewing] = useState<Doc<"products"> | null>(null);
 
   const visible = useMemo(() => {
     const filtered = (products ?? []).filter((p) => !category || p.category === category);
@@ -178,6 +180,7 @@ export function ProductsPage() {
               <ProductCard
                 key={product._id}
                 product={product}
+                onView={() => setViewing(product)}
                 onSell={() => setSelling(product)}
                 onEdit={() => setEditing(product)}
                 onDelete={() => setDeleting(product)}
@@ -208,6 +211,11 @@ export function ProductsPage() {
         </>
       )}
 
+      <ProductDetailDialog
+        open={viewing !== null}
+        onClose={() => setViewing(null)}
+        productId={viewing?._id ?? null}
+      />
       <ProductDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <ProductDialog open={editing !== null} onClose={() => setEditing(null)} product={editing} />
       <SellDialog
@@ -218,13 +226,13 @@ export function ProductsPage() {
       <ConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}
-        title={`Delete ${deleting?.name ?? "product"}?`}
-        body="This removes the product and its stock lots, so it stops counting toward projected profit. Sales already recorded are kept, with the name and cost they were sold at, so your profit history does not change."
+        title={t("confirm.deleteProduct")}
+        body={t("confirm.deleteProductBody")}
         onConfirm={async () => {
           if (!deleting) return;
           try {
             await remove({ id: deleting._id });
-            toast.ok(`${deleting.name} deleted.`);
+            toast.ok(t("toast.productDeleted"));
           } catch (err) {
             toast.error(errorMessage(err));
           }
@@ -236,6 +244,7 @@ export function ProductsPage() {
 
 function ProductCard({
   product,
+  onView,
   onSell,
   onEdit,
   onDelete,
@@ -244,6 +253,7 @@ function ProductCard({
   fmt,
 }: {
   product: Doc<"products">;
+  onView: () => void;
   onSell: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -251,8 +261,13 @@ function ProductCard({
   onAdjust: (delta: number) => void;
   fmt: (v: number) => string;
 }) {
+  const t = useT();
   const out = product.quantity === 0;
   const low = product.quantity > 0 && product.quantity <= 3;
+  const [showAll, setShowAll] = useState(false);
+  // Roughly where three clamped lines end; below this there is nothing hidden
+  // and an expand control would be noise.
+  const clampable = product.details.length > 120;
 
   return (
     <Card
@@ -286,9 +301,12 @@ function ProductCard({
         >
           {initialOf(product.name)}
         </span>
-        <h3 className="mt-0.5 line-clamp-2 min-w-0 flex-1 text-[15.5px] leading-5.5 font-bold tracking-tight text-ink">
+        <button
+          onClick={onView}
+          className="mt-0.5 line-clamp-2 min-w-0 flex-1 text-left text-[15.5px] leading-5.5 font-bold tracking-tight text-ink transition-colors hover:text-accent"
+        >
           {product.name}
-        </h3>
+        </button>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5 px-5">
@@ -303,15 +321,25 @@ function ProductCard({
         )}
       </div>
 
-      <p
-        className={cx(
-          "mt-4 min-h-10 px-5 text-[13.5px] leading-[1.6] whitespace-pre-wrap",
-          product.details ? "line-clamp-3 text-ink-2" : "text-ink-3 italic",
+      <div className="mt-4 px-5">
+        <p
+          className={cx(
+            "min-h-10 text-[13.5px] leading-[1.6] whitespace-pre-wrap",
+            product.details ? "text-ink-2" : "text-ink-3 italic",
+            product.details && !showAll && "line-clamp-3",
+          )}
+        >
+          {product.details || t("products.noDetails")}
+        </p>
+        {clampable && (
+          <button
+            onClick={() => setShowAll((v) => !v)}
+            className="mt-1 text-[12px] font-semibold text-accent hover:underline"
+          >
+            {showAll ? t("detail.showLess") : t("detail.showMore")}
+          </button>
         )}
-        title={product.details || undefined}
-      >
-        {product.details || "No details."}
-      </p>
+      </div>
 
       <div className="mt-auto flex items-end justify-between gap-3 border-t border-line px-5 pt-4 pb-5">
         <div>

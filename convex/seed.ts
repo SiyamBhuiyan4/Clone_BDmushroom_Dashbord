@@ -266,6 +266,51 @@ export const profitSheet = internalMutation({
   },
 });
 
+/**
+ * Brings stock in line with the lots that produced it:
+ *
+ *   npx convex run seed:reconcileStock
+ *
+ * Stock lots only started moving `product.quantity` after the two were
+ * connected, so lots recorded before that are not reflected in stock. This
+ * recomputes quantity as (units bought in lots − units sold) for every product
+ * that has lots. Products with no lots are left alone: the invariant does not
+ * apply to them, and their quantity was entered by hand.
+ */
+export const reconcileStock = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const lots = await ctx.db.query("stockBatches").collect();
+    const sales = await ctx.db.query("sales").collect();
+
+    const bought = new Map<string, number>();
+    for (const l of lots) {
+      const k = l.productId as string;
+      bought.set(k, (bought.get(k) ?? 0) + l.quantity);
+    }
+    const sold = new Map<string, number>();
+    for (const s of sales) {
+      const k = s.productId as string;
+      sold.set(k, (sold.get(k) ?? 0) + s.quantity);
+    }
+
+    const changes: string[] = [];
+    for (const [productId, boughtUnits] of bought) {
+      const product = await ctx.db.get(productId as Id<"products">);
+      if (!product) continue;
+      const next = Math.max(0, boughtUnits - (sold.get(productId) ?? 0));
+      if (next !== product.quantity) {
+        changes.push(`${product.name}: ${product.quantity} → ${next}`);
+        await ctx.db.patch(product._id, { quantity: next });
+      }
+    }
+
+    return changes.length === 0
+      ? "Stock already matches the lots. Nothing changed."
+      : `Reconciled ${changes.length} product(s):\n  ${changes.join("\n  ")}`;
+  },
+});
+
 export const clear = internalMutation({
   args: {},
   handler: async (ctx) => {

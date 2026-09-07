@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useSettings, type ThemeChoice } from "./lib/settings";
 import { useSession } from "./lib/session";
+import { ConnectionBanner, SessionWarning } from "./components/StatusBar";
 import { useT, type MessageKey } from "./lib/i18n";
 import { cx } from "./components/ui";
 import { DashboardPage } from "./pages/Dashboard";
@@ -64,6 +65,8 @@ export default function App() {
 
   return (
     <div className="flex min-h-full bg-page">
+      <ConnectionBanner />
+      <SessionWarning />
       {drawerOpen && (
         <div
           className="ac-fade-in fixed inset-0 z-30 bg-scrim backdrop-blur-sm lg:hidden"

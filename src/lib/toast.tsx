@@ -9,11 +9,18 @@ import {
 } from "react";
 import { CheckCircle2, AlertTriangle, X } from "lucide-react";
 
-type Toast = { id: number; kind: "ok" | "error"; text: string };
+type Action = { label: string; run: () => void | Promise<void> };
+type Toast = { id: number; kind: "ok" | "error"; text: string; action?: Action };
 
 type ToastApi = {
   ok: (text: string) => void;
   error: (text: string) => void;
+  /**
+   * A confirmation that can be taken back. Deleting a sale is the most
+   * frequent destructive action and the least protected — a confirm dialog
+   * catches the deliberate mistake, an undo catches the misclick.
+   */
+  undoable: (text: string, action: Action) => void;
 };
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -27,11 +34,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const push = useCallback(
-    (kind: Toast["kind"], text: string) => {
+    (kind: Toast["kind"], text: string, action?: Action) => {
       const id = nextId.current++;
-      setToasts((list) => [...list, { id, kind, text }]);
-      // Errors linger; confirmations get out of the way.
-      setTimeout(() => dismiss(id), kind === "error" ? 6000 : 3000);
+      setToasts((list) => [...list, { id, kind, text, action }]);
+      // Errors linger, an undo needs time to be noticed, confirmations get
+      // out of the way.
+      const ttl = kind === "error" ? 6000 : action ? 7000 : 3000;
+      setTimeout(() => dismiss(id), ttl);
     },
     [dismiss],
   );
@@ -40,6 +49,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     () => ({
       ok: (text: string) => push("ok", text),
       error: (text: string) => push("error", text),
+      undoable: (text: string, action: Action) => push("ok", text, action),
     }),
     [push],
   );
@@ -62,7 +72,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             ) : (
               <AlertTriangle size={18} className="mt-px shrink-0 text-critical" aria-hidden />
             )}
-            <p className="min-w-0 flex-1 text-[13.5px] leading-5.5 font-medium text-ink">{t.text}</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-[13.5px] leading-5.5 font-medium text-ink">{t.text}</p>
+              {t.action && (
+                <button
+                  onClick={() => {
+                    void t.action!.run();
+                    dismiss(t.id);
+                  }}
+                  className="mt-1 rounded-md text-[12.5px] font-bold text-accent underline underline-offset-2 hover:brightness-110"
+                >
+                  {t.action.label}
+                </button>
+              )}
+            </div>
             <button
               onClick={() => dismiss(t.id)}
               className="-mr-1 -mt-0.5 rounded-md p-1 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
