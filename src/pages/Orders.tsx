@@ -6,6 +6,7 @@ import {
   FileText,
   Plus,
   Receipt,
+  Wallet,
   Search,
   Trash2,
   XCircle,
@@ -15,6 +16,7 @@ import type { Doc } from "../../convex/_generated/dataModel";
 import { Badge, Button, Card, EmptyState, Input, Select, cx } from "../components/ui";
 import { Pagination, usePagination } from "../components/Pagination";
 import { OrderDialog } from "../components/OrderDialog";
+import { PaymentDialog } from "../components/PaymentDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -43,6 +45,7 @@ function toReceipt(order: Doc<"orders">): ReceiptOrder {
     deliveryCharge: order.deliveryCharge,
     total: order.total,
     paymentStatus: order.paymentStatus,
+    paidAmount: order.paidAmount,
     orderStatus: order.orderStatus,
     note: order.note,
   };
@@ -73,6 +76,7 @@ export function OrdersPage() {
   const [status, setStatus] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<Doc<"orders"> | null>(null);
+  const [paying, setPaying] = useState<Doc<"orders"> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const rows = useMemo(() => {
@@ -206,6 +210,11 @@ export function OrdersPage() {
                   </div>
                   <div className="text-right">
                     <p className="text-[18px] font-bold tabular-nums text-ink">{fmt(order.total)}</p>
+                    {order.paymentStatus !== "paid" && (
+                      <p className="mt-0.5 text-[11.5px] font-semibold tabular-nums text-critical-ink">
+                        {t("orders.remainingDue")}: {fmt(order.total - (order.paidAmount ?? 0))}
+                      </p>
+                    )}
                     <div className="mt-1 flex flex-wrap justify-end gap-1.5">
                       <Badge tone={PAYMENT_TONE[order.paymentStatus] ?? "neutral"}>
                         {t(`orders.${order.paymentStatus}` as never)}
@@ -247,6 +256,11 @@ export function OrdersPage() {
                   >
                     <Eye size={15} />
                     {t("orders.preview")}
+                  </Button>
+
+                  <Button size="sm" variant="secondary" onClick={() => setPaying(order)}>
+                    <Wallet size={15} />
+                    {t("orders.payment")}
                   </Button>
 
                   {order.orderStatus === "pending" && (
@@ -308,6 +322,7 @@ export function OrdersPage() {
       )}
 
       <OrderDialog open={addOpen} onClose={() => setAddOpen(false)} />
+      <PaymentDialog open={paying !== null} onClose={() => setPaying(null)} order={paying} />
       <ConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}

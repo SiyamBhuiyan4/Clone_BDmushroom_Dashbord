@@ -30,6 +30,8 @@ export type ReceiptOrder = {
   deliveryCharge: number;
   total: number;
   paymentStatus: string;
+  /** What the customer has handed over so far; only meaningful when partial. */
+  paidAmount?: number;
   orderStatus?: string;
   note?: string;
 };
@@ -257,6 +259,16 @@ export function drawReceipt(
   doc.strokeColor(RULE).lineWidth(1).moveTo(labelX, y).lineTo(right, y).stroke();
   y += 8;
   totalRow(bn ? "সর্বমোট" : "Total", money(order.total), true);
+
+  /*
+    A partly-paid order is the one case where the total is not the number the
+    customer cares about — what they still owe is. Both are printed so the
+    receipt doubles as a record of the balance.
+  */
+  if (order.paymentStatus === "partial" && order.paidAmount !== undefined) {
+    totalRow(bn ? "পরিশোধিত" : "Paid", money(order.paidAmount));
+    totalRow(bn ? "বাকি" : "Due", money(order.total - order.paidAmount), true);
+  }
 
   /* ------------------------------------------------------------- footer */
   y += 6;

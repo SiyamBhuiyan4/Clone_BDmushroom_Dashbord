@@ -195,6 +195,13 @@ const EN = {
   "orders.deleteBody": "The order is removed. If it was confirmed, its sales are deleted and the stock goes back.",
   "orders.deleted": "Order deleted.",
 
+  "orders.recordPayment": "Record payment",
+  "orders.amountPaid": "Amount paid",
+  "orders.paidSoFar": "Paid so far",
+  "orders.remainingDue": "Still due",
+  "orders.partialRange": "A partial payment must be more than zero and less than",
+  "orders.paymentSaved": "Payment updated.",
+
   "profit.title": "Profit",
   "profit.subtitle": "Profit per stock lot, split across your categories.",
   "profit.addLot": "Add stock lot",
@@ -405,6 +412,13 @@ const BN: Partial<Record<MessageKey, string>> = {
   "orders.deleteTitle": "এই অর্ডারটি মুছবেন?",
   "orders.deleteBody": "অর্ডারটি মুছে যাবে। নিশ্চিত করা থাকলে এর বিক্রয়গুলোও মুছবে এবং স্টক ফেরত আসবে।",
   "orders.deleted": "অর্ডার মোছা হয়েছে।",
+
+  "orders.recordPayment": "পেমেন্ট লিখুন",
+  "orders.amountPaid": "যত টাকা দিয়েছেন",
+  "orders.paidSoFar": "এ পর্যন্ত পরিশোধিত",
+  "orders.remainingDue": "বাকি আছে",
+  "orders.partialRange": "আংশিক পেমেন্ট শূন্যের বেশি এবং এর কম হতে হবে:",
+  "orders.paymentSaved": "পেমেন্ট হালনাগাদ হয়েছে।",
 
   "profit.title": "লাভ",
   "profit.subtitle": "প্রতি স্টকের লাভ, খাত অনুযায়ী ভাগ করা।",

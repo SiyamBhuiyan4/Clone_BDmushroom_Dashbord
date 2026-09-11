@@ -267,6 +267,49 @@ export const cancel = mutation({
   },
 });
 
+/**
+ * Records what the customer has actually paid.
+ *
+ * Status and amount are kept consistent with each other rather than being two
+ * independent fields: "paid" always means the full total, "due" always means
+ * nothing, and "partial" must be strictly between the two. Letting them drift
+ * apart is how an order ends up marked paid with ৳0 against it.
+ */
+export const setPayment = mutation({
+  args: {
+    token: v.string(),
+    id: v.id("orders"),
+    paymentStatus: v.union(v.literal("paid"), v.literal("due"), v.literal("partial")),
+    paidAmount: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const order = await ctx.db.get(args.id);
+    if (!order) throw new ConvexError("That order no longer exists.");
+
+    let paidAmount: number;
+    if (args.paymentStatus === "paid") {
+      paidAmount = order.total;
+    } else if (args.paymentStatus === "due") {
+      paidAmount = 0;
+    } else {
+      const amount = args.paidAmount ?? 0;
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new ConvexError("Enter how much has been paid.");
+      }
+      if (amount >= order.total) {
+        throw new ConvexError(
+          `That is the full amount — mark the order paid instead of partial.`,
+        );
+      }
+      paidAmount = amount;
+    }
+
+    await ctx.db.patch(args.id, { paymentStatus: args.paymentStatus, paidAmount });
+    return { paidAmount, due: order.total - paidAmount };
+  },
+});
+
 export const setStatus = mutation({
   args: {
     token: v.string(),

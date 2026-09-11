@@ -128,11 +128,19 @@ export const count = internalQuery({
   handler: async (ctx) => {
     const products = await ctx.db.query("products").collect();
     const sales = await ctx.db.query("sales").collect();
+    const orders = await ctx.db.query("orders").collect();
     const config = await ctx.db.query("authConfig").first();
     const sessions = await ctx.db.query("sessions").collect();
     return {
       products: products.length,
       sales: sales.length,
+      orders: orders.length,
+      ordersByStatus: orders.reduce<Record<string, number>>((acc, o) => {
+        acc[o.orderStatus] = (acc[o.orderStatus] ?? 0) + 1;
+        return acc;
+      }, {}),
+      /** Sales that came from a confirmed order, rather than entered directly. */
+      salesFromOrders: orders.reduce((n, o) => n + (o.saleIds?.length ?? 0), 0),
       categories: [...new Set(products.map((p) => p.category).filter(Boolean))].length,
       passcodeSet: config !== null,
       activeSessions: sessions.filter((s) => s.expiresAt > Date.now()).length,
