@@ -28,6 +28,66 @@ export default defineSchema({
     .index("by_tokenHash", ["tokenHash"])
     .index("by_expiresAt", ["expiresAt"]),
 
+  /*
+    A customer order, as taken over WhatsApp.
+
+    Items are embedded rather than a separate table: an order is always read
+    and written whole, and embedding keeps the line items and the totals they
+    produce in one atomic record.
+
+    `unitCost` is snapshotted per line for the same reason sales snapshot it —
+    so repricing a product later cannot rewrite the profit of an order that
+    has already been fulfilled.
+  */
+  orders: defineTable({
+    orderNo: v.string(),
+    customerName: v.string(),
+    customerPhone: v.optional(v.string()),
+    customerAddress: v.optional(v.string()),
+    orderedAt: v.number(),
+    items: v.array(
+      v.object({
+        productId: v.id("products"),
+        productName: v.string(),
+        quantity: v.number(),
+        unit: v.string(),
+        unitPrice: v.number(),
+        unitCost: v.number(),
+      }),
+    ),
+    subtotal: v.number(),
+    discount: v.number(),
+    deliveryCharge: v.number(),
+    total: v.number(),
+    paymentStatus: v.union(v.literal("paid"), v.literal("due"), v.literal("partial")),
+    paidAmount: v.optional(v.number()),
+    orderStatus: v.union(
+      v.literal("pending"),
+      v.literal("confirmed"),
+      v.literal("delivered"),
+      v.literal("cancelled"),
+    ),
+    note: v.optional(v.string()),
+    /*
+      Sales written when the order was confirmed. Confirming an order records
+      one sale per line, so the Dashboard, Profit and Sales ledger keep working
+      unchanged and include order revenue — without this, orders would be a
+      second set of books the profit figures ignore.
+    */
+    saleIds: v.optional(v.array(v.id("sales"))),
+    source: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_orderedAt", ["orderedAt"])
+    .index("by_orderNo", ["orderNo"])
+    .index("by_status", ["orderStatus"]),
+
+  /** Monotonic counters, so order numbers never collide. */
+  counters: defineTable({
+    name: v.string(),
+    value: v.number(),
+  }).index("by_name", ["name"]),
+
   /** Failed login timestamps, for throttling brute force. */
   loginFailures: defineTable({
     at: v.number(),
@@ -83,10 +143,23 @@ export default defineSchema({
     name: v.string(),
     // What it costs you to acquire one unit.
     costPrice: v.number(),
+    /*
+      Default selling price, so picking a product on an order fills the price
+      in. Optional because products created before orders existed have none.
+    */
+    sellPrice: v.optional(v.number()),
+    /*
+      What a "unit" means for this product — পিস, কেজি, গ্রাম, লিটার. Without
+      it, stock totals add 2.5 kg of agar to 50 fogger nozzles.
+    */
+    unit: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
     details: v.string(),
     category: v.optional(v.string()),
     // Units currently on hand.
     quantity: v.number(),
+    /** Per-product low-stock threshold; falls back to a global default. */
+    reorderLevel: v.optional(v.number()),
     archived: v.boolean(),
     createdAt: v.number(),
   })

@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as catalogue from "../catalogue.js";
 import type * as danger from "../danger.js";
 import type * as dashboard from "../dashboard.js";
+import type * as orders from "../orders.js";
 import type * as products from "../products.js";
 import type * as profit from "../profit.js";
 import type * as sales from "../sales.js";
@@ -28,6 +29,7 @@ declare const fullApi: ApiFromModules<{
   catalogue: typeof catalogue;
   danger: typeof danger;
   dashboard: typeof dashboard;
+  orders: typeof orders;
   products: typeof products;
   profit: typeof profit;
   sales: typeof sales;

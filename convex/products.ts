@@ -213,3 +213,94 @@ export const detail = query({
     };
   },
 });
+
+/**
+ * Bulk product import, backing the CSV upload.
+ *
+ * Rows are validated here as well as in the browser: the client parses the
+ * file for immediate feedback, but nothing stops a malformed payload arriving
+ * anyway, and a half-imported catalogue is worse than a rejected one.
+ *
+ * `mode` decides what happens when a name already exists — skip it, or update
+ * the existing product in place. Nothing is ever silently duplicated.
+ */
+export const bulkImport = mutation({
+  args: {
+    token: v.string(),
+    mode: v.union(v.literal("skip"), v.literal("update")),
+    rows: v.array(
+      v.object({
+        name: v.string(),
+        details: v.optional(v.string()),
+        category: v.optional(v.string()),
+        tags: v.optional(v.array(v.string())),
+        costPrice: v.number(),
+        sellPrice: v.optional(v.number()),
+        quantity: v.number(),
+        unit: v.optional(v.string()),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    if (args.rows.length === 0) throw new ConvexError("The file contained no rows.");
+    if (args.rows.length > 1000) {
+      throw new ConvexError("Import at most 1000 rows at a time.");
+    }
+
+    const existing = await ctx.db.query("products").collect();
+    const byName = new Map(existing.map((p) => [p.name.trim().toLowerCase(), p]));
+
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const [index, row] of args.rows.entries()) {
+      const line = index + 2; // +1 for zero-index, +1 for the header row
+      const name = row.name.trim();
+      try {
+        validate(name, row.costPrice, row.quantity);
+      } catch (err) {
+        errors.push(`Row ${line}: ${err instanceof ConvexError ? String(err.data) : "invalid"}`);
+        continue;
+      }
+      if (row.sellPrice !== undefined && (!Number.isFinite(row.sellPrice) || row.sellPrice < 0)) {
+        errors.push(`Row ${line}: sell price cannot be negative.`);
+        continue;
+      }
+
+      const match = byName.get(name.toLowerCase());
+      const fields = {
+        name,
+        costPrice: row.costPrice,
+        sellPrice: row.sellPrice,
+        unit: row.unit?.trim() || undefined,
+        tags: row.tags && row.tags.length > 0 ? row.tags : undefined,
+        details: (row.details ?? "").trim(),
+        category: row.category?.trim() || undefined,
+        quantity: row.quantity,
+      };
+
+      if (match) {
+        if (args.mode === "skip") {
+          skipped++;
+          continue;
+        }
+        await ctx.db.patch(match._id, fields);
+        updated++;
+      } else {
+        const id = await ctx.db.insert("products", {
+          ...fields,
+          archived: false,
+          createdAt: Date.now(),
+        });
+        const inserted = await ctx.db.get(id);
+        if (inserted) byName.set(name.toLowerCase(), inserted);
+        created++;
+      }
+    }
+
+    return { created, updated, skipped, errors };
+  },
+});
