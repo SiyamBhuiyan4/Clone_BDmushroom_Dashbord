@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Package,
   Receipt,
+  ShoppingCart,
   PieChart,
   Menu,
   X,
@@ -22,13 +23,15 @@ import { cx } from "./components/ui";
 import { DashboardPage } from "./pages/Dashboard";
 import { ProductsPage } from "./pages/Products";
 import { SalesPage } from "./pages/Sales";
+import { OrdersPage } from "./pages/Orders";
 import { ProfitPage } from "./pages/Profit";
 
-type Route = "dashboard" | "products" | "sales" | "profit";
+type Route = "dashboard" | "products" | "orders" | "sales" | "profit";
 
 const NAV: { route: Route; key: MessageKey; icon: typeof LayoutDashboard }[] = [
   { route: "dashboard", key: "nav.dashboard", icon: LayoutDashboard },
   { route: "products", key: "nav.products", icon: Package },
+  { route: "orders", key: "orders.title", icon: ShoppingCart },
   { route: "sales", key: "nav.sales", icon: Receipt },
   { route: "profit", key: "nav.profit", icon: PieChart },
 ];
@@ -104,6 +107,7 @@ export default function App() {
           <div key={route} className="ac-rise mx-auto w-full max-w-[76rem]">
             {route === "dashboard" && <DashboardPage onNavigate={go} />}
             {route === "products" && <ProductsPage />}
+            {route === "orders" && <OrdersPage />}
             {route === "sales" && <SalesPage />}
             {route === "profit" && <ProfitPage />}
           </div>

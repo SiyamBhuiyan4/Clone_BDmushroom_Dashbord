@@ -231,6 +231,9 @@ export function drawReceipt(
   y += 10;
   const labelX = xRate - 40;
   const labelW = wRate + 40;
+  // Remembered before the totals column advances `y`, so the payment note on
+  // the left starts level with the totals instead of at a guessed offset.
+  const totalsTop = y;
 
   const totalRow = (label: string, value: string, bold = false) => {
     doc
@@ -262,13 +265,15 @@ export function drawReceipt(
     .font(REGULAR)
     .fontSize(10)
     .fillColor(INK)
-    .text(`${bn ? "পেমেন্ট" : "Payment"}: ${bn ? payment.bn : payment.en}`, left, y - 40, {
-      width: width * 0.5,
+    .text(`${bn ? "পেমেন্ট" : "Payment"}: ${bn ? payment.bn : payment.en}`, left, totalsTop, {
+      // Stop short of the totals column so the two can never collide,
+      // however many total rows an order happens to have.
+      width: labelX - left - 16,
     });
 
   if (order.note) {
     doc.font(REGULAR).fontSize(9).fillColor(MUTED).text(order.note, left, doc.y + 2, {
-      width: width * 0.5,
+      width: labelX - left - 16,
     });
   }
 
