@@ -390,6 +390,17 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   }
 }
 
+@keyframes ac-slide-down {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -100%, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @keyframes ac-draw {
   to {
     stroke-dashoffset: 0;
@@ -413,6 +424,9 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
 }
 .ac-slide-in-right {
   animation: ac-slide-in-right 260ms var(--ease-spring) both;
+}
+.ac-slide-down {
+  animation: ac-slide-down 240ms var(--ease-out) both;
 }
 
 /*
@@ -494,6 +508,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   .ac-rise,
   .ac-pop-in,
   .ac-slide-in-right,
+  .ac-slide-down,
   .ac-stagger > *,
   .ac-draw {
     animation: none;

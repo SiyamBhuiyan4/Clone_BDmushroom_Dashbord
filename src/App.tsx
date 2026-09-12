@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useSettings, type ThemeChoice } from "./lib/settings";
 import { useSession } from "./lib/session";
-import { ConnectionBanner, SessionWarning } from "./components/StatusBar";
+import { ConnectionBanner, SessionWarning, useIsOffline } from "./components/StatusBar";
 import { useT, type MessageKey } from "./lib/i18n";
 import { cx } from "./components/ui";
 import { DashboardPage } from "./pages/Dashboard";
@@ -49,6 +49,9 @@ function routeFromHash(): Route {
 
 export default function App() {
   const t = useT();
+  // The banner is fixed, so everything anchored to the top of the viewport
+  // has to shift down by its height while it is showing.
+  const offline = useIsOffline();
   const [route, setRoute] = useState<Route>(routeFromHash);
   // Separate from the sidebar's collapsed state: this is the mobile drawer,
   // which is always full width and never a rail.
@@ -67,7 +70,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex min-h-full bg-page">
+    <div className={cx("flex min-h-full bg-page", offline && "pt-9")}>
       <ConnectionBanner />
       <SessionWarning />
       {drawerOpen && (
@@ -82,10 +85,17 @@ export default function App() {
         go={go}
         drawerOpen={drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
+        offline={offline}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-line bg-page/80 px-4 backdrop-blur-xl sm:px-6 lg:hidden">
+        <header
+          className={cx(
+            "sticky z-20 flex h-16 items-center gap-3 border-b border-line bg-page/80 px-4",
+            "backdrop-blur-xl sm:px-6 lg:hidden",
+            offline ? "top-9" : "top-0",
+          )}
+        >
           <button
             onClick={() => setDrawerOpen(true)}
             className="rounded-xl p-2 text-ink-2 transition-colors hover:bg-surface-2"
@@ -122,11 +132,13 @@ function Sidebar({
   go,
   drawerOpen,
   onCloseDrawer,
+  offline,
 }: {
   route: Route;
   go: (r: Route) => void;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
+  offline: boolean;
 }) {
   const { navCollapsed, toggleNav } = useSettings();
   const t = useT();
@@ -152,7 +164,8 @@ function Sidebar({
       className={cx(
         "fixed inset-y-0 left-0 z-40 flex w-68 shrink-0 flex-col overflow-hidden border-r border-line bg-surface",
         "transition-[width,transform] duration-300 ease-[var(--ease-out)]",
-        "lg:sticky lg:top-0 lg:h-screen lg:translate-x-0",
+        "lg:sticky lg:h-screen lg:translate-x-0",
+        offline ? "lg:top-9" : "lg:top-0",
         drawerOpen ? "translate-x-0" : "-translate-x-full",
         rail && "lg:w-17",
       )}

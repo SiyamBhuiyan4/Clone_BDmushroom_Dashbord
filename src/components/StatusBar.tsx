@@ -10,19 +10,19 @@ import { useT } from "../lib/i18n";
 const WARN_BEFORE_MS = 5 * 60 * 1000;
 
 /**
- * Connection state.
+ * Whether the connection has been down long enough to be worth saying so.
  *
  * Convex is realtime, so a dropped socket does not blank the page — it keeps
- * showing the last data it received, with no sign that it is now stale. On a
- * phone that is a genuine hazard: you could record a sale into a dead
- * connection and believe it saved.
+ * showing the last data it received with no sign that it is stale. On a phone
+ * that is a genuine hazard: you could record a sale into a dead connection and
+ * believe it saved.
+ *
+ * Exported because the layout reacts too: the banner is fixed, so the page has
+ * to make room for it rather than let it cover the header.
  */
-export function ConnectionBanner() {
+export function useIsOffline() {
   const state = useConvexConnectionState();
-  const t = useT();
-  // Don't flash on a normal momentary reconnect.
   const [settled, setSettled] = useState(false);
-
   const offline = !state.isWebSocketConnected;
 
   useEffect(() => {
@@ -30,20 +30,33 @@ export function ConnectionBanner() {
       setSettled(false);
       return;
     }
+    // Don't flash on a normal momentary reconnect.
     const timer = setTimeout(() => setSettled(true), 2500);
     return () => clearTimeout(timer);
   }, [offline]);
 
-  if (!offline || !settled) return null;
+  return offline && settled;
+}
 
+export function ConnectionBanner() {
+  const offline = useIsOffline();
+  const t = useT();
+  if (!offline) return null;
+
+  /*
+    Fixed, not sticky. It used to sit in normal flow as a child of the flex
+    row holding the sidebar, so it was laid out as a column beside them and
+    ate horizontal space — and being in flow it scrolled away, which meant
+    scrolling back up to find out why nothing was saving.
+  */
   return (
     <div
       role="status"
-      className="ac-slide-down sticky top-0 z-30 flex items-center justify-center gap-2 bg-critical-solid px-4 py-2 text-[12.5px] font-semibold text-white"
+      className="ac-slide-down fixed inset-x-0 top-0 z-60 flex h-9 items-center justify-center gap-2 bg-critical-solid px-4 text-[12.5px] font-semibold text-white"
     >
       <CloudOff size={14} aria-hidden />
-      {t("status.offline")}
-      <Loader2 size={13} className="animate-spin" aria-hidden />
+      <span className="truncate">{t("status.offline")}</span>
+      <Loader2 size={13} className="shrink-0 animate-spin" aria-hidden />
     </div>
   );
 }
