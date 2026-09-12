@@ -202,6 +202,13 @@ const EN = {
   "orders.partialRange": "A partial payment must be more than zero and less than",
   "orders.paymentSaved": "Payment updated.",
 
+  "orders.noMargin": "Some lines sell at or below cost — they will record no profit.",
+  "orders.cost": "cost",
+  "orders.selling": "selling at",
+  "products.sellPrice": "Selling price",
+  "products.sellPriceHint": "Prefilled when this product is added to an order.",
+  "products.costHint": "What one unit costs you.",
+
   "profit.title": "Profit",
   "profit.subtitle": "Profit per stock lot, split across your categories.",
   "profit.addLot": "Add stock lot",
@@ -419,6 +426,13 @@ const BN: Partial<Record<MessageKey, string>> = {
   "orders.remainingDue": "বাকি আছে",
   "orders.partialRange": "আংশিক পেমেন্ট শূন্যের বেশি এবং এর কম হতে হবে:",
   "orders.paymentSaved": "পেমেন্ট হালনাগাদ হয়েছে।",
+
+  "orders.noMargin": "কিছু পণ্য ক্রয়মূল্যে বা তার কমে বিক্রি হচ্ছে — এতে কোনো লাভ থাকবে না।",
+  "orders.cost": "ক্রয়",
+  "orders.selling": "বিক্রয়",
+  "products.sellPrice": "বিক্রয়মূল্য",
+  "products.sellPriceHint": "অর্ডারে এই পণ্য যোগ করলে এই দাম বসবে।",
+  "products.costHint": "প্রতি এককে আপনার খরচ।",
 
   "profit.title": "লাভ",
   "profit.subtitle": "প্রতি স্টকের লাভ, খাত অনুযায়ী ভাগ করা।",

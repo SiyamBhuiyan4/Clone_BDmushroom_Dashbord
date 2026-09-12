@@ -319,6 +319,67 @@ export const reconcileStock = internalMutation({
   },
 });
 
+/**
+ * Fills in a selling price for products that have none:
+ *
+ *   npx convex run seed:backfillSellPrice
+ *
+ * Products created before orders existed have no sellPrice, so adding one to
+ * an order fell back to its cost and recorded the sale at zero profit. The
+ * price is taken from the product's most recent stock lot where there is one,
+ * since that is a real intended selling price, and otherwise from the
+ * catalogue's listed retail price. Anything already set is left alone.
+ */
+export const backfillSellPrice = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const products = await ctx.db.query("products").collect();
+    const lots = await ctx.db.query("stockBatches").collect();
+
+    // Most recent lot per product wins — that is the current asking price.
+    const latestLot = new Map<string, { at: number; price: number }>();
+    for (const l of lots) {
+      const key = l.productId as string;
+      const seen = latestLot.get(key);
+      if (!seen || l.purchasedAt > seen.at) {
+        latestLot.set(key, { at: l.purchasedAt, price: l.unitPrice });
+      }
+    }
+    const retail = new Map(CATALOGUE.map((c) => [c.name, c.retailLow]));
+
+    let fromLots = 0;
+    let fromCatalogue = 0;
+    let untouched = 0;
+    const unresolved: string[] = [];
+
+    for (const product of products) {
+      if (product.sellPrice !== undefined) {
+        untouched++;
+        continue;
+      }
+      const lot = latestLot.get(product._id as string);
+      if (lot) {
+        await ctx.db.patch(product._id, { sellPrice: lot.price });
+        fromLots++;
+        continue;
+      }
+      const listed = retail.get(product.name);
+      if (listed !== undefined) {
+        await ctx.db.patch(product._id, { sellPrice: listed });
+        fromCatalogue++;
+        continue;
+      }
+      unresolved.push(product.name);
+    }
+
+    return (
+      `Set from stock lots: ${fromLots}. From catalogue retail: ${fromCatalogue}. ` +
+      `Already had one: ${untouched}. Needs a price by hand: ${unresolved.length}` +
+      (unresolved.length ? ` (${unresolved.slice(0, 5).join(", ")})` : "")
+    );
+  },
+});
+
 export const clear = internalMutation({
   args: {},
   handler: async (ctx) => {

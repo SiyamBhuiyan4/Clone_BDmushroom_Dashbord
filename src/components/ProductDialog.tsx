@@ -15,6 +15,7 @@ import {
   cx,
 } from "./ui";
 import { CURRENCY_SYMBOL } from "../lib/format";
+import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedQuery, useAuthedMutation } from "../lib/session";
 
@@ -22,17 +23,19 @@ type Draft = {
   name: string;
   category: string;
   costPrice: string;
+  sellPrice: string;
   quantity: number;
   details: string;
 };
 
-const EMPTY: Draft = { name: "", category: "", costPrice: "", quantity: 1, details: "" };
+const EMPTY: Draft = { name: "", category: "", costPrice: "", sellPrice: "", quantity: 1, details: "" };
 
 function toDraft(product: Doc<"products">): Draft {
   return {
     name: product.name,
     category: product.category ?? "",
     costPrice: String(product.costPrice),
+    sellPrice: product.sellPrice !== undefined ? String(product.sellPrice) : "",
     quantity: product.quantity,
     details: product.details,
   };
@@ -48,6 +51,7 @@ export function ProductDialog({
   /** Present when editing; absent when adding. */
   product?: Doc<"products"> | null;
 }) {
+  const t = useT();
   const toast = useToast();
   const create = useAuthedMutation(api.products.create);
   const update = useAuthedMutation(api.products.update);
@@ -64,6 +68,7 @@ export function ProductDialog({
     setDraft((d) => ({ ...d, [key]: value }));
 
   const costPrice = Number(draft.costPrice);
+  const sellPrice = draft.sellPrice.trim() === "" ? undefined : Number(draft.sellPrice);
   const valid =
     draft.name.trim().length > 0 &&
     draft.costPrice.trim() !== "" &&
@@ -80,6 +85,7 @@ export function ProductDialog({
       const payload = {
         name: draft.name,
         costPrice,
+        sellPrice,
         details: draft.details,
         category: draft.category,
         quantity: draft.quantity,
@@ -138,6 +144,24 @@ export function ProductDialog({
               placeholder="0"
               required
             />
+
+            {/*
+              Without this, orders had no selling price to prefill and fell
+              back to cost — which recorded every sale at zero profit.
+            */}
+            <div className="mt-2 flex flex-col gap-2.5">
+              <div className="flex items-baseline justify-between gap-3">
+                <SectionLabel>{t("products.sellPrice")}</SectionLabel>
+                <span className="text-[11.5px] text-ink-3">{t("common.optional")}</span>
+              </div>
+              <AmountInput
+                symbol={CURRENCY_SYMBOL}
+                value={draft.sellPrice}
+                onChange={(e) => set("sellPrice", e.target.value)}
+                placeholder="0"
+              />
+              <p className="text-[12px] leading-4.5 text-ink-3">{t("products.sellPriceHint")}</p>
+            </div>
 
             <div className="mt-2 flex items-center justify-between gap-4">
               <div>

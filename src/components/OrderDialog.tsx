@@ -27,6 +27,7 @@ type Line = {
   productName: string;
   unit: string;
   stock: number;
+  unitCost: number;
   quantity: string;
   unitPrice: string;
 };
@@ -85,7 +86,13 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
           unit: p.unit ?? "পিস",
           stock: p.quantity,
           quantity: "1",
-          unitPrice: String(p.sellPrice ?? p.costPrice ?? 0),
+          /*
+            Only a real selling price is prefilled. Falling back to cost was
+            silently guaranteeing zero profit on every line; an empty box that
+            asks for a number is far better than a wrong one that looks filled.
+          */
+          unitPrice: p.sellPrice !== undefined ? String(p.sellPrice) : "",
+          unitCost: p.costPrice,
         },
       ];
     });
@@ -105,6 +112,10 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
   const total = subtotal - discountValue + deliveryValue;
 
   const shortLines = parsed.filter((l) => Number.isFinite(l.qty) && l.qty > l.stock);
+  // Selling at or below cost is legitimate sometimes, but never by accident.
+  const noMarginLines = parsed.filter(
+    (l) => Number.isFinite(l.price) && l.unitPrice !== "" && l.price <= l.unitCost,
+  );
   const linesValid =
     parsed.length > 0 &&
     parsed.every((l) => Number.isFinite(l.qty) && l.qty > 0 && Number.isFinite(l.price) && l.price >= 0);
@@ -289,12 +300,24 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
                           <span className="mb-1 block text-[11px] font-semibold text-ink-3">
                             {t("common.total")}
                           </span>
-                          <span className="block py-2.5 text-[15px] font-bold tabular-nums text-ink">
+                          <span className="block pt-2.5 text-[15px] font-bold tabular-nums text-ink">
                             {fmt(
                               Number.isFinite(line.qty) && Number.isFinite(line.price)
                                 ? line.qty * line.price
                                 : 0,
                             )}
+                          </span>
+                          <span
+                            className={cx(
+                              "block text-[11px] font-semibold tabular-nums",
+                              line.price > line.unitCost ? "text-good-ink" : "text-critical-ink",
+                            )}
+                          >
+                            {Number.isFinite(line.price)
+                              ? `${line.price > line.unitCost ? "+" : ""}${fmt(
+                                  (line.price - line.unitCost) * (Number.isFinite(line.qty) ? line.qty : 0),
+                                )}`
+                              : ""}
                           </span>
                         </div>
                       </div>
@@ -355,6 +378,23 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
                 </span>
               </div>
             </div>
+
+            {noMarginLines.length > 0 && (
+              <div className="rounded-2xl border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-warning-soft p-4">
+                <p className="flex items-start gap-2 text-[13px] font-semibold text-ink">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" aria-hidden />
+                  {t("orders.noMargin")}
+                </p>
+                <ul className="mt-1.5 ml-6 list-disc text-[12.5px] text-ink-2">
+                  {noMarginLines.map((l) => (
+                    <li key={l.key}>
+                      {l.productName} — {t("orders.cost")} {fmt(l.unitCost)}, {t("orders.selling")}{" "}
+                      {fmt(l.price)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {shortLines.length > 0 && (
               <div className="rounded-2xl border border-[color-mix(in_srgb,var(--critical)_30%,transparent)] bg-critical-soft p-4">
