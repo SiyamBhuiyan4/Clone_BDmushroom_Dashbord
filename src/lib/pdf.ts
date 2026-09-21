@@ -18,10 +18,11 @@ export const SHOP: ShopInfo = {
   tagline: "মাশরুম ও চাষের সরঞ্জাম",
   website: "bdmushroom.com",
   logoAspect: 357 / 476,
+  sealAspect: 292 / 476,
 };
 
 let fontCache: { regular: ArrayBuffer; bold: ArrayBuffer } | null = null;
-let logoCache: Uint8Array | null | undefined;
+let brandCache: { logo?: Uint8Array; seal?: Uint8Array } | null = null;
 
 async function loadFonts() {
   if (fontCache) return fontCache;
@@ -40,25 +41,33 @@ async function loadFonts() {
 }
 
 /*
-  The logo is a nicety, not a requirement: if it cannot be fetched — offline,
-  or the file moved — the receipt falls back to the wordmark rather than
-  failing the download the shopkeeper actually asked for. `null` is a cached
-  failure, so a missing file is not re-fetched on every receipt.
+  The artwork is a nicety, not a requirement: if it cannot be fetched —
+  offline, or a file moved — the receipt loses its letterhead and seal rather
+  than failing the download the shopkeeper actually asked for. The result is
+  cached either way, so a missing file is not re-fetched on every receipt.
 */
-async function loadLogo() {
-  if (logoCache !== undefined) return logoCache ?? undefined;
+async function loadArtwork(path: string) {
   try {
-    const res = await fetch("/brand/bdmushroom.png");
+    const res = await fetch(path);
     if (!res.ok) throw new Error(String(res.status));
-    logoCache = new Uint8Array(await res.arrayBuffer());
+    return new Uint8Array(await res.arrayBuffer());
   } catch {
-    logoCache = null;
+    return undefined;
   }
-  return logoCache ?? undefined;
+}
+
+async function loadBrand() {
+  if (brandCache) return brandCache;
+  const [logo, seal] = await Promise.all([
+    loadArtwork("/brand/bdmushroom.png"),
+    loadArtwork("/brand/bdmushroom-seal.png"),
+  ]);
+  brandCache = { logo, seal };
+  return brandCache;
 }
 
 async function buildDoc(orders: ReceiptOrder[], shop: ShopInfo, bengali: boolean) {
-  const [pdfkit, fonts, logo] = await Promise.all([import("pdfkit"), loadFonts(), loadLogo()]);
+  const [pdfkit, fonts, brand] = await Promise.all([import("pdfkit"), loadFonts(), loadBrand()]);
   const PDFDocument = pdfkit.default;
 
   /*
@@ -96,7 +105,7 @@ async function buildDoc(orders: ReceiptOrder[], shop: ShopInfo, bengali: boolean
     stream.on("error", (err) => reject(err));
   });
 
-  const branded: ShopInfo = { ...shop, logo: shop.logo ?? logo };
+  const branded: ShopInfo = { ...shop, logo: shop.logo ?? brand.logo, seal: shop.seal ?? brand.seal };
   orders.forEach((order) => {
     doc.addPage();
     drawReceipt(doc as never, order, branded, { bengali });
