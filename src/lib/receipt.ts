@@ -68,9 +68,8 @@ type Doc = {
   text(text: string, x?: number, y?: number, options?: Record<string, unknown>): Doc;
   moveTo(x: number, y: number): Doc;
   lineTo(x: number, y: number): Doc;
-  stroke(): Doc;
+  stroke(color?: string): Doc;
   rect(x: number, y: number, w: number, h: number): Doc;
-  roundedRect(x: number, y: number, w: number, h: number, r: number): Doc;
   fill(color?: string): Doc;
   fillAndStroke(fill?: string, stroke?: string): Doc;
   heightOfString(text: string, options?: Record<string, unknown>): number;
@@ -134,11 +133,11 @@ const PAYMENT_LABELS: Record<string, { en: string; bn: string }> = {
   partial: { en: "Partial", bn: "আংশিক" },
 };
 
-/** Pill colours per payment state: green settled, coral owed, amber in between. */
-const PAYMENT_COLORS: Record<string, { bg: string; fg: string }> = {
-  paid: { bg: "#e7f3e5", fg: GREEN_DEEP },
-  due: { bg: "#fdeceb", fg: CORAL_DEEP },
-  partial: { bg: "#fdf2e0", fg: "#9a6b12" },
+/** Tag colours per payment state: green settled, coral owed, amber in between. */
+const PAYMENT_COLORS: Record<string, { bg: string; fg: string; border: string }> = {
+  paid: { bg: "#e7f3e5", fg: GREEN_DEEP, border: "#b9d9b3" },
+  due: { bg: "#fdeceb", fg: CORAL_DEEP, border: "#f0c5c0" },
+  partial: { bg: "#fdf2e0", fg: "#9a6b12", border: "#e8d1a2" },
 };
 
 const ORDER_STATUS_LABELS: Record<string, { en: string; bn: string }> = {
@@ -170,16 +169,15 @@ export function drawReceipt(
   const headerTop = doc.page.margins.top;
 
   /**
-   * A rounded label chip — used for the payment state and the order state.
-   * Returns its width so several can be laid out side by side.
+   * A square status tag — used for the payment state and the order state.
+   * Outlined as well as filled, so it still reads as a tag on a black-and-
+   * white printer where the fill comes out as pale grey.
    */
-  const pill = (text: string, x: number, y: number, bg: string, fg: string, border?: string) => {
+  const tag = (text: string, x: number, y: number, bg: string, fg: string, border: string) => {
     doc.font(BOLD).fontSize(8.5);
-    const w = doc.widthOfString(text) + 18;
-    doc.roundedRect(x, y, w, 17, 8.5);
-    if (border) doc.lineWidth(0.6).fillAndStroke(bg, border);
-    else doc.fill(bg);
-    doc.fillColor(fg).text(text, x + 9, y + 4.5, { lineBreak: false });
+    const w = doc.widthOfString(text) + 16;
+    doc.rect(x, y, w, 16).lineWidth(0.6).fillAndStroke(bg, border);
+    doc.fillColor(fg).text(text, x + 8, y + 4, { lineBreak: false });
     return w;
   };
 
@@ -277,8 +275,7 @@ export function drawReceipt(
   /* ----------------------------------------------------------- customer */
   /*
     Measured before it is drawn: the card is exactly as tall as the customer
-    details inside it, so a two-line address does not spill past the rounded
-    corner.
+    details inside it, so a two-line address does not spill past its border.
   */
   const cardPadX = 14;
   const cardPadY = 11;
@@ -292,9 +289,9 @@ export function drawReceipt(
   for (const line of detailLines) cardH += doc.heightOfString(line, { width: detailW });
   cardH = Math.max(cardH + cardPadY, 62);
 
-  doc.roundedRect(left, y, width, cardH, 7).fill(TINT);
+  doc.rect(left, y, width, cardH).lineWidth(0.6).fillAndStroke(TINT, EDGE);
   // A green spine down the left edge, echoing the rule above.
-  doc.rect(left, y + 7, 3, cardH - 14).fill(GREEN_LEAF);
+  doc.rect(left, y, 3, cardH).fill(GREEN);
 
   doc
     .font(BOLD)
@@ -309,23 +306,21 @@ export function drawReceipt(
     cardY = doc.y;
   }
 
-  // Status chips, right-aligned inside the card and laid out back to front.
+  // Status tags, right-aligned inside the card and laid out back to front.
   const payment = PAYMENT_LABELS[order.paymentStatus] ?? { en: order.paymentStatus, bn: order.paymentStatus };
-  const paymentColor = PAYMENT_COLORS[order.paymentStatus] ?? { bg: "#eceeed", fg: INK };
-  const chips: { text: string; bg: string; fg: string; border?: string }[] = [
-    { text: bn ? payment.bn : payment.en, bg: paymentColor.bg, fg: paymentColor.fg },
-  ];
+  const paymentColor = PAYMENT_COLORS[order.paymentStatus] ?? { bg: "#eceeed", fg: INK, border: "#d4d9d6" };
+  const chips = [{ text: bn ? payment.bn : payment.en, ...paymentColor }];
   if (order.orderStatus) {
     const status = ORDER_STATUS_LABELS[order.orderStatus] ?? { en: order.orderStatus, bn: order.orderStatus };
-    // Outlined rather than filled: the delivery state is context, not the
-    // headline, and a second solid chip would fight the payment one.
+    // Outline only: the delivery state is context, not the headline, and a
+    // second filled tag would fight the payment one.
     chips.push({ text: bn ? status.bn : status.en, bg: PAPER, fg: MUTED, border: EDGE });
   }
   let chipX = right - cardPadX;
   doc.font(BOLD).fontSize(8.5);
   for (const chip of chips) {
-    chipX -= doc.widthOfString(chip.text) + 18;
-    pill(chip.text, chipX, y + cardPadY - 1, chip.bg, chip.fg, chip.border);
+    chipX -= doc.widthOfString(chip.text) + 16;
+    tag(chip.text, chipX, y + cardPadY - 1, chip.bg, chip.fg, chip.border);
     chipX -= 6;
     doc.font(BOLD).fontSize(8.5);
   }
@@ -350,19 +345,28 @@ export function drawReceipt(
     : { name: "Product", qty: "Qty", unit: "Unit", rate: "Rate", amount: "Amount" };
 
   const drawTableHeader = (top: number) => {
-    doc.roundedRect(left, top, width, 24, 5).fill(GREEN_DEEP);
-    // Square off the bottom corners so the band sits flush on the first row.
-    doc.rect(left, top + 14, width, 10).fill(GREEN_DEEP);
+    doc.rect(left, top, width, 24).fill(GREEN_DEEP);
     doc.font(BOLD).fontSize(8.5).fillColor(PAPER);
     doc.text(header.name, left + 12, top + 8, { width: wName, lineBreak: false });
     doc.text(header.qty, xQty, top + 8, { width: wQty, align: "right", lineBreak: false });
     doc.text(header.unit, xUnit + 8, top + 8, { width: wUnit - 8, lineBreak: false });
     doc.text(header.rate, xRate, top + 8, { width: wRate, align: "right", lineBreak: false });
-    doc.text(header.amount, xAmount, top + 8, { width: wAmount - 6, align: "right", lineBreak: false });
+    doc.text(header.amount, xAmount, top + 8, { width: wAmount - 12, align: "right", lineBreak: false });
     return top + 24;
   };
 
+  let tableTop = y;
   y = drawTableHeader(y);
+
+  /*
+    Ruled like a ledger rather than floating on the page: a single hairline
+    box around the header and its rows, drawn last so it sits over the row
+    fills. Reopened on every sheet, because the box has to close at whatever
+    row the page happened to break on.
+  */
+  const closeTable = (bottom: number) => {
+    doc.rect(left, tableTop, width, bottom - tableTop).lineWidth(0.6).stroke(EDGE);
+  };
 
   /*
     Rows may run to just above the footer. The totals block is what needs
@@ -399,9 +403,11 @@ export function drawReceipt(
     const rowHeight = Math.max(nameHeight, 12) + 12;
 
     if (y + rowHeight > rowLimit) {
+      closeTable(y);
       drawFooter(continued, MUTED);
       doc.addPage();
-      y = drawTableHeader(drawContinuation());
+      tableTop = drawContinuation();
+      y = drawTableHeader(tableTop);
       doc.font(REGULAR).fontSize(10);
       zebra = false;
     }
@@ -414,16 +420,17 @@ export function drawReceipt(
     doc.fillColor(MUTED).text(formatQty(item.quantity, bn), xQty, y + 6, { width: wQty, align: "right" });
     doc.text(item.unit, xUnit + 8, y + 6, { width: wUnit - 8 });
     doc.text(money(item.unitPrice), xRate, y + 6, { width: wRate, align: "right" });
-    doc.font(BOLD).fillColor(INK).text(money(amount), xAmount, y + 6, { width: wAmount - 6, align: "right" });
+    doc.font(BOLD).fillColor(INK).text(money(amount), xAmount, y + 6, { width: wAmount - 12, align: "right" });
 
     y += rowHeight;
     doc.strokeColor(EDGE).lineWidth(0.5).moveTo(left, y).lineTo(right, y).stroke();
   }
+  closeTable(y);
 
   /* ------------------------------------------------------------- totals */
-  const labelX = xRate - 50;
-  const labelW = wRate + 50;
-  const bandX = labelX - 12;
+  const bandX = xUnit;
+  const labelX = bandX;
+  const labelW = right - bandX - 12 - wAmount;
 
   /*
     Measured up front so the block is never split across a page boundary: a
@@ -463,7 +470,7 @@ export function drawReceipt(
       .font(BOLD)
       .fontSize(size)
       .fillColor(valueColor)
-      .text(value, xAmount, y, { width: wAmount - 6, align: "right" });
+      .text(value, xAmount, y, { width: wAmount - 12, align: "right" });
     y += size + 6;
   };
 
@@ -477,7 +484,7 @@ export function drawReceipt(
 
   // The grand total gets the brand band; everything above it is arithmetic.
   y += 2;
-  doc.roundedRect(bandX, y, right - bandX, 30, 6).fill(GREEN_DEEP);
+  doc.rect(bandX, y, right - bandX, 30).fill(GREEN_DEEP);
   doc
     .font(BOLD)
     .fontSize(10)
@@ -487,7 +494,7 @@ export function drawReceipt(
     .font(BOLD)
     .fontSize(14)
     .fillColor(PAPER)
-    .text(money(order.total), xAmount, y + 8, { width: wAmount - 6, align: "right", lineBreak: false });
+    .text(money(order.total), xAmount, y + 8, { width: wAmount - 12, align: "right", lineBreak: false });
   y += 38;
 
   /*
