@@ -17,9 +17,11 @@ export const SHOP: ShopInfo = {
   name: "BD Mushroom",
   tagline: "মাশরুম ও চাষের সরঞ্জাম",
   website: "bdmushroom.com",
+  logoAspect: 357 / 476,
 };
 
 let fontCache: { regular: ArrayBuffer; bold: ArrayBuffer } | null = null;
+let logoCache: Uint8Array | null | undefined;
 
 async function loadFonts() {
   if (fontCache) return fontCache;
@@ -37,8 +39,26 @@ async function loadFonts() {
   return fontCache;
 }
 
+/*
+  The logo is a nicety, not a requirement: if it cannot be fetched — offline,
+  or the file moved — the receipt falls back to the wordmark rather than
+  failing the download the shopkeeper actually asked for. `null` is a cached
+  failure, so a missing file is not re-fetched on every receipt.
+*/
+async function loadLogo() {
+  if (logoCache !== undefined) return logoCache ?? undefined;
+  try {
+    const res = await fetch("/brand/bdmushroom.png");
+    if (!res.ok) throw new Error(String(res.status));
+    logoCache = new Uint8Array(await res.arrayBuffer());
+  } catch {
+    logoCache = null;
+  }
+  return logoCache ?? undefined;
+}
+
 async function buildDoc(orders: ReceiptOrder[], shop: ShopInfo, bengali: boolean) {
-  const [pdfkit, fonts] = await Promise.all([import("pdfkit"), loadFonts()]);
+  const [pdfkit, fonts, logo] = await Promise.all([import("pdfkit"), loadFonts(), loadLogo()]);
   const PDFDocument = pdfkit.default;
 
   /*
@@ -76,9 +96,10 @@ async function buildDoc(orders: ReceiptOrder[], shop: ShopInfo, bengali: boolean
     stream.on("error", (err) => reject(err));
   });
 
+  const branded: ShopInfo = { ...shop, logo: shop.logo ?? logo };
   orders.forEach((order) => {
     doc.addPage();
-    drawReceipt(doc as never, order, shop, { bengali });
+    drawReceipt(doc as never, order, branded, { bengali });
   });
   doc.end();
 

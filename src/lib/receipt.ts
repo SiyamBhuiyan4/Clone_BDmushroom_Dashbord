@@ -9,6 +9,9 @@
   Everything is measured before it is drawn. The requirement is that long
   product and customer names wrap rather than overflow, that nothing overlaps,
   and that nothing is clipped — none of which survives fixed row heights.
+
+  The palette is lifted from the bdmushroom.com logo: the deep green of the
+  cap, the leaf green of its highlight and the coral of the swoosh beneath.
 */
 
 export type ReceiptItem = {
@@ -42,6 +45,15 @@ export type ShopInfo = {
   phone?: string;
   address?: string;
   website?: string;
+  /**
+   * PNG bytes of the shop logo, flattened onto white rather than transparent:
+   * PDFKit decodes an alpha channel through a Web Worker, while an opaque PNG
+   * is passed straight through. Optional on purpose — a failed fetch should
+   * cost the receipt its logo, not the download.
+   */
+  logo?: Uint8Array;
+  /** Aspect ratio of the logo, used to reserve the right amount of height. */
+  logoAspect?: number;
 };
 
 /** Minimal shape of the PDFKit document this module needs. */
@@ -58,18 +70,36 @@ type Doc = {
   lineTo(x: number, y: number): Doc;
   stroke(): Doc;
   rect(x: number, y: number, w: number, h: number): Doc;
+  roundedRect(x: number, y: number, w: number, h: number, r: number): Doc;
   fill(color?: string): Doc;
+  fillAndStroke(fill?: string, stroke?: string): Doc;
   heightOfString(text: string, options?: Record<string, unknown>): number;
+  widthOfString(text: string, options?: Record<string, unknown>): number;
+  image(src: unknown, x?: number, y?: number, options?: Record<string, unknown>): Doc;
   addPage(options?: Record<string, unknown>): Doc;
 };
 
 const REGULAR = "bn";
 const BOLD = "bnb";
 
-const INK = "#111111";
-const MUTED = "#666666";
-const RULE = "#cccccc";
-const BAND = "#f2f2f2";
+/* --------------------------------------------------------------- palette */
+
+/** Cap green — the logo's darkest tone, used for headings and the table band. */
+const GREEN_DEEP = "#2e6b38";
+/** The mid green of the mushroom stem, for rules and secondary marks. */
+const GREEN = "#3e8548";
+/** Leaf highlight, only ever used as a thin accent. */
+const GREEN_LEAF = "#8dc07a";
+/** Paper-safe wash behind cards and alternating rows. */
+const TINT = "#f2f8f0";
+/** Hairline that reads as a separator without competing with the text. */
+const EDGE = "#dcebd6";
+/** The swoosh under the wordmark: reserved for what the customer still owes. */
+const CORAL = "#ee6c60";
+const CORAL_DEEP = "#c2453a";
+const INK = "#1f2a24";
+const MUTED = "#6b7b70";
+const PAPER = "#ffffff";
 
 /** Bengali digits, so the receipt matches how the amounts are read aloud. */
 const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
@@ -104,6 +134,21 @@ const PAYMENT_LABELS: Record<string, { en: string; bn: string }> = {
   partial: { en: "Partial", bn: "আংশিক" },
 };
 
+/** Pill colours per payment state: green settled, coral owed, amber in between. */
+const PAYMENT_COLORS: Record<string, { bg: string; fg: string }> = {
+  paid: { bg: "#e7f3e5", fg: GREEN_DEEP },
+  due: { bg: "#fdeceb", fg: CORAL_DEEP },
+  partial: { bg: "#fdf2e0", fg: "#9a6b12" },
+};
+
+const ORDER_STATUS_LABELS: Record<string, { en: string; bn: string }> = {
+  pending: { en: "Pending", bn: "অপেক্ষমাণ" },
+  processing: { en: "Processing", bn: "প্রক্রিয়াধীন" },
+  shipped: { en: "Shipped", bn: "পাঠানো হয়েছে" },
+  delivered: { en: "Delivered", bn: "ডেলিভারি সম্পন্ন" },
+  cancelled: { en: "Cancelled", bn: "বাতিল" },
+};
+
 /**
  * Draws one receipt onto the current page.
  *
@@ -122,55 +167,170 @@ export function drawReceipt(
   const left = doc.page.margins.left;
   const right = doc.page.width - doc.page.margins.right;
   const width = right - left;
+  const headerTop = doc.page.margins.top;
+
+  /**
+   * A rounded label chip — used for the payment state and the order state.
+   * Returns its width so several can be laid out side by side.
+   */
+  const pill = (text: string, x: number, y: number, bg: string, fg: string, border?: string) => {
+    doc.font(BOLD).fontSize(8.5);
+    const w = doc.widthOfString(text) + 18;
+    doc.roundedRect(x, y, w, 17, 8.5);
+    if (border) doc.lineWidth(0.6).fillAndStroke(bg, border);
+    else doc.fill(bg);
+    doc.fillColor(fg).text(text, x + 9, y + 4.5, { lineBreak: false });
+    return w;
+  };
+
+  /*
+    The footer is drawn on every page rather than only the last: a printed
+    receipt that runs to two sheets should look finished on both, and the
+    continuation line says which order the second sheet belongs to.
+  */
+  const drawFooter = (message: string, accent: string) => {
+    const footerY = doc.page.height - doc.page.margins.bottom - 30;
+    doc.rect(left, footerY, width, 2).fill(GREEN_LEAF);
+    doc
+      .font(BOLD)
+      .fontSize(9)
+      .fillColor(accent)
+      .text(message, left, footerY + 10, { width: width * 0.6, lineBreak: false });
+    if (shop.website) {
+      doc
+        .font(REGULAR)
+        .fontSize(9)
+        .fillColor(MUTED)
+        .text(shop.website, left + width * 0.6, footerY + 10, {
+          width: width * 0.4,
+          align: "right",
+          lineBreak: false,
+        });
+    }
+  };
 
   /* ------------------------------------------------------------- header */
-  doc.font(BOLD).fontSize(20).fillColor(INK).text(shop.name, left, doc.page.margins.top, {
-    width: width * 0.62,
-  });
-  const headerTop = doc.page.margins.top;
-  let y = doc.y;
+  /*
+    Letterhead: the mark on the left with the shop's details beside it, the
+    document's own identity on the right. The two sides are measured
+    independently and the header ends below whichever runs longer.
+  */
+  let textX = left;
+  let logoBottom = headerTop;
+  if (shop.logo) {
+    const logoW = 92;
+    const logoH = logoW * (shop.logoAspect ?? 0.75);
+    doc.image(shop.logo, left, headerTop, { width: logoW });
+    textX = left + logoW + 16;
+    logoBottom = headerTop + logoH;
+  }
+
+  const idColW = 165;
+  const nameW = Math.max(120, right - idColW - 20 - textX);
+
+  let y = headerTop + 4;
+  doc.font(BOLD).fontSize(16).fillColor(GREEN_DEEP).text(shop.name, textX, y, { width: nameW });
+  y = doc.y + 1;
 
   if (shop.tagline) {
-    doc.font(REGULAR).fontSize(9.5).fillColor(MUTED).text(shop.tagline, left, y, {
-      width: width * 0.62,
-    });
-    y = doc.y;
+    doc.font(REGULAR).fontSize(9.5).fillColor(MUTED).text(shop.tagline, textX, y, { width: nameW });
+    y = doc.y + 1;
   }
   const contact = [shop.phone, shop.address, shop.website].filter(Boolean).join("  ·  ");
   if (contact) {
-    doc.font(REGULAR).fontSize(9).fillColor(MUTED).text(contact, left, y, { width: width * 0.62 });
+    doc.font(REGULAR).fontSize(8.5).fillColor(MUTED).text(contact, textX, y, { width: nameW });
     y = doc.y;
   }
 
   // Title and order meta, right-aligned against the header block.
-  doc.font(BOLD).fontSize(16).fillColor(INK).text(bn ? "রসিদ" : "RECEIPT", left, headerTop, {
-    width,
-    align: "right",
-  });
+  const idX = right - idColW;
+  doc
+    .font(BOLD)
+    .fontSize(19)
+    .fillColor(GREEN_DEEP)
+    .text(bn ? "রসিদ" : "RECEIPT", idX, headerTop + 2, { width: idColW, align: "right" });
+  let metaY = doc.y + 4;
+  doc
+    .font(BOLD)
+    .fontSize(10)
+    .fillColor(INK)
+    .text(order.orderNo, idX, metaY, { width: idColW, align: "right" });
+  metaY = doc.y + 1;
   doc
     .font(REGULAR)
-    .fontSize(9.5)
+    .fontSize(9)
     .fillColor(MUTED)
-    .text(order.orderNo, left, headerTop + 22, { width, align: "right" })
-    .text(formatDate(order.orderedAt, bn), left, headerTop + 35, { width, align: "right" });
+    .text(formatDate(order.orderedAt, bn), idX, metaY, { width: idColW, align: "right" });
 
-  y = Math.max(y, headerTop + 50) + 10;
-  doc.strokeColor(RULE).lineWidth(1).moveTo(left, y).lineTo(right, y).stroke();
-  y += 14;
+  y = Math.max(y, doc.y, logoBottom) + 12;
+
+  /*
+    The brand rule: cap green running most of the way across, finished with
+    the coral of the swoosh. Two rectangles rather than a stroked line, so the
+    weight is exact at any zoom.
+  */
+  const coralW = 58;
+  doc.rect(left, y, width - coralW, 3).fill(GREEN_DEEP);
+  doc.rect(right - coralW, y, coralW, 3).fill(CORAL);
+  y += 18;
 
   /* ----------------------------------------------------------- customer */
-  doc.font(BOLD).fontSize(10).fillColor(INK).text(bn ? "ক্রেতা" : "Customer", left, y);
-  y = doc.y + 2;
-  doc.font(REGULAR).fontSize(11).fillColor(INK).text(order.customerName, left, y, {
-    width: width * 0.6,
-  });
-  y = doc.y;
-  const lines = [order.customerPhone, order.customerAddress].filter(Boolean) as string[];
-  for (const line of lines) {
-    doc.font(REGULAR).fontSize(9.5).fillColor(MUTED).text(line, left, y, { width: width * 0.6 });
-    y = doc.y;
+  /*
+    Measured before it is drawn: the card is exactly as tall as the customer
+    details inside it, so a two-line address does not spill past the rounded
+    corner.
+  */
+  const cardPadX = 14;
+  const cardPadY = 11;
+  const cardTextX = left + cardPadX + 4;
+  const detailW = width * 0.54;
+
+  doc.font(BOLD).fontSize(12);
+  let cardH = cardPadY + 8 + 3 + doc.heightOfString(order.customerName, { width: detailW });
+  const detailLines = [order.customerPhone, order.customerAddress].filter(Boolean) as string[];
+  doc.font(REGULAR).fontSize(9.5);
+  for (const line of detailLines) cardH += doc.heightOfString(line, { width: detailW });
+  cardH = Math.max(cardH + cardPadY, 62);
+
+  doc.roundedRect(left, y, width, cardH, 7).fill(TINT);
+  // A green spine down the left edge, echoing the rule above.
+  doc.rect(left, y + 7, 3, cardH - 14).fill(GREEN_LEAF);
+
+  doc
+    .font(BOLD)
+    .fontSize(7.5)
+    .fillColor(GREEN)
+    .text(bn ? "ক্রেতা" : "BILL TO", cardTextX, y + cardPadY, { width: detailW, characterSpacing: 0.8 });
+  let cardY = doc.y + 3;
+  doc.font(BOLD).fontSize(12).fillColor(INK).text(order.customerName, cardTextX, cardY, { width: detailW });
+  cardY = doc.y;
+  for (const line of detailLines) {
+    doc.font(REGULAR).fontSize(9.5).fillColor(MUTED).text(line, cardTextX, cardY, { width: detailW });
+    cardY = doc.y;
   }
-  y += 12;
+
+  // Status chips, right-aligned inside the card and laid out back to front.
+  const payment = PAYMENT_LABELS[order.paymentStatus] ?? { en: order.paymentStatus, bn: order.paymentStatus };
+  const paymentColor = PAYMENT_COLORS[order.paymentStatus] ?? { bg: "#eceeed", fg: INK };
+  const chips: { text: string; bg: string; fg: string; border?: string }[] = [
+    { text: bn ? payment.bn : payment.en, bg: paymentColor.bg, fg: paymentColor.fg },
+  ];
+  if (order.orderStatus) {
+    const status = ORDER_STATUS_LABELS[order.orderStatus] ?? { en: order.orderStatus, bn: order.orderStatus };
+    // Outlined rather than filled: the delivery state is context, not the
+    // headline, and a second solid chip would fight the payment one.
+    chips.push({ text: bn ? status.bn : status.en, bg: PAPER, fg: MUTED, border: EDGE });
+  }
+  let chipX = right - cardPadX;
+  doc.font(BOLD).fontSize(8.5);
+  for (const chip of chips) {
+    chipX -= doc.widthOfString(chip.text) + 18;
+    pill(chip.text, chipX, y + cardPadY - 1, chip.bg, chip.fg, chip.border);
+    chipX -= 6;
+    doc.font(BOLD).fontSize(8.5);
+  }
+
+  y += cardH + 18;
 
   /* -------------------------------------------------------------- table */
   // Fixed widths from the right; the product column absorbs the remainder,
@@ -183,120 +343,195 @@ export function drawReceipt(
   const xRate = xAmount - wRate;
   const xUnit = xRate - wUnit;
   const xQty = xUnit - wQty;
-  const wName = xQty - left - 8;
+  const wName = xQty - left - 20;
 
   const header = bn
     ? { name: "পণ্য", qty: "পরিমাণ", unit: "একক", rate: "দর", amount: "মোট" }
     : { name: "Product", qty: "Qty", unit: "Unit", rate: "Rate", amount: "Amount" };
 
   const drawTableHeader = (top: number) => {
-    doc.rect(left, top, width, 22).fill(BAND);
-    doc.font(BOLD).fontSize(9).fillColor(INK);
-    doc.text(header.name, left + 6, top + 7, { width: wName });
-    doc.text(header.qty, xQty, top + 7, { width: wQty, align: "right" });
-    doc.text(header.unit, xUnit + 6, top + 7, { width: wUnit - 6 });
-    doc.text(header.rate, xRate, top + 7, { width: wRate, align: "right" });
-    doc.text(header.amount, xAmount, top + 7, { width: wAmount, align: "right" });
-    return top + 22;
+    doc.roundedRect(left, top, width, 24, 5).fill(GREEN_DEEP);
+    // Square off the bottom corners so the band sits flush on the first row.
+    doc.rect(left, top + 14, width, 10).fill(GREEN_DEEP);
+    doc.font(BOLD).fontSize(8.5).fillColor(PAPER);
+    doc.text(header.name, left + 12, top + 8, { width: wName, lineBreak: false });
+    doc.text(header.qty, xQty, top + 8, { width: wQty, align: "right", lineBreak: false });
+    doc.text(header.unit, xUnit + 8, top + 8, { width: wUnit - 8, lineBreak: false });
+    doc.text(header.rate, xRate, top + 8, { width: wRate, align: "right", lineBreak: false });
+    doc.text(header.amount, xAmount, top + 8, { width: wAmount - 6, align: "right", lineBreak: false });
+    return top + 24;
   };
 
   y = drawTableHeader(y);
 
-  const bottomLimit = doc.page.height - doc.page.margins.bottom - 130;
+  /*
+    Rows may run to just above the footer. The totals block is what needs
+    headroom, and it asks for it once, after the last row — reserving that
+    space on every page would strand half a page of white under a long order.
+  */
+  const rowLimit = doc.page.height - doc.page.margins.bottom - 48;
+  const continued = `${order.orderNo} · ${bn ? "চলমান" : "continued"}`;
+
+  /** Slim masthead for a second and subsequent sheet of the same receipt. */
+  const drawContinuation = () => {
+    const top = doc.page.margins.top;
+    doc.font(BOLD).fontSize(10).fillColor(GREEN_DEEP).text(shop.name, left, top, {
+      width: width * 0.5,
+      lineBreak: false,
+    });
+    doc
+      .font(REGULAR)
+      .fontSize(9)
+      .fillColor(MUTED)
+      .text(continued, left + width * 0.5, top + 1, { width: width * 0.5, align: "right", lineBreak: false });
+    const ruleY = top + 16;
+    doc.rect(left, ruleY, width, 1.5).fill(GREEN_LEAF);
+    return ruleY + 14;
+  };
+
   doc.font(REGULAR).fontSize(10);
 
+  let zebra = false;
   for (const item of order.items) {
     // Measure first: the row is as tall as its tallest cell, which is what
     // stops long product names from colliding with the row beneath.
     const nameHeight = doc.heightOfString(item.productName, { width: wName });
-    const rowHeight = Math.max(nameHeight, 12) + 10;
+    const rowHeight = Math.max(nameHeight, 12) + 12;
 
-    if (y + rowHeight > bottomLimit) {
+    if (y + rowHeight > rowLimit) {
+      drawFooter(continued, MUTED);
       doc.addPage();
-      y = doc.page.margins.top;
-      y = drawTableHeader(y);
+      y = drawTableHeader(drawContinuation());
       doc.font(REGULAR).fontSize(10);
+      zebra = false;
     }
 
+    if (zebra) doc.rect(left, y, width, rowHeight).fill(TINT);
+    zebra = !zebra;
+
     const amount = item.quantity * item.unitPrice;
-    doc.fillColor(INK).text(item.productName, left + 6, y + 5, { width: wName });
-    doc.text(formatQty(item.quantity, bn), xQty, y + 5, { width: wQty, align: "right" });
-    doc.text(item.unit, xUnit + 6, y + 5, { width: wUnit - 6 });
-    doc.text(money(item.unitPrice), xRate, y + 5, { width: wRate, align: "right" });
-    doc.text(money(amount), xAmount, y + 5, { width: wAmount, align: "right" });
+    doc.font(REGULAR).fontSize(10).fillColor(INK).text(item.productName, left + 12, y + 6, { width: wName });
+    doc.fillColor(MUTED).text(formatQty(item.quantity, bn), xQty, y + 6, { width: wQty, align: "right" });
+    doc.text(item.unit, xUnit + 8, y + 6, { width: wUnit - 8 });
+    doc.text(money(item.unitPrice), xRate, y + 6, { width: wRate, align: "right" });
+    doc.font(BOLD).fillColor(INK).text(money(amount), xAmount, y + 6, { width: wAmount - 6, align: "right" });
 
     y += rowHeight;
-    doc.strokeColor(RULE).lineWidth(0.5).moveTo(left, y).lineTo(right, y).stroke();
+    doc.strokeColor(EDGE).lineWidth(0.5).moveTo(left, y).lineTo(right, y).stroke();
   }
 
   /* ------------------------------------------------------------- totals */
-  y += 10;
-  const labelX = xRate - 40;
-  const labelW = wRate + 40;
-  // Remembered before the totals column advances `y`, so the payment note on
-  // the left starts level with the totals instead of at a guessed offset.
+  const labelX = xRate - 50;
+  const labelW = wRate + 50;
+  const bandX = labelX - 12;
+
+  /*
+    Measured up front so the block is never split across a page boundary: a
+    grand total on a sheet of its own, or worse, a total separated from the
+    balance still owed, is exactly the kind of receipt that gets disputed.
+  */
+  const summaryRows = 1 + (order.discount > 0 ? 1 : 0) + (order.deliveryCharge > 0 ? 1 : 0);
+  const balanceRows =
+    order.paymentStatus === "partial" && order.paidAmount !== undefined
+      ? 2
+      : order.paymentStatus === "due"
+        ? 1
+        : 0;
+  doc.font(REGULAR).fontSize(9);
+  const noteHeight = order.note ? doc.heightOfString(order.note, { width: bandX - left - 20 }) + 16 : 0;
+  const totalsHeight =
+    14 + Math.max(summaryRows * 16 + 40 + balanceRows * 17, noteHeight) + 46;
+
+  if (y + totalsHeight > rowLimit) {
+    drawFooter(continued, MUTED);
+    doc.addPage();
+    y = drawContinuation();
+  }
+
+  y += 14;
+  // Remembered before the totals column advances `y`, so the notes on the
+  // left start level with the totals instead of at a guessed offset.
   const totalsTop = y;
 
-  const totalRow = (label: string, value: string, bold = false) => {
+  const totalRow = (label: string, value: string, color = MUTED, valueColor = INK, size = 10) => {
     doc
-      .font(bold ? BOLD : REGULAR)
-      .fontSize(bold ? 12 : 10)
-      .fillColor(bold ? INK : MUTED)
+      .font(REGULAR)
+      .fontSize(size)
+      .fillColor(color)
       .text(label, labelX, y, { width: labelW, align: "right" });
     doc
-      .font(bold ? BOLD : REGULAR)
-      .fillColor(INK)
-      .text(value, xAmount, y, { width: wAmount, align: "right" });
-    y += bold ? 20 : 15;
+      .font(BOLD)
+      .fontSize(size)
+      .fillColor(valueColor)
+      .text(value, xAmount, y, { width: wAmount - 6, align: "right" });
+    y += size + 6;
   };
 
   totalRow(bn ? "সাবটোটাল" : "Subtotal", money(order.subtotal));
-  if (order.discount > 0) totalRow(bn ? "ডিসকাউন্ট" : "Discount", `− ${money(order.discount)}`);
+  if (order.discount > 0) {
+    totalRow(bn ? "ডিসকাউন্ট" : "Discount", `− ${money(order.discount)}`, MUTED, CORAL_DEEP);
+  }
   if (order.deliveryCharge > 0) {
     totalRow(bn ? "ডেলিভারি চার্জ" : "Delivery", money(order.deliveryCharge));
   }
 
-  doc.strokeColor(RULE).lineWidth(1).moveTo(labelX, y).lineTo(right, y).stroke();
-  y += 8;
-  totalRow(bn ? "সর্বমোট" : "Total", money(order.total), true);
+  // The grand total gets the brand band; everything above it is arithmetic.
+  y += 2;
+  doc.roundedRect(bandX, y, right - bandX, 30, 6).fill(GREEN_DEEP);
+  doc
+    .font(BOLD)
+    .fontSize(10)
+    .fillColor(PAPER)
+    .text(bn ? "সর্বমোট" : "TOTAL", bandX + 12, y + 10, { width: labelW - 12, align: "left", lineBreak: false });
+  doc
+    .font(BOLD)
+    .fontSize(14)
+    .fillColor(PAPER)
+    .text(money(order.total), xAmount, y + 8, { width: wAmount - 6, align: "right", lineBreak: false });
+  y += 38;
 
   /*
     A partly-paid order is the one case where the total is not the number the
     customer cares about — what they still owe is. Both are printed so the
-    receipt doubles as a record of the balance.
+    receipt doubles as a record of the balance, and the balance is the only
+    figure allowed to wear the coral.
   */
   if (order.paymentStatus === "partial" && order.paidAmount !== undefined) {
-    totalRow(bn ? "পরিশোধিত" : "Paid", money(order.paidAmount));
-    totalRow(bn ? "বাকি" : "Due", money(order.total - order.paidAmount), true);
+    totalRow(bn ? "পরিশোধিত" : "Paid", money(order.paidAmount), MUTED, GREEN_DEEP);
+    totalRow(bn ? "বাকি" : "Due", money(order.total - order.paidAmount), CORAL_DEEP, CORAL_DEEP, 11);
+  } else if (order.paymentStatus === "due") {
+    totalRow(bn ? "বাকি" : "Due", money(order.total), CORAL_DEEP, CORAL_DEEP, 11);
   }
+
+  /* ------------------------------------------------- notes and signature */
+  const noteW = bandX - left - 20;
+  let leftY = totalsTop;
+  if (order.note) {
+    doc
+      .font(BOLD)
+      .fontSize(7.5)
+      .fillColor(GREEN)
+      .text(bn ? "নোট" : "NOTE", left, leftY, { width: noteW, characterSpacing: 0.8 });
+    leftY = doc.y + 2;
+    doc.font(REGULAR).fontSize(9).fillColor(MUTED).text(order.note, left, leftY, { width: noteW });
+    leftY = doc.y;
+  }
+
+  /*
+    Signature line: below both columns, so it can never land on top of a long
+    note or a tall totals block — but on a short receipt it drops to just
+    above the footer, where a signature belongs, instead of floating in the
+    middle of the page.
+  */
+  const footerY = doc.page.height - doc.page.margins.bottom - 30;
+  const signY = Math.max(Math.max(y, leftY) + 26, footerY - 46);
+  doc.strokeColor(EDGE).lineWidth(0.75).moveTo(left, signY).lineTo(left + 150, signY).stroke();
+  doc
+    .font(REGULAR)
+    .fontSize(8)
+    .fillColor(MUTED)
+    .text(bn ? "অনুমোদিত স্বাক্ষর" : "Authorised signature", left, signY + 5, { width: 150 });
 
   /* ------------------------------------------------------------- footer */
-  y += 6;
-  const payment = PAYMENT_LABELS[order.paymentStatus] ?? { en: order.paymentStatus, bn: order.paymentStatus };
-  doc
-    .font(REGULAR)
-    .fontSize(10)
-    .fillColor(INK)
-    .text(`${bn ? "পেমেন্ট" : "Payment"}: ${bn ? payment.bn : payment.en}`, left, totalsTop, {
-      // Stop short of the totals column so the two can never collide,
-      // however many total rows an order happens to have.
-      width: labelX - left - 16,
-    });
-
-  if (order.note) {
-    doc.font(REGULAR).fontSize(9).fillColor(MUTED).text(order.note, left, doc.y + 2, {
-      width: labelX - left - 16,
-    });
-  }
-
-  const footerY = doc.page.height - doc.page.margins.bottom - 28;
-  doc.strokeColor(RULE).lineWidth(0.5).moveTo(left, footerY).lineTo(right, footerY).stroke();
-  doc
-    .font(REGULAR)
-    .fontSize(9)
-    .fillColor(MUTED)
-    .text(bn ? "ধন্যবাদ — আবার আসবেন।" : "Thank you for your business.", left, footerY + 8, {
-      width,
-      align: "center",
-    });
+  drawFooter(bn ? "ধন্যবাদ — আবার আসবেন।" : "Thank you for your business.", GREEN_DEEP);
 }
