@@ -5,6 +5,7 @@ import {
   Receipt,
   ShoppingCart,
   PieChart,
+  Coins,
   Menu,
   X,
   Monitor,
@@ -25,14 +26,16 @@ import { ProductsPage } from "./pages/Products";
 import { SalesPage } from "./pages/Sales";
 import { OrdersPage } from "./pages/Orders";
 import { ProfitPage } from "./pages/Profit";
+import { CostsPage } from "./pages/Costs";
 
-type Route = "dashboard" | "products" | "orders" | "sales" | "profit";
+type Route = "dashboard" | "products" | "orders" | "sales" | "costs" | "profit";
 
 const NAV: { route: Route; key: MessageKey; icon: typeof LayoutDashboard }[] = [
   { route: "dashboard", key: "nav.dashboard", icon: LayoutDashboard },
   { route: "products", key: "nav.products", icon: Package },
   { route: "orders", key: "orders.title", icon: ShoppingCart },
   { route: "sales", key: "nav.sales", icon: Receipt },
+  { route: "costs", key: "nav.costs", icon: Coins },
   { route: "profit", key: "nav.profit", icon: PieChart },
 ];
 
@@ -119,6 +122,7 @@ export default function App() {
             {route === "products" && <ProductsPage />}
             {route === "orders" && <OrdersPage />}
             {route === "sales" && <SalesPage />}
+            {route === "costs" && <CostsPage />}
             {route === "profit" && <ProfitPage />}
           </div>
         </main>

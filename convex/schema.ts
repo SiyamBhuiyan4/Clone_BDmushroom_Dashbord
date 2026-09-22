@@ -139,6 +139,49 @@ export default defineSchema({
     order: v.number(),
   }).index("by_order", ["order"]),
 
+  /*
+    A cost the business carried that is not the price of stock — office
+    snacks, van fuel, the electricity bill. Kept apart from `stockBatches`
+    on purpose: a lot's cost is recovered when its units sell, and an
+    operating cost never is. Mixing the two would make margin meaningless.
+  */
+  costs: defineTable({
+    /*
+      The name is copied onto the row rather than only referenced, for the
+      same reason a sale snapshots its product name: renaming or deleting a
+      saved name later must not rewrite what an old receipt said.
+    */
+    name: v.string(),
+    /** Set when the name was picked from the saved list rather than typed. */
+    costNameId: v.optional(v.id("costNames")),
+    amount: v.number(),
+    spentAt: v.number(),
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_spentAt", ["spentAt"])
+    .index("by_costName", ["costNameId"]),
+
+  /*
+    A cost name the shop expects to use again — "Office snacks", "Van fuel".
+    Saving one is what stops the same expense being typed three ways and
+    landing in a report as three separate things.
+
+    `key` is the lowercased, space-collapsed name, so the check for "have we
+    got this one already" is an index lookup rather than a scan that misses
+    on a stray capital.
+  */
+  costNames: defineTable({
+    name: v.string(),
+    key: v.string(),
+    /** How many costs have used it — the pick list is ordered by this. */
+    usageCount: v.number(),
+    lastUsedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_key", ["key"])
+    .index("by_usage", ["usageCount"]),
+
   products: defineTable({
     name: v.string(),
     // What it costs you to acquire one unit.
