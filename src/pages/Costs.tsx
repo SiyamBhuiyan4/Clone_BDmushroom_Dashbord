@@ -17,7 +17,7 @@ import { Button, Card, CardHeader, EmptyState, Input, Select } from "../componen
 import { StatTile } from "../components/StatTile";
 import { Pagination, SortSelect, usePagination } from "../components/Pagination";
 import { CostDialog } from "../components/CostDialog";
-import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
@@ -464,7 +464,13 @@ export function CostsPage() {
       <CostDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <CostDialog open={editing !== null} onClose={() => setEditing(null)} cost={editing} />
 
-      <ConfirmDialog
+      {/*
+        Both deletions go through the passcode. The thrown error is left to
+        propagate — the dialog keeps itself open on a wrong passcode and shows
+        the message, which is what a mistyped one deserves rather than a
+        closed dialog and a lost intention.
+      */}
+      <PasscodeConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}
         title={t("costs.deleteTitle")}
@@ -473,50 +479,44 @@ export function CostsPage() {
             ? `${deleting.name} — ${fmt(deleting.amount)} comes off your cost totals.`
             : ""
         }
-        onConfirm={async () => {
+        onConfirm={async (passcode) => {
           if (!deleting) return;
           const snapshot = deleting;
-          try {
-            await remove({ id: snapshot._id });
-            // The same protection a deleted sale gets: re-recording restores
-            // the same figures under a new id, which nothing else references.
-            toast.undoable(t("costs.deleted"), {
-              label: t("toast.undo"),
-              run: async () => {
-                try {
-                  await recreate({
-                    name: snapshot.name,
-                    amount: snapshot.amount,
-                    spentAt: snapshot.spentAt,
-                    note: snapshot.note ?? "",
-                    saveName: false,
-                  });
-                  toast.ok(t("costs.restored"));
-                } catch (err) {
-                  toast.error(errorMessage(err));
-                }
-              },
-            });
-          } catch (err) {
-            toast.error(errorMessage(err));
-          }
+          await remove({ id: snapshot._id, passcode });
+          // The same protection a deleted sale gets: re-recording restores the
+          // same figures under a new id, which nothing else references. Undo
+          // asks for nothing further — the passcode was given a moment ago,
+          // and putting a row back is not the dangerous direction.
+          toast.undoable(t("costs.deleted"), {
+            label: t("toast.undo"),
+            run: async () => {
+              try {
+                await recreate({
+                  name: snapshot.name,
+                  amount: snapshot.amount,
+                  spentAt: snapshot.spentAt,
+                  note: snapshot.note ?? "",
+                  saveName: false,
+                });
+                toast.ok(t("costs.restored"));
+              } catch (err) {
+                toast.error(errorMessage(err));
+              }
+            },
+          });
         }}
       />
 
-      <ConfirmDialog
+      <PasscodeConfirmDialog
         open={droppingName !== null}
         onClose={() => setDroppingName(null)}
         title={t("costs.dropNameTitle")}
         confirmLabel={t("costs.dropName")}
         body={droppingName ? t("costs.dropNameBody") : ""}
-        onConfirm={async () => {
+        onConfirm={async (passcode) => {
           if (!droppingName) return;
-          try {
-            await removeName({ id: droppingName.id });
-            toast.ok(t("costs.nameDropped"));
-          } catch (err) {
-            toast.error(errorMessage(err));
-          }
+          await removeName({ id: droppingName.id, passcode });
+          toast.ok(t("costs.nameDropped"));
         }}
       />
     </div>

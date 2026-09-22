@@ -1,7 +1,7 @@
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { requireSession } from "./auth";
+import { requireSession, verifyPasscode } from "./auth";
 
 /*
   Operating costs — money the business spends that is not the price of stock.
@@ -127,11 +127,16 @@ async function resolveName(ctx: MutationCtx, typed: string, save: boolean) {
  * Removes a saved name. The costs recorded against it keep their own copy of
  * the text, so history reads exactly as it did before — only the pick list
  * changes.
+ *
+ * Gated on the passcode like every other delete here: a live session means a
+ * browser is unlocked, which is not the same as the owner deciding something
+ * should go.
  */
 export const removeName = mutation({
-  args: { token: v.string(), id: v.id("costNames") },
+  args: { token: v.string(), id: v.id("costNames"), passcode: v.string() },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
     const row = await ctx.db.get(args.id);
     if (!row) return;
     for (const cost of await ctx.db
@@ -248,10 +253,16 @@ export const update = mutation({
   },
 });
 
+/**
+ * Deletes a cost. Needs the passcode, not just a session — the check lives in
+ * the mutation rather than only in the dialog, so a caller that never opened
+ * the dialog is refused just the same.
+ */
 export const remove = mutation({
-  args: { token: v.string(), id: v.id("costs") },
+  args: { token: v.string(), id: v.id("costs"), passcode: v.string() },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
     const cost = await ctx.db.get(args.id);
     if (!cost) return;
     /*

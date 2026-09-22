@@ -3,6 +3,7 @@ import {
   useId,
   useRef,
   type ButtonHTMLAttributes,
+  type ComponentProps,
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
@@ -134,7 +135,12 @@ const CONTROL =
   "placeholder:text-ink-3 transition-all focus:border-accent focus:outline-none " +
   "focus:ring-4 focus:ring-[var(--ring)] disabled:opacity-50";
 
-export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+/*
+  Typed as the element's own props rather than only its attributes, so `ref`
+  comes through — React 19 passes it like any other prop. A caller that has to
+  move focus back into a field (a passcode retry, say) needs the handle.
+*/
+export function Input({ className, ...rest }: ComponentProps<"input">) {
   return <input {...rest} className={cx(CONTROL, "h-11", className)} />;
 }
 
@@ -320,7 +326,19 @@ export function Modal({
 
     // Return focus to whatever opened the dialog once it closes.
     const opener = document.activeElement as HTMLElement | null;
-    panelRef.current?.querySelector<HTMLElement>("input, textarea, select, button")?.focus();
+    /*
+      A field first, and only then a button. `querySelector` with a comma list
+      returns whatever comes first in the document, and the header's close
+      button precedes every field — so this used to open each dialog with the
+      X focused, quietly overriding React's own autoFocus. Typing went
+      nowhere and Enter dismissed the dialog instead of submitting it.
+    */
+    const panel = panelRef.current;
+    const target =
+      panel?.querySelector<HTMLElement>("[autofocus]") ??
+      panel?.querySelector<HTMLElement>("input:not([type='hidden']), textarea, select") ??
+      panel?.querySelector<HTMLElement>("button");
+    target?.focus();
 
     return () => {
       document.removeEventListener("keydown", onKey);
