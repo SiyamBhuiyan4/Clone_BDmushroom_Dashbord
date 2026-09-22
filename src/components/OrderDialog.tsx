@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { AlertTriangle, KeyRound, Receipt, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, BookmarkPlus, Check, KeyRound, Receipt, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import {
@@ -15,6 +15,8 @@ import {
   cx,
 } from "./ui";
 import { ProductPicker } from "./ProductPicker";
+import { CustomerPicker, type SavedCustomer } from "./CustomerPicker";
+import { customerKey } from "../../convex/shared";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { CURRENCY_SYMBOL } from "../lib/format";
@@ -39,6 +41,7 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
   const t = useT();
   const toast = useToast();
   const products = useAuthedQuery(api.products.list, {});
+  const customers = useAuthedQuery(api.customers.list) ?? [];
   const create = useAuthedMutation(api.orders.create);
 
   const [name, setName] = useState("");
@@ -50,6 +53,7 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
   const [payment, setPayment] = useState("due");
   const [note, setNote] = useState("");
   const [override, setOverride] = useState("");
+  const [saveCustomer, setSaveCustomer] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -63,7 +67,26 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
     setPayment("due");
     setNote("");
     setOverride("");
+    setSaveCustomer(false);
   }, [open]);
+
+  /*
+    Whether these details are already in the address book — decided by the
+    same function the server uses, not a second copy of the rule. A tick
+    offered for someone already saved, or withheld from someone who is not,
+    is visible to the shopkeeper immediately.
+  */
+  const known = useMemo(() => {
+    if (!name.trim()) return false;
+    const key = customerKey(name, phone);
+    return customers.some((c) => customerKey(c.name, c.phone) === key);
+  }, [customers, name, phone]);
+
+  function fillFrom(c: SavedCustomer) {
+    setName(c.name);
+    setPhone(c.phone ?? "");
+    setAddress(c.address ?? "");
+  }
 
   function addProduct(p: Doc<"products">) {
     setLines((prev) => {
@@ -145,6 +168,7 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
         paymentStatus: payment,
         note,
         overridePasscode: shortLines.length > 0 ? override : undefined,
+        saveCustomer,
         source: "manual",
       });
       toast.ok(t("orders.created"));
@@ -172,14 +196,12 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
             <SectionLabel>{t("orders.customer")}</SectionLabel>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label={t("orders.customerName")}>
-                {(id) => (
-                  <Input
-                    id={id}
+                {() => (
+                  <CustomerPicker
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="মোঃ রিফাত হোসেন"
-                    autoComplete="off"
-                    required
+                    onChange={setName}
+                    onPick={fillFrom}
+                    customers={customers}
                   />
                 )}
               </Field>
@@ -207,6 +229,37 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
                 />
               )}
             </Field>
+
+            {/*
+              Offered only for someone not already saved. A tick that does
+              nothing is one people stop reading, including on the orders
+              where it would have mattered.
+            */}
+            {name.trim() !== "" && !known && (
+              <label className="ac-fade-in flex cursor-pointer items-start gap-3 rounded-xl border border-line-strong bg-page px-3.5 py-3">
+                <input
+                  type="checkbox"
+                  checked={saveCustomer}
+                  onChange={(e) => setSaveCustomer(e.target.checked)}
+                  className="mt-0.5 size-4 accent-[var(--accent)]"
+                />
+                <span className="min-w-0">
+                  <span className="flex items-center gap-1.5 text-[13.5px] font-semibold text-ink">
+                    <BookmarkPlus size={15} className="text-accent" aria-hidden />
+                    {t("orders.saveCustomer")}
+                  </span>
+                  <span className="mt-0.5 block text-[12px] leading-4.5 text-ink-3">
+                    {t("orders.saveCustomerHint")}
+                  </span>
+                </span>
+              </label>
+            )}
+            {name.trim() !== "" && known && (
+              <p className="ac-fade-in flex items-center gap-1.5 text-[12px] font-semibold text-good-ink">
+                <Check size={14} aria-hidden />
+                {t("orders.customerSaved")}
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col gap-3 border-t border-line pt-5">

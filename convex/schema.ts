@@ -182,6 +182,29 @@ export default defineSchema({
     .index("by_key", ["key"])
     .index("by_usage", ["usageCount"]),
 
+  /*
+    A customer the shop expects to see again. Saved from an order with the
+    tick on, searched and picked the next time rather than retyped.
+
+    Identity is the phone number when there is one — two people called Rifat
+    are two customers, one phone number is one person — and the name only
+    when there is not. A customer first saved without a phone and later with
+    one therefore becomes two records; that is honest rather than clever,
+    since merging them would mean guessing which Rifat placed which order.
+  */
+  customers: defineTable({
+    name: v.string(),
+    phone: v.optional(v.string()),
+    address: v.optional(v.string()),
+    /** Digits of the phone, else the lowercased name. */
+    key: v.string(),
+    orderCount: v.number(),
+    lastOrderedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_key", ["key"])
+    .index("by_orders", ["orderCount"]),
+
   products: defineTable({
     name: v.string(),
     // What it costs you to acquire one unit.

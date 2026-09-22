@@ -2,6 +2,7 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { requireSession, verifyPasscode } from "./auth";
+import { rememberCustomer } from "./customers";
 
 /*
   Orders.
@@ -138,6 +139,8 @@ export const create = mutation({
       are on the way.
     */
     overridePasscode: v.optional(v.string()),
+    /** The tick: keep this customer in the address book for next time. */
+    saveCustomer: v.optional(v.boolean()),
     source: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -160,13 +163,30 @@ export const create = mutation({
 
     const { subtotal, total } = computeTotals(resolved, discount, deliveryCharge);
     const paymentStatus = (args.paymentStatus ?? "due") as "paid" | "due" | "partial";
+    const orderedAt = args.orderedAt ?? Date.now();
+
+    /*
+      Remembering the customer rides along with the order rather than being a
+      second call from the client: an order that was placed but whose customer
+      was not remembered — or the reverse — is a state worth making impossible.
+    */
+    await rememberCustomer(
+      ctx,
+      {
+        name: args.customerName,
+        phone: args.customerPhone,
+        address: args.customerAddress,
+      },
+      args.saveCustomer ?? false,
+      orderedAt,
+    );
 
     return await ctx.db.insert("orders", {
       orderNo: await nextOrderNo(ctx),
       customerName: args.customerName.trim(),
       customerPhone: args.customerPhone?.trim() || undefined,
       customerAddress: args.customerAddress?.trim() || undefined,
-      orderedAt: args.orderedAt ?? Date.now(),
+      orderedAt,
       items: resolved,
       subtotal,
       discount,
