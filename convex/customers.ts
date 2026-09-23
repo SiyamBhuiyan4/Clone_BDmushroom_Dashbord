@@ -90,6 +90,51 @@ export const list = query({
 });
 
 /**
+ * Adds a customer by hand, without waiting for them to buy something.
+ *
+ * The address book is worth filling in before the first sale — a shop knows
+ * its regulars before it has recorded an order for each of them, and typing
+ * the details once here is the whole point of the list.
+ */
+export const create = mutation({
+  args: {
+    token: v.string(),
+    name: v.string(),
+    phone: v.optional(v.string()),
+    address: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const name = args.name.trim();
+    if (!name) throw new ConvexError("A customer needs a name.");
+
+    const phone = args.phone?.trim() || undefined;
+    const key = customerKey(name, phone);
+    const clash = await ctx.db
+      .query("customers")
+      .withIndex("by_key", (q) => q.eq("key", key))
+      .unique();
+    if (clash) {
+      throw new ConvexError(
+        phone
+          ? `${clash.name} is already saved with that number.`
+          : `${clash.name} is already saved.`,
+      );
+    }
+
+    return await ctx.db.insert("customers", {
+      name,
+      phone,
+      address: args.address?.trim() || undefined,
+      key,
+      // Added by hand, so nothing has been bought under this name yet.
+      orderCount: 0,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+/**
  * Corrects a saved customer's details. Orders already placed keep the name
  * and address they were placed under — a receipt has to keep saying what it
  * said when it was printed.

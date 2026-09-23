@@ -11,18 +11,16 @@ import {
   TrendingUp,
   CircleDollarSign,
   Trash2,
-  UserRound,
   XCircle,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Badge, Button, Card, CardHeader, EmptyState, Input, Select, cx } from "../components/ui";
+import type { Doc } from "../../convex/_generated/dataModel";
+import { Badge, Button, Card, EmptyState, Input, Select, cx } from "../components/ui";
 import { Pagination, usePagination } from "../components/Pagination";
 import { StatTile } from "../components/StatTile";
 import { SaleDialog } from "../components/SaleDialog";
 import { PaymentDialog } from "../components/PaymentDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
@@ -98,18 +96,12 @@ export function SalesPage() {
   const confirmOrder = useAuthedMutation(api.orders.confirm);
   const cancelOrder = useAuthedMutation(api.orders.cancel);
   const removeOrder = useAuthedMutation(api.orders.remove);
-  const savedCustomers = useAuthedQuery(api.customers.list) ?? [];
-  const dropCustomer = useAuthedMutation(api.customers.remove);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [rangeDays, setRangeDays] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<Doc<"orders"> | null>(null);
-  const [droppingCustomer, setDroppingCustomer] = useState<{
-    id: Id<"customers">;
-    name: string;
-  } | null>(null);
   const [paying, setPaying] = useState<Doc<"orders"> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -497,61 +489,6 @@ export function SalesPage() {
         </>
       )}
 
-      {/*
-        The address book, kept at the foot of the page rather than inside the
-        order dialog: it is read while typing an order and tidied at leisure,
-        and those are different moments.
-      */}
-      <Card>
-        <CardHeader
-          title={t("orders.savedCustomers")}
-          subtitle={t("orders.savedCustomersSub")}
-        />
-        <div className="px-5 pb-5 sm:px-6 sm:pb-6">
-          {savedCustomers.length === 0 ? (
-            <p className="flex items-center gap-2 text-[13px] text-ink-3">
-              <UserRound size={15} aria-hidden />
-              {t("orders.noSavedCustomers")}
-            </p>
-          ) : (
-            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {savedCustomers.map((c) => (
-                <li
-                  key={c._id}
-                  className="flex items-center gap-3 rounded-xl border border-line-strong bg-page py-2 pr-2 pl-3"
-                >
-                  <span
-                    className="flex size-8 shrink-0 items-center justify-center rounded-lg text-[12px] font-bold text-white"
-                    style={{ background: gradientFor(c.name) }}
-                    aria-hidden
-                  >
-                    {initialOf(c.name)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-semibold text-ink">{c.name}</p>
-                    <p className="truncate text-[11.5px] text-ink-3">
-                      {[c.phone, c.address].filter(Boolean).join(" · ") || t("orders.noDetails")}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-[11.5px] font-bold tabular-nums text-ink-3">
-                    {fmtNum(c.orderCount)}
-                  </span>
-                  <button
-                    onClick={() =>
-                      setDroppingCustomer({ id: c._id as Id<"customers">, name: c.name })
-                    }
-                    aria-label={`${t("common.delete")} ${c.name}`}
-                    className="shrink-0 rounded-lg p-1.5 text-ink-3 transition-colors hover:bg-surface-2 hover:text-critical"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </Card>
-
       <SaleDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <PaymentDialog open={paying !== null} onClose={() => setPaying(null)} order={paying} />
       <ConfirmDialog
@@ -567,18 +504,6 @@ export function SalesPage() {
           } catch (err) {
             toast.error(errorMessage(err));
           }
-        }}
-      />
-      <PasscodeConfirmDialog
-        open={droppingCustomer !== null}
-        onClose={() => setDroppingCustomer(null)}
-        title={t("orders.dropCustomerTitle")}
-        confirmLabel={t("orders.dropCustomer")}
-        body={droppingCustomer ? t("orders.dropCustomerBody") : ""}
-        onConfirm={async (passcode) => {
-          if (!droppingCustomer) return;
-          await dropCustomer({ id: droppingCustomer.id, passcode });
-          toast.ok(t("orders.customerDropped"));
         }}
       />
     </div>
