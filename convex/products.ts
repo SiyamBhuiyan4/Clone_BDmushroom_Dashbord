@@ -48,10 +48,13 @@ export const categories = query({
   },
 });
 
-function validate(name: string, costPrice: number, quantity: number) {
+function validate(name: string, costPrice: number, quantity: number, sellPrice?: number) {
   if (!name.trim()) throw new ConvexError("Product name is required.");
   if (!Number.isFinite(costPrice) || costPrice < 0) {
     throw new ConvexError("Cost price must be zero or more.");
+  }
+  if (sellPrice !== undefined && (!Number.isFinite(sellPrice) || sellPrice < 0)) {
+    throw new ConvexError("Sell price must be zero or more.");
   }
   if (!Number.isInteger(quantity) || quantity < 0) {
     throw new ConvexError("Quantity must be a whole number, zero or more.");
@@ -63,17 +66,24 @@ export const create = mutation({
     token: v.string(),
     name: v.string(),
     costPrice: v.number(),
+    /*
+      The price an order fills in for this product. Optional because it was
+      added after the first products were, and because a product you only ever
+      quote by hand does not need one.
+    */
+    sellPrice: v.optional(v.number()),
     details: v.string(),
     category: v.optional(v.string()),
     quantity: v.number(),
   },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
-    validate(args.name, args.costPrice, args.quantity);
+    validate(args.name, args.costPrice, args.quantity, args.sellPrice);
     const category = (args.category ?? "").trim();
     return await ctx.db.insert("products", {
       name: args.name.trim(),
       costPrice: args.costPrice,
+      sellPrice: args.sellPrice,
       details: args.details.trim(),
       category: category ? category : undefined,
       quantity: args.quantity,
@@ -89,6 +99,7 @@ export const update = mutation({
     id: v.id("products"),
     name: v.string(),
     costPrice: v.number(),
+    sellPrice: v.optional(v.number()),
     details: v.string(),
     category: v.optional(v.string()),
     quantity: v.number(),
@@ -97,11 +108,13 @@ export const update = mutation({
     await requireSession(ctx, args.token);
     const existing = await ctx.db.get(args.id);
     if (!existing) throw new ConvexError("That product no longer exists.");
-    validate(args.name, args.costPrice, args.quantity);
+    validate(args.name, args.costPrice, args.quantity, args.sellPrice);
     const category = (args.category ?? "").trim();
     await ctx.db.patch(args.id, {
       name: args.name.trim(),
       costPrice: args.costPrice,
+      // Undefined clears it, which is what emptying the field means.
+      sellPrice: args.sellPrice,
       details: args.details.trim(),
       category: category ? category : undefined,
       quantity: args.quantity,
