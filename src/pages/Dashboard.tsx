@@ -17,7 +17,7 @@ import { AnimatedNumber } from "../components/AnimatedNumber";
 import { TrendChart, type TrendPoint } from "../components/charts/TrendChart";
 import { TopProductsChart, type TopProduct } from "../components/charts/TopProductsChart";
 import { ProductDialog } from "../components/ProductDialog";
-import { SellDialog } from "../components/SellDialog";
+import { SaleDialog } from "../components/SaleDialog";
 import { ProductDetailDialog } from "../components/ProductDetailDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -399,7 +399,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
         productId={viewing}
       />
       <ProductDialog open={productOpen} onClose={() => setProductOpen(false)} />
-      <SellDialog open={sellOpen} onClose={() => setSellOpen(false)} />
+      <SaleDialog open={sellOpen} onClose={() => setSellOpen(false)} />
     </div>
   );
 }

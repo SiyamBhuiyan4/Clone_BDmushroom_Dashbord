@@ -36,7 +36,24 @@ type Line = {
 
 let lineSeq = 0;
 
-export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/**
+ * Records a sale: the customer, what they took, what they paid.
+ *
+ * One dialog for both shapes the shop actually has — a counter sale that is
+ * over the moment it is written, and an order to be delivered later. They
+ * differ by one field, not by being separate features, which is why there is
+ * no separate "quick sell" any more.
+ */
+export function SaleDialog({
+  open,
+  onClose,
+  presetProduct,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Pre-loads one line — the Sell button on a product opens straight into this. */
+  presetProduct?: Doc<"products"> | null;
+}) {
   const { fmt, fmtNum } = useSettings();
   const t = useT();
   const toast = useToast();
@@ -54,6 +71,12 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
   const [note, setNote] = useState("");
   const [override, setOverride] = useState("");
   const [saveCustomer, setSaveCustomer] = useState(false);
+  /*
+    Completed by default: most sales are rung up after the goods have gone,
+    and a default that leaves stock untouched is wrong far more often than it
+    is right. An order still to be delivered is the deliberate choice.
+  */
+  const [completed, setCompleted] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -68,7 +91,9 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
     setNote("");
     setOverride("");
     setSaveCustomer(false);
-  }, [open]);
+    setCompleted(true);
+    setLines(presetProduct ? [lineFor(presetProduct)] : []);
+  }, [open, presetProduct]);
 
   /*
     Whether these details are already in the address book — decided by the
@@ -88,6 +113,25 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
     setAddress(c.address ?? "");
   }
 
+  /** One order line from a product, with its price and cost snapshotted. */
+  function lineFor(p: Doc<"products">): Line {
+    return {
+      key: `l${lineSeq++}`,
+      productId: p._id,
+      productName: p.name,
+      unit: p.unit ?? "পিস",
+      stock: p.quantity,
+      quantity: "1",
+      /*
+        Only a real selling price is prefilled. Falling back to cost was
+        silently guaranteeing zero profit on every line; an empty box that
+        asks for a number is far better than a wrong one that looks filled.
+      */
+      unitPrice: p.sellPrice !== undefined ? String(p.sellPrice) : "",
+      unitCost: p.costPrice,
+    };
+  }
+
   function addProduct(p: Doc<"products">) {
     setLines((prev) => {
       // Picking the same product twice bumps its quantity rather than
@@ -100,24 +144,7 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
             : l,
         );
       }
-      return [
-        ...prev,
-        {
-          key: `l${lineSeq++}`,
-          productId: p._id,
-          productName: p.name,
-          unit: p.unit ?? "পিস",
-          stock: p.quantity,
-          quantity: "1",
-          /*
-            Only a real selling price is prefilled. Falling back to cost was
-            silently guaranteeing zero profit on every line; an empty box that
-            asks for a number is far better than a wrong one that looks filled.
-          */
-          unitPrice: p.sellPrice !== undefined ? String(p.sellPrice) : "",
-          unitCost: p.costPrice,
-        },
-      ];
+      return [...prev, lineFor(p)];
     });
   }
 
@@ -169,9 +196,10 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
         note,
         overridePasscode: shortLines.length > 0 ? override : undefined,
         saveCustomer,
+        completed,
         source: "manual",
       });
-      toast.ok(t("orders.created"));
+      toast.ok(completed ? t("sales.recorded") : t("sales.orderPlaced"));
       onClose();
     } catch (err) {
       toast.error(errorMessage(err));
@@ -186,8 +214,8 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
       open={open}
       onClose={onClose}
       icon={<Receipt size={19} />}
-      title={t("orders.newOrder")}
-      subtitle={t("orders.newOrderHint")}
+      title={t("sales.newSale")}
+      subtitle={t("sales.newSaleHint")}
       width="sm:max-w-3xl"
     >
       <form onSubmit={submit}>
@@ -418,6 +446,24 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
               </Field>
             </div>
 
+            {/*
+              The one field that separates a counter sale from an order still
+              to go out. It decides whether stock moves now, so it says so in
+              as many words rather than leaving it to be discovered.
+            */}
+            <Field label={t("sales.fulfilment")} hint={completed ? t("sales.completedHint") : t("sales.pendingHint")}>
+              {(id) => (
+                <Select
+                  id={id}
+                  value={completed ? "completed" : "pending"}
+                  onChange={(e) => setCompleted(e.target.value === "completed")}
+                >
+                  <option value="completed">{t("sales.completed")}</option>
+                  <option value="pending">{t("sales.pendingOrder")}</option>
+                </Select>
+              )}
+            </Field>
+
             <div className="rounded-2xl border border-line bg-page p-5">
               <Row label={t("orders.subtotal")} value={fmt(subtotal)} />
               {discountValue > 0 && (
@@ -505,7 +551,7 @@ export function OrderDialog({ open, onClose }: { open: boolean; onClose: () => v
             {t("common.cancel")}
           </Button>
           <Button type="submit" variant="primary" disabled={!valid}>
-            {saving ? t("common.saving") : t("orders.saveOrder")}
+            {saving ? t("common.saving") : completed ? t("sales.recordSale") : t("sales.placeOrder")}
           </Button>
         </ModalFooter>
       </form>

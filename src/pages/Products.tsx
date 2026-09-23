@@ -17,7 +17,7 @@ import { Pagination, SortSelect, usePagination } from "../components/Pagination"
 import { useT } from "../lib/i18n";
 import { ProductDialog } from "../components/ProductDialog";
 import { ProductDetailDialog } from "../components/ProductDetailDialog";
-import { SellDialog } from "../components/SellDialog";
+import { SaleDialog } from "../components/SaleDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { gradientFor, initialOf } from "../lib/avatar";
@@ -218,10 +218,10 @@ export function ProductsPage() {
       />
       <ProductDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <ProductDialog open={editing !== null} onClose={() => setEditing(null)} product={editing} />
-      <SellDialog
+      <SaleDialog
         open={selling !== null}
         onClose={() => setSelling(null)}
-        presetProductId={selling?._id}
+        presetProduct={selling}
       />
       <ConfirmDialog
         open={deleting !== null}

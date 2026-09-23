@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Package,
-  Receipt,
   ShoppingCart,
   PieChart,
   Coins,
@@ -24,17 +23,15 @@ import { cx } from "./components/ui";
 import { DashboardPage } from "./pages/Dashboard";
 import { ProductsPage } from "./pages/Products";
 import { SalesPage } from "./pages/Sales";
-import { OrdersPage } from "./pages/Orders";
 import { ProfitPage } from "./pages/Profit";
 import { CostsPage } from "./pages/Costs";
 
-type Route = "dashboard" | "products" | "orders" | "sales" | "costs" | "profit";
+type Route = "dashboard" | "products" | "sales" | "costs" | "profit";
 
 const NAV: { route: Route; key: MessageKey; icon: typeof LayoutDashboard }[] = [
   { route: "dashboard", key: "nav.dashboard", icon: LayoutDashboard },
   { route: "products", key: "nav.products", icon: Package },
-  { route: "orders", key: "orders.title", icon: ShoppingCart },
-  { route: "sales", key: "nav.sales", icon: Receipt },
+  { route: "sales", key: "nav.sales", icon: ShoppingCart },
   { route: "costs", key: "nav.costs", icon: Coins },
   { route: "profit", key: "nav.profit", icon: PieChart },
 ];
@@ -47,6 +44,9 @@ const THEMES: { value: ThemeChoice; icon: typeof Sun; label: string }[] = [
 
 function routeFromHash(): Route {
   const raw = window.location.hash.replace(/^#\/?/, "");
+  // Orders and sales are one section now; links and bookmarks to the old
+  // route still land somewhere sensible rather than on the dashboard.
+  if (raw === "orders") return "sales";
   return NAV.some((n) => n.route === raw) ? (raw as Route) : "dashboard";
 }
 
@@ -120,7 +120,6 @@ export default function App() {
           <div key={route} className="ac-rise mx-auto w-full max-w-[76rem]">
             {route === "dashboard" && <DashboardPage onNavigate={go} />}
             {route === "products" && <ProductsPage />}
-            {route === "orders" && <OrdersPage />}
             {route === "sales" && <SalesPage />}
             {route === "costs" && <CostsPage />}
             {route === "profit" && <ProfitPage />}

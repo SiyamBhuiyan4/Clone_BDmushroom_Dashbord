@@ -141,6 +141,12 @@ export const create = mutation({
     overridePasscode: v.optional(v.string()),
     /** The tick: keep this customer in the address book for next time. */
     saveCustomer: v.optional(v.boolean()),
+    /*
+      Whether the goods have already gone. A counter sale is complete the
+      moment it is written, and making the shopkeeper confirm it afterwards
+      would leave stock wrong for as long as they forgot to.
+    */
+    completed: v.optional(v.boolean()),
     source: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -181,7 +187,7 @@ export const create = mutation({
       orderedAt,
     );
 
-    return await ctx.db.insert("orders", {
+    const id = await ctx.db.insert("orders", {
       orderNo: await nextOrderNo(ctx),
       customerName: args.customerName.trim(),
       customerPhone: args.customerPhone?.trim() || undefined,
@@ -199,8 +205,52 @@ export const create = mutation({
       source: args.source,
       createdAt: Date.now(),
     });
+
+    // Stock was already checked above, override included, so fulfilment here
+    // cannot fail on a shortage the caller was not told about.
+    if (args.completed) await fulfil(ctx, id);
+    return id;
   },
 });
+
+/**
+ * Takes the stock and writes one sale per line, then marks the sale confirmed.
+ *
+ * Shared by confirming later and by recording a sale that is already complete
+ * — a walk-in customer paying at the counter should not have to be confirmed
+ * as a second step. Stock availability is the caller's business: both callers
+ * check it, and only they know whether an override was given.
+ */
+async function fulfil(ctx: MutationCtx, id: Id<"orders">) {
+  const order = await ctx.db.get(id);
+  if (!order) throw new ConvexError("That sale no longer exists.");
+
+  const discountRatio = order.subtotal > 0 ? order.discount / order.subtotal : 0;
+  const saleIds: Id<"sales">[] = [];
+
+  for (const line of order.items) {
+    const product = await ctx.db.get(line.productId);
+    if (product) {
+      await ctx.db.patch(line.productId, { quantity: product.quantity - line.quantity });
+    }
+    const effectivePrice = line.unitPrice * (1 - discountRatio);
+    saleIds.push(
+      await ctx.db.insert("sales", {
+        productId: line.productId,
+        productName: line.productName,
+        unitCost: line.unitCost,
+        unitPrice: effectivePrice,
+        quantity: line.quantity,
+        buyer: order.customerName,
+        note: `${order.orderNo}${order.note ? ` · ${order.note}` : ""}`,
+        soldAt: order.orderedAt,
+      }),
+    );
+  }
+
+  await ctx.db.patch(id, { orderStatus: "confirmed", saleIds });
+  return saleIds;
+}
 
 /**
  * Confirms an order: takes the stock and writes one sale per line.
@@ -237,30 +287,7 @@ export const confirm = mutation({
       await verifyPasscode(ctx, args.overridePasscode);
     }
 
-    const discountRatio = order.subtotal > 0 ? order.discount / order.subtotal : 0;
-    const saleIds: Id<"sales">[] = [];
-
-    for (const line of order.items) {
-      const product = await ctx.db.get(line.productId);
-      if (product) {
-        await ctx.db.patch(line.productId, { quantity: product.quantity - line.quantity });
-      }
-      const effectivePrice = line.unitPrice * (1 - discountRatio);
-      saleIds.push(
-        await ctx.db.insert("sales", {
-          productId: line.productId,
-          productName: line.productName,
-          unitCost: line.unitCost,
-          unitPrice: effectivePrice,
-          quantity: line.quantity,
-          buyer: order.customerName,
-          note: `${order.orderNo}${order.note ? ` · ${order.note}` : ""}`,
-          soldAt: order.orderedAt,
-        }),
-      );
-    }
-
-    await ctx.db.patch(args.id, { orderStatus: "confirmed", saleIds });
+    const saleIds = await fulfil(ctx, args.id);
     return { saleIds: saleIds.length };
   },
 });

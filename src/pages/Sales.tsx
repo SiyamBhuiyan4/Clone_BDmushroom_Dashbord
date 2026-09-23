@@ -1,59 +1,164 @@
 import { useMemo, useState } from "react";
 import {
-  AlertTriangle,
-  CircleDollarSign,
+  CheckCircle2,
   Download,
-  Pencil,
+  Eye,
+  FileText,
   Plus,
   Receipt,
-  Search,
-  Trash2,
-  TrendingUp,
   Wallet,
+  Search,
+  TrendingUp,
+  CircleDollarSign,
+  Trash2,
+  UserRound,
+  XCircle,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Doc } from "../../convex/_generated/dataModel";
-import { Button, Card, EmptyState, Input, Select, cx } from "../components/ui";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
+import { Badge, Button, Card, CardHeader, EmptyState, Input, Select, cx } from "../components/ui";
+import { Pagination, usePagination } from "../components/Pagination";
 import { StatTile } from "../components/StatTile";
-import { Pagination, SortSelect, usePagination } from "../components/Pagination";
-import { SellDialog } from "../components/SellDialog";
-import { EraseDialog, type EraseScope } from "../components/EraseDialog";
+import { SaleDialog } from "../components/SaleDialog";
+import { PaymentDialog } from "../components/PaymentDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
-import { CURRENCY_CODE, plural, startOfLocalDay } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
-import { usePersistedState } from "../lib/persist";
+import { CURRENCY_CODE, plural, startOfLocalDay } from "../lib/format";
+import { downloadReceipt, downloadReceipts, previewReceipt } from "../lib/pdf";
+import type { ReceiptOrder } from "../lib/receipt";
+
+/** The order shape the receipt module wants, from a stored order. */
+function toReceipt(order: Doc<"orders">): ReceiptOrder {
+  return {
+    orderNo: order.orderNo,
+    orderedAt: order.orderedAt,
+    customerName: order.customerName,
+    customerPhone: order.customerPhone,
+    customerAddress: order.customerAddress,
+    items: order.items.map((i) => ({
+      productName: i.productName,
+      quantity: i.quantity,
+      unit: i.unit,
+      unitPrice: i.unitPrice,
+    })),
+    subtotal: order.subtotal,
+    discount: order.discount,
+    deliveryCharge: order.deliveryCharge,
+    total: order.total,
+    paymentStatus: order.paymentStatus,
+    paidAmount: order.paidAmount,
+    orderStatus: order.orderStatus,
+    note: order.note,
+  };
+}
+
+const STATUS_TONE: Record<string, "neutral" | "good" | "warning" | "critical" | "accent"> = {
+  pending: "warning",
+  confirmed: "accent",
+  delivered: "good",
+  cancelled: "critical",
+};
+const PAYMENT_TONE: Record<string, "neutral" | "good" | "warning" | "critical"> = {
+  paid: "good",
+  partial: "warning",
+  due: "critical",
+};
 
 const DAY = 24 * 60 * 60 * 1000;
-type SortKey = "newest" | "oldest" | "profit" | "revenue";
+
+/*
+  What a sale was actually worth.
+
+  Delivery is excluded because it is a pass-through rather than product
+  revenue — folding it in inflates the margin. The discount comes off the
+  revenue, which is how confirming a sale books it: spread across the lines in
+  proportion to their value. So this agrees with the Profit page by
+  construction rather than by coincidence.
+*/
+function moneyOf(order: Doc<"orders">) {
+  const cost = order.items.reduce((sum, i) => sum + i.unitCost * i.quantity, 0);
+  const revenue = order.subtotal - order.discount;
+  return { revenue, cost, profit: revenue - cost };
+}
+
+/** Only a sale that has actually happened counts toward the totals. */
+const isBooked = (o: Doc<"orders">) =>
+  o.orderStatus === "confirmed" || o.orderStatus === "delivered";
 
 export function SalesPage() {
-  const { fmt, fmtNum, fmtPercent, fmtDateTime } = useSettings();
+  const { fmt, fmtNum, fmtPercent, fmtDateFull, lang } = useSettings();
   const t = useT();
   const toast = useToast();
-  const sales = useAuthedQuery(api.sales.list, {});
-  const products = useAuthedQuery(api.products.list, { includeArchived: true });
-  const remove = useAuthedMutation(api.sales.remove);
-  const recreate = useAuthedMutation(api.sales.create);
-  const categories = useAuthedQuery(api.products.categories) ?? [];
+  const orders = useAuthedQuery(api.orders.list, {});
+  const confirmOrder = useAuthedMutation(api.orders.confirm);
+  const cancelOrder = useAuthedMutation(api.orders.cancel);
+  const removeOrder = useAuthedMutation(api.orders.remove);
+  const savedCustomers = useAuthedQuery(api.customers.list) ?? [];
+  const dropCustomer = useAuthedMutation(api.customers.remove);
 
   const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
   const [rangeDays, setRangeDays] = useState(0);
-  const [sort, setSort] = usePersistedState<SortKey>("ac.sort.sales", "newest");
-  const [productId, setProductId] = useState("");
-  const [category, setCategory] = useState("");
-  const [sellOpen, setSellOpen] = useState(false);
-  const [editing, setEditing] = useState<Doc<"sales"> | null>(null);
-  const [deleting, setDeleting] = useState<Doc<"sales"> | null>(null);
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
-  const [erase, setErase] = useState<EraseScope | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [deleting, setDeleting] = useState<Doc<"orders"> | null>(null);
+  const [droppingCustomer, setDroppingCustomer] = useState<{
+    id: Id<"customers">;
+    name: string;
+  } | null>(null);
+  const [paying, setPaying] = useState<Doc<"orders"> | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const from = useMemo(
+    () => (rangeDays > 0 ? startOfLocalDay(Date.now() - (rangeDays - 1) * DAY) : 0),
+    [rangeDays],
+  );
+
+  const rows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return (orders ?? []).filter((o) => {
+      if (o.orderedAt < from) return false;
+      if (status && o.orderStatus !== status) return false;
+      if (!term) return true;
+      return (
+        o.orderNo.toLowerCase().includes(term) ||
+        o.customerName.toLowerCase().includes(term) ||
+        (o.customerPhone ?? "").includes(term) ||
+        o.items.some((i) => i.productName.toLowerCase().includes(term))
+      );
+    });
+  }, [orders, search, status, from]);
+
+  /*
+    Totals cover every sale the filters leave on screen, not the page being
+    shown — a figure that changes when you turn the page is not a total.
+  */
+  const totals = useMemo(() => {
+    let revenue = 0;
+    let cost = 0;
+    let booked = 0;
+    let pending = 0;
+    for (const o of rows) {
+      if (!isBooked(o)) {
+        if (o.orderStatus === "pending") pending++;
+        continue;
+      }
+      const m = moneyOf(o);
+      revenue += m.revenue;
+      cost += m.cost;
+      booked++;
+    }
+    return { revenue, cost, profit: revenue - cost, booked, pending };
+  }, [rows]);
+
+  const pager = usePagination(rows, `${search}|${status}|${rangeDays}`, 25);
+  const bengali = lang === "bn";
 
   const RANGES = [
-    { days: -1, label: t("sales.custom") },
     { days: 0, label: t("dash.allTime") },
     { days: 7, label: "7d" },
     { days: 30, label: "30d" },
@@ -61,99 +166,34 @@ export function SalesPage() {
     { days: 365, label: "12m" },
   ];
 
-  /*
-    One place decides what "the current range" means, so the list on screen
-    and the range an erase would remove can never drift apart.
-  */
-  const bounds = useMemo(() => {
-    if (rangeDays === -1) {
-      const from = customFrom ? new Date(`${customFrom}T00:00:00`).getTime() : 0;
-      const to = customTo
-        ? new Date(`${customTo}T23:59:59.999`).getTime()
-        : Number.MAX_SAFE_INTEGER;
-      return { from, to, custom: true };
-    }
-    if (rangeDays > 0) {
-      return {
-        from: startOfLocalDay(Date.now() - (rangeDays - 1) * DAY),
-        to: Number.MAX_SAFE_INTEGER,
-        custom: false,
-      };
-    }
-    return { from: 0, to: Number.MAX_SAFE_INTEGER, custom: false };
-  }, [rangeDays, customFrom, customTo]);
-
-  const rows = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    // Category has to be resolved through the product, since a sale only
-    // snapshots the name.
-    const inCategory = new Set(
-      (products ?? []).filter((p) => !category || p.category === category).map((p) => p._id as string),
-    );
-
-    const filtered = (sales ?? []).filter((s) => {
-      if (s.soldAt < bounds.from || s.soldAt > bounds.to) return false;
-      if (productId && (s.productId as string) !== productId) return false;
-      if (category && !inCategory.has(s.productId as string)) return false;
-      if (!term) return true;
-      return (
-        s.productName.toLowerCase().includes(term) ||
-        (s.buyer ?? "").toLowerCase().includes(term) ||
-        (s.note ?? "").toLowerCase().includes(term)
-      );
-    });
-
-    const profitOf = (s: Doc<"sales">) => (s.unitPrice - s.unitCost) * s.quantity;
-    return [...filtered].sort((a, b) => {
-      if (sort === "oldest") return a.soldAt - b.soldAt;
-      if (sort === "profit") return profitOf(b) - profitOf(a);
-      if (sort === "revenue") return b.unitPrice * b.quantity - a.unitPrice * a.quantity;
-      return b.soldAt - a.soldAt;
-    });
-  }, [sales, products, search, bounds, sort, productId, category]);
-
-  const totals = useMemo(() => {
-    let revenue = 0;
-    let cost = 0;
-    let units = 0;
-    for (const s of rows) {
-      revenue += s.unitPrice * s.quantity;
-      cost += s.unitCost * s.quantity;
-      units += s.quantity;
-    }
-    return { revenue, cost, profit: revenue - cost, units };
-  }, [rows]);
-
-  const pager = usePagination(
-    rows,
-    `${search}|${rangeDays}|${customFrom}|${customTo}|${sort}|${productId}|${category}`,
-  );
-  const hasStock = (products ?? []).some((p) => !p.archived && p.quantity > 0);
-  const rangeLabel =
-    RANGES.find((r) => r.days === rangeDays)?.label ?? t("dash.allTime");
-
   function exportCsv() {
     const header = [
       "Date",
-      "Product",
-      "Quantity",
-      `Unit cost (${CURRENCY_CODE})`,
-      `Unit price (${CURRENCY_CODE})`,
-      `Revenue (${CURRENCY_CODE})`,
+      "No",
+      "Customer",
+      "Phone",
+      "Status",
+      "Payment",
+      "Items",
+      `Subtotal (${CURRENCY_CODE})`,
+      `Discount (${CURRENCY_CODE})`,
+      `Delivery (${CURRENCY_CODE})`,
+      `Total (${CURRENCY_CODE})`,
       `Profit (${CURRENCY_CODE})`,
-      "Buyer",
-      "Note",
     ];
-    const body = rows.map((s) => [
-      new Date(s.soldAt).toISOString(),
-      s.productName,
-      s.quantity,
-      s.unitCost,
-      s.unitPrice,
-      s.unitPrice * s.quantity,
-      (s.unitPrice - s.unitCost) * s.quantity,
-      s.buyer ?? "",
-      s.note ?? "",
+    const body = rows.map((o) => [
+      new Date(o.orderedAt).toISOString(),
+      o.orderNo,
+      o.customerName,
+      o.customerPhone ?? "",
+      o.orderStatus,
+      o.paymentStatus,
+      o.items.map((i) => `${i.productName} x${i.quantity}`).join("; "),
+      o.subtotal,
+      o.discount,
+      o.deliveryCharge,
+      o.total,
+      isBooked(o) ? moneyOf(o).profit : "",
     ]);
     const csv = [header, ...body]
       .map((line) => line.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
@@ -168,6 +208,18 @@ export function SalesPage() {
     toast.ok(`Exported ${plural(rows.length, "sale")}.`);
   }
 
+  async function run(key: string, fn: () => Promise<unknown>, ok: string) {
+    setBusy(key);
+    try {
+      await fn();
+      toast.ok(ok);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -177,7 +229,7 @@ export function SalesPage() {
           </h1>
           <p className="mt-1 text-[13.5px] text-ink-3 sm:text-[14px]">{t("sales.subtitle")}</p>
         </div>
-        <div className="flex w-full items-center gap-2.5 sm:w-auto">
+        <div className="flex w-full flex-wrap items-center gap-2.5 sm:w-auto">
           <Button
             variant="secondary"
             onClick={exportCsv}
@@ -188,13 +240,23 @@ export function SalesPage() {
             {t("sales.export")}
           </Button>
           <Button
-            variant="primary"
-            onClick={() => setSellOpen(true)}
-            disabled={!hasStock}
+            variant="secondary"
+            disabled={rows.length === 0 || busy === "bulk"}
             className="flex-1 sm:flex-none"
+            onClick={() =>
+              run(
+                "bulk",
+                () => downloadReceipts(rows.map(toReceipt), { bengali }),
+                t("orders.receiptsDownloaded"),
+              )
+            }
           >
+            <FileText size={17} />
+            {t("orders.allReceipts")}
+          </Button>
+          <Button variant="primary" onClick={() => setAddOpen(true)} className="flex-1 sm:flex-none">
             <Plus size={17} />
-            {t("dash.recordSale")}
+            {t("sales.newSale")}
           </Button>
         </div>
       </div>
@@ -209,111 +271,33 @@ export function SalesPage() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("sales.searchPlaceholder")}
+            placeholder={t("orders.searchPlaceholder")}
             className="pl-10.5"
             aria-label={t("common.search")}
           />
         </div>
-        <div className="flex w-full gap-3 sm:w-auto">
-          <div className="flex-1 sm:w-40 sm:flex-none">
-            <Select
-              value={rangeDays}
-              onChange={(e) => setRangeDays(Number(e.target.value))}
-              aria-label={t("common.date")}
-            >
-              {RANGES.map((r) => (
-                <option key={r.days} value={r.days}>
-                  {r.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="flex-1 sm:w-48 sm:flex-none">
-            <Select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              aria-label={t("common.category")}
-            >
-              <option value="">{t("common.allCategories")}</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="flex-1 sm:w-56 sm:flex-none">
-            <Select
-              value={productId}
-              onChange={(e) => setProductId(e.target.value)}
-              aria-label={t("sales.product")}
-            >
-              <option value="">{t("sales.allProducts")}</option>
-              {(products ?? [])
-                .filter((p) => !category || p.category === category)
-                .map((p) => (
-                  <option key={p._id} value={p._id}>
-                    {p.name}
-                  </option>
-                ))}
-            </Select>
-          </div>
-          <div className="flex-1 sm:flex-none">
-            <SortSelect
-              value={sort}
-              onChange={setSort}
-              options={[
-                { value: "newest", label: t("sales.sortNewest") },
-                { value: "oldest", label: t("sales.sortOldest") },
-                { value: "profit", label: t("sales.sortProfitHigh") },
-                { value: "revenue", label: t("sales.sortRevenueHigh") },
-              ]}
-            />
-          </div>
+        <div className="w-full sm:w-36">
+          <Select
+            value={rangeDays}
+            onChange={(e) => setRangeDays(Number(e.target.value))}
+            aria-label={t("common.date")}
+          >
+            {RANGES.map((r) => (
+              <option key={r.days} value={r.days}>
+                {r.label}
+              </option>
+            ))}
+          </Select>
         </div>
-
-        {bounds.custom && (
-          <div className="ac-fade-in flex w-full flex-wrap items-center gap-3">
-            <label className="flex flex-1 items-center gap-2 sm:flex-none">
-              <span className="shrink-0 text-[12.5px] font-semibold text-ink-3">
-                {t("sales.from")}
-              </span>
-              <Input
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                max={customTo || undefined}
-                aria-label={t("sales.from")}
-                className="sm:w-44"
-              />
-            </label>
-            <label className="flex flex-1 items-center gap-2 sm:flex-none">
-              <span className="shrink-0 text-[12.5px] font-semibold text-ink-3">
-                {t("sales.to")}
-              </span>
-              <Input
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                min={customFrom || undefined}
-                aria-label={t("sales.to")}
-                className="sm:w-44"
-              />
-            </label>
-            {(customFrom || customTo) && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setCustomFrom("");
-                  setCustomTo("");
-                }}
-              >
-                {t("sales.clearDates")}
-              </Button>
-            )}
-          </div>
-        )}
+        <div className="w-full sm:w-48">
+          <Select value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t("orders.status")}>
+            <option value="">{t("orders.allStatuses")}</option>
+            <option value="pending">{t("orders.pending")}</option>
+            <option value="confirmed">{t("orders.confirmed")}</option>
+            <option value="delivered">{t("orders.delivered")}</option>
+            <option value="cancelled">{t("orders.cancelled")}</option>
+          </Select>
+        </div>
       </div>
 
       <div className="ac-stagger grid gap-4 sm:grid-cols-3">
@@ -334,339 +318,269 @@ export function SalesPage() {
           label={t("sales.revenue")}
           value={fmt(totals.revenue)}
           icon={<CircleDollarSign size={17} />}
-          sub={`${fmtNum(rows.length)} · ${fmtNum(totals.units)} ${t("common.units")}`}
+          sub={`${t("sales.cost")} ${fmt(totals.cost)}`}
         />
         <StatTile
           accent="amber"
-          label={t("sales.cost")}
-          value={fmt(totals.cost)}
-          icon={<Wallet size={17} />}
+          label={t("sales.title")}
+          value={fmtNum(totals.booked)}
+          icon={<Receipt size={17} />}
+          sub={totals.pending > 0 ? `${fmtNum(totals.pending)} ${t("orders.pending")}` : undefined}
         />
       </div>
 
-      <Card>
-        {sales === undefined ? (
-          <div className="ac-skeleton h-72 rounded-card bg-surface" aria-hidden />
-        ) : rows.length === 0 ? (
+      {orders === undefined ? (
+        <div className="ac-skeleton h-72 rounded-card border border-line bg-surface" aria-hidden />
+      ) : rows.length === 0 ? (
+        <Card>
           <EmptyState
             icon={<Receipt size={24} />}
-            title={search || rangeDays ? t("sales.noMatches") : t("sales.none")}
-            body={
-              search || rangeDays
-                ? "Try a wider date range or a different search."
-                : "Record your first sale and it will show up here with its profit worked out."
-            }
+            title={search || status || rangeDays ? t("orders.noMatches") : t("sales.none")}
+            body={t("sales.noneBody")}
             action={
-              !search && !rangeDays && hasStock ? (
-                <Button variant="primary" onClick={() => setSellOpen(true)}>
+              !search && !status && !rangeDays ? (
+                <Button variant="primary" onClick={() => setAddOpen(true)}>
                   <Plus size={17} />
-                  {t("dash.recordSale")}
+                  {t("sales.newSale")}
                 </Button>
               ) : undefined
             }
           />
-        ) : (
-          <>
-            {/*
-              Cards on phones, table from md up. The table used to carry a
-              min-width of 56rem, which forced a sideways scroll on every
-              phone — shrinking the type would not have fixed that.
-            */}
-            <ul className="flex flex-col divide-y divide-line md:hidden">
-              {pager.pageRows.map((s) => {
-                const revenue = s.unitPrice * s.quantity;
-                const profit = (s.unitPrice - s.unitCost) * s.quantity;
-                return (
-                  <li key={s._id} className="flex flex-col gap-2.5 px-4 py-4">
-                    <div className="flex items-start gap-3">
-                      <span
-                        className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[13px] font-bold text-white"
-                        style={{ background: gradientFor(s.productName) }}
-                        aria-hidden
-                      >
-                        {initialOf(s.productName)}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[14px] font-semibold text-ink">{s.productName}</p>
-                        <p className="mt-0.5 text-[12px] text-ink-3">{fmtDateTime(s.soldAt)}</p>
-                      </div>
-                      <div className="flex shrink-0 gap-0.5">
-                        <button
-                          onClick={() => setEditing(s)}
-                          aria-label={`${t("common.edit")} ${s.productName}`}
-                          className="rounded-lg p-2 text-ink-3 hover:bg-surface-2 hover:text-ink"
-                        >
-                          <Pencil size={15} />
-                        </button>
-                        <button
-                          onClick={() => setDeleting(s)}
-                          aria-label={`${t("common.delete")} ${s.productName}`}
-                          className="rounded-lg p-2 text-ink-3 hover:bg-surface-2 hover:text-critical"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
+        </Card>
+      ) : (
+        <>
+          <div className="ac-stagger flex flex-col gap-4">
+            {pager.pageRows.map((order) => (
+              <Card key={order._id} className="p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span
+                      className="flex size-10 shrink-0 items-center justify-center rounded-2xl text-[14px] font-bold text-white"
+                      style={{ background: gradientFor(order.customerName) }}
+                      aria-hidden
+                    >
+                      {initialOf(order.customerName)}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-[15px] font-bold tracking-tight text-ink">
+                        {order.customerName}
+                      </p>
+                      <p className="mt-0.5 text-[12px] text-ink-3">
+                        {order.orderNo} · {fmtDateFull(order.orderedAt)}
+                        {order.customerPhone ? ` · ${order.customerPhone}` : ""}
+                      </p>
                     </div>
-                    {(s.buyer || s.note) && (
-                      <p className="text-[12.5px] text-ink-3">
-                        {[s.buyer, s.note].filter(Boolean).join(" · ")}
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[18px] font-bold tabular-nums text-ink">{fmt(order.total)}</p>
+                    {isBooked(order) && (
+                      <p
+                        className={cx(
+                          "mt-0.5 text-[11.5px] font-bold tabular-nums",
+                          moneyOf(order).profit < 0 ? "text-critical-ink" : "text-good-ink",
+                        )}
+                      >
+                        {moneyOf(order).profit < 0
+                          ? `−${fmt(Math.abs(moneyOf(order).profit))}`
+                          : `+${fmt(moneyOf(order).profit)}`}{" "}
+                        {t("sales.profit").toLowerCase()}
                       </p>
                     )}
-                    <dl className="grid grid-cols-3 gap-2 rounded-xl bg-page px-3 py-2.5">
-                      <MobileCell label={t("sales.qty")} value={fmtNum(s.quantity)} />
-                      <MobileCell label={t("sales.revenue")} value={fmt(revenue)} />
-                      <MobileCell
-                        label={t("sales.profit")}
-                        value={profit < 0 ? `−${fmt(Math.abs(profit))}` : `+${fmt(profit)}`}
-                        tone={profit < 0 ? "critical" : "good"}
-                      />
-                    </dl>
-                  </li>
-                );
-              })}
-            </ul>
+                    {order.paymentStatus !== "paid" && (
+                      <p className="mt-0.5 text-[11.5px] font-semibold tabular-nums text-critical-ink">
+                        {t("orders.remainingDue")}: {fmt(order.total - (order.paidAmount ?? 0))}
+                      </p>
+                    )}
+                    <div className="mt-1 flex flex-wrap justify-end gap-1.5">
+                      <Badge tone={PAYMENT_TONE[order.paymentStatus] ?? "neutral"}>
+                        {t(`orders.${order.paymentStatus}` as never)}
+                      </Badge>
+                      <Badge tone={STATUS_TONE[order.orderStatus] ?? "neutral"}>
+                        {t(`orders.${order.orderStatus}` as never)}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
 
-            <div className="hidden md:block">
-              <table className="w-full text-[14px]">
-                <thead>
-                  <tr className="border-b border-line text-left text-[11px] font-bold tracking-[0.06em] text-ink-3 uppercase">
-                    <th className="py-3.5 pl-6 font-bold">{t("sales.product")}</th>
-                    <th className="px-4 py-3.5 font-bold">{t("sales.sold")}</th>
-                    <th className="px-4 py-3.5 text-right font-bold">{t("sales.qty")}</th>
-                    <th className="px-4 py-3.5 text-right font-bold">{t("sales.unitPrice")}</th>
-                    <th className="px-4 py-3.5 text-right font-bold">{t("sales.revenue")}</th>
-                    <th className="px-4 py-3.5 text-right font-bold">{t("sales.profit")}</th>
-                    <th className="py-3.5 pr-5 pl-4" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {pager.pageRows.map((s) => {
-                    const revenue = s.unitPrice * s.quantity;
-                    const profit = (s.unitPrice - s.unitCost) * s.quantity;
-                    return (
-                      <tr
-                        key={s._id}
-                        className="group border-b border-line last:border-0 transition-colors hover:bg-surface-2"
-                      >
-                        <td className="py-3 pl-6">
-                          <div className="flex items-center gap-3">
-                            <span
-                              className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[13px] font-bold text-white"
-                              style={{ background: gradientFor(s.productName) }}
-                              aria-hidden
-                            >
-                              {initialOf(s.productName)}
-                            </span>
-                            <div className="min-w-0">
-                              <p className="font-semibold text-ink">{s.productName}</p>
-                              {(s.buyer || s.note) && (
-                                <p className="mt-0.5 max-w-72 truncate text-[12.5px] text-ink-3">
-                                  {[s.buyer, s.note].filter(Boolean).join(" · ")}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-[13.5px] text-ink-2">
-                          {fmtDateTime(s.soldAt)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium tabular-nums text-ink-2">
-                          {fmtNum(s.quantity)}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums text-ink-2">
-                          {fmt(s.unitPrice)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-bold tabular-nums text-ink">
-                          {fmt(revenue)}
-                        </td>
-                        <td
-                          className={cx(
-                            "px-4 py-3 text-right font-bold tabular-nums",
-                            profit < 0 ? "text-critical-ink" : "text-good-ink",
-                          )}
-                        >
-                          {profit < 0 ? `−${fmt(Math.abs(profit))}` : `+${fmt(profit)}`}
-                        </td>
-                        <td className="py-3 pr-5 pl-4">
-                          <div className="flex justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                            <button
-                              onClick={() => setEditing(s)}
-                              aria-label={`${t("common.edit")} ${s.productName}`}
-                              className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
-                            >
-                              <Pencil size={15} />
-                            </button>
-                            <button
-                              onClick={() => setDeleting(s)}
-                              aria-label={`${t("common.delete")} ${s.productName}`}
-                              className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-3 hover:text-critical"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  {/* Totals span the whole filtered set, not just this page. */}
-                  <tr className="border-t border-line-strong bg-page/60 text-[13.5px]">
-                    <td className="py-3.5 pl-6 font-bold text-ink-2" colSpan={2}>
-                      {t("common.total")} · {fmtNum(rows.length)}
-                    </td>
-                    <td className="px-4 py-3.5 text-right font-bold tabular-nums text-ink-2">
-                      {fmtNum(totals.units)}
-                    </td>
-                    <td />
-                    <td className="px-4 py-3.5 text-right font-bold tabular-nums text-ink">
-                      {fmt(totals.revenue)}
-                    </td>
-                    <td
-                      className={cx(
-                        "px-4 py-3.5 text-right font-bold tabular-nums",
-                        totals.profit < 0 ? "text-critical-ink" : "text-good-ink",
-                      )}
+                <ul className="mt-3 flex flex-col gap-1 border-t border-line pt-3">
+                  {order.items.map((i, idx) => (
+                    <li key={idx} className="flex items-center justify-between gap-3 text-[12.5px]">
+                      <span className="min-w-0 truncate text-ink-2">{i.productName}</span>
+                      <span className="shrink-0 tabular-nums text-ink-3">
+                        {fmtNum(i.quantity)} {i.unit} × {fmt(i.unitPrice)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t border-line pt-3.5">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={busy === order._id}
+                    onClick={() =>
+                      run(order._id, () => downloadReceipt(toReceipt(order), { bengali }), t("orders.receiptDownloaded"))
+                    }
+                  >
+                    <FileText size={15} />
+                    {t("orders.receipt")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void previewReceipt(toReceipt(order), { bengali })}
+                  >
+                    <Eye size={15} />
+                    {t("orders.preview")}
+                  </Button>
+
+                  <Button size="sm" variant="secondary" onClick={() => setPaying(order)}>
+                    <Wallet size={15} />
+                    {t("orders.payment")}
+                  </Button>
+
+                  {order.orderStatus === "pending" && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy === order._id}
+                      onClick={() =>
+                        run(order._id, () => confirmOrder({ id: order._id }), t("orders.confirmedToast"))
+                      }
                     >
-                      {totals.profit < 0
-                        ? `−${fmt(Math.abs(totals.profit))}`
-                        : `+${fmt(totals.profit)}`}
-                    </td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                      <CheckCircle2 size={15} />
+                      {t("orders.confirm")}
+                    </Button>
+                  )}
+                  {(order.orderStatus === "confirmed" || order.orderStatus === "delivered") && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy === order._id}
+                      onClick={() =>
+                        run(order._id, () => cancelOrder({ id: order._id }), t("orders.cancelledToast"))
+                      }
+                    >
+                      <XCircle size={15} />
+                      {t("orders.cancel")}
+                    </Button>
+                  )}
 
-            <Pagination
-              page={pager.page}
-              pageCount={pager.pageCount}
-              pageSize={pager.pageSize}
-              total={pager.total}
-              onPage={pager.setPage}
-              onPageSize={pager.setPageSize}
-            />
-          </>
-        )}
-      </Card>
+                  <button
+                    onClick={() => setDeleting(order)}
+                    aria-label={t("common.delete")}
+                    className={cx(
+                      "ml-auto rounded-lg p-2 text-ink-3 transition-colors",
+                      "hover:bg-surface-2 hover:text-critical",
+                    )}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          {pager.pageCount > 1 && (
+            <Card>
+              <Pagination
+                page={pager.page}
+                pageCount={pager.pageCount}
+                pageSize={pager.pageSize}
+                total={pager.total}
+                onPage={pager.setPage}
+                onPageSize={pager.setPageSize}
+                itemLabel="sales"
+              />
+            </Card>
+          )}
+        </>
+      )}
 
       {/*
-        Kept at the bottom, visually separated and in the critical colour, so
-        it is never adjacent to something you click routinely.
+        The address book, kept at the foot of the page rather than inside the
+        order dialog: it is read while typing an order and tidied at leisure,
+        and those are different moments.
       */}
-      <Card className="border-[color-mix(in_srgb,var(--critical)_25%,transparent)]">
-        <div className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
-          <div className="min-w-0">
-            <h2 className="flex items-center gap-2 text-[15px] font-bold tracking-tight text-ink">
-              <AlertTriangle size={16} className="text-critical" aria-hidden />
-              {t("sales.dangerZone")}
-            </h2>
-            <p className="mt-1.5 max-w-lg text-[13px] leading-6 text-ink-3">
-              {t("sales.dangerBody")}
+      <Card>
+        <CardHeader
+          title={t("orders.savedCustomers")}
+          subtitle={t("orders.savedCustomersSub")}
+        />
+        <div className="px-5 pb-5 sm:px-6 sm:pb-6">
+          {savedCustomers.length === 0 ? (
+            <p className="flex items-center gap-2 text-[13px] text-ink-3">
+              <UserRound size={15} aria-hidden />
+              {t("orders.noSavedCustomers")}
             </p>
-          </div>
-          <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row">
-            <Button
-              variant="secondary"
-              onClick={() =>
-                setErase({
-                  kind: "range",
-                  from: bounds.from,
-                  to: Math.min(bounds.to, Date.now() + DAY),
-                  label: rangeLabel,
-                })
-              }
-              disabled={rows.length === 0}
-              className="text-critical-ink"
-            >
-              <Trash2 size={16} />
-              {t("sales.eraseRange")}
-            </Button>
-            <Button variant="danger" onClick={() => setErase({ kind: "all" })}>
-              <Trash2 size={16} />
-              {t("sales.eraseAll")}
-            </Button>
-          </div>
+          ) : (
+            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {savedCustomers.map((c) => (
+                <li
+                  key={c._id}
+                  className="flex items-center gap-3 rounded-xl border border-line-strong bg-page py-2 pr-2 pl-3"
+                >
+                  <span
+                    className="flex size-8 shrink-0 items-center justify-center rounded-lg text-[12px] font-bold text-white"
+                    style={{ background: gradientFor(c.name) }}
+                    aria-hidden
+                  >
+                    {initialOf(c.name)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-semibold text-ink">{c.name}</p>
+                    <p className="truncate text-[11.5px] text-ink-3">
+                      {[c.phone, c.address].filter(Boolean).join(" · ") || t("orders.noDetails")}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-[11.5px] font-bold tabular-nums text-ink-3">
+                    {fmtNum(c.orderCount)}
+                  </span>
+                  <button
+                    onClick={() =>
+                      setDroppingCustomer({ id: c._id as Id<"customers">, name: c.name })
+                    }
+                    aria-label={`${t("common.delete")} ${c.name}`}
+                    className="shrink-0 rounded-lg p-1.5 text-ink-3 transition-colors hover:bg-surface-2 hover:text-critical"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </Card>
 
-      <EraseDialog
-        open={erase !== null}
-        onClose={() => setErase(null)}
-        scope={erase}
-        onDone={() => {
-          setCustomFrom("");
-          setCustomTo("");
-          setRangeDays(0);
-        }}
-      />
-
-      <SellDialog open={sellOpen} onClose={() => setSellOpen(false)} />
-      <SellDialog open={editing !== null} onClose={() => setEditing(null)} sale={editing} />
+      <SaleDialog open={addOpen} onClose={() => setAddOpen(false)} />
+      <PaymentDialog open={paying !== null} onClose={() => setPaying(null)} order={paying} />
       <ConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}
-        title={t("confirm.deleteSale")}
-        body={
-          deleting
-            ? `The ${plural(deleting.quantity, "unit")} of ${deleting.productName} go back into stock, and the revenue and profit come off your totals.`
-            : ""
-        }
+        title={t("orders.deleteTitle")}
+        body={t("orders.deleteBody")}
         onConfirm={async () => {
           if (!deleting) return;
-          const snapshot = deleting;
           try {
-            await remove({ id: snapshot._id });
-            // Deleting a sale is the most frequent destructive action and had
-            // the least protection. Re-recording restores the same figures;
-            // the row gets a new id, which nothing else references.
-            toast.undoable(t("toast.saleDeleted"), {
-              label: t("toast.undo"),
-              run: async () => {
-                try {
-                  await recreate({
-                    productId: snapshot.productId,
-                    unitPrice: snapshot.unitPrice,
-                    quantity: snapshot.quantity,
-                    buyer: snapshot.buyer ?? "",
-                    note: snapshot.note ?? "",
-                    soldAt: snapshot.soldAt,
-                  });
-                  toast.ok(t("toast.saleRestored"));
-                } catch (err) {
-                  toast.error(errorMessage(err));
-                }
-              },
-            });
+            await removeOrder({ id: deleting._id });
+            toast.ok(t("orders.deleted"));
           } catch (err) {
             toast.error(errorMessage(err));
           }
         }}
       />
-    </div>
-  );
-}
-
-function MobileCell({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "good" | "critical";
-}) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[10.5px] font-bold tracking-wide text-ink-3 uppercase">{label}</dt>
-      <dd
-        className={cx(
-          "mt-0.5 truncate text-[13.5px] font-bold tabular-nums",
-          tone === "good" ? "text-good-ink" : tone === "critical" ? "text-critical-ink" : "text-ink",
-        )}
-      >
-        {value}
-      </dd>
+      <PasscodeConfirmDialog
+        open={droppingCustomer !== null}
+        onClose={() => setDroppingCustomer(null)}
+        title={t("orders.dropCustomerTitle")}
+        confirmLabel={t("orders.dropCustomer")}
+        body={droppingCustomer ? t("orders.dropCustomerBody") : ""}
+        onConfirm={async (passcode) => {
+          if (!droppingCustomer) return;
+          await dropCustomer({ id: droppingCustomer.id, passcode });
+          toast.ok(t("orders.customerDropped"));
+        }}
+      />
     </div>
   );
 }
