@@ -90,6 +90,53 @@ export const list = query({
 });
 
 /**
+ * One customer and everything they have bought.
+ *
+ * Sales are found by identity rather than by a stored link: an order keeps
+ * its own copy of the name and phone, and the same rule that decides whether
+ * two entries are the same person decides which sales are theirs. That means
+ * a sale recorded before the customer was ever saved still shows up here, and
+ * correcting a typo in their name does not orphan their history.
+ */
+export const detail = query({
+  args: { token: v.string(), id: v.id("customers") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const customer = await ctx.db.get(args.id);
+    if (!customer) return null;
+
+    const all = await ctx.db.query("orders").withIndex("by_orderedAt").order("desc").collect();
+    const mine = all.filter(
+      (o) => customerKey(o.customerName, o.customerPhone) === customer.key,
+    );
+
+    let spent = 0;
+    let due = 0;
+    let items = 0;
+    for (const o of mine) {
+      // A cancelled sale is not money the customer spent with you.
+      if (o.orderStatus === "cancelled") continue;
+      spent += o.total;
+      due += o.total - (o.paidAmount ?? (o.paymentStatus === "paid" ? o.total : 0));
+      items += o.items.reduce((sum, i) => sum + i.quantity, 0);
+    }
+
+    return {
+      customer: {
+        _id: customer._id,
+        name: customer.name,
+        phone: customer.phone,
+        address: customer.address,
+        orderCount: customer.orderCount,
+        lastOrderedAt: customer.lastOrderedAt,
+      },
+      sales: mine,
+      totals: { spent, due, items, count: mine.length },
+    };
+  },
+});
+
+/**
  * Adds a customer by hand, without waiting for them to buy something.
  *
  * The address book is worth filling in before the first sale — a shop knows

@@ -5,6 +5,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { Button, Card, EmptyState, Input } from "../components/ui";
 import { Pagination, usePagination } from "../components/Pagination";
 import { CustomerDialog, type EditableCustomer } from "../components/CustomerDialog";
+import { CustomerDetailDialog } from "../components/CustomerDetailDialog";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -24,6 +25,7 @@ export function CustomersPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<EditableCustomer | null>(null);
   const [deleting, setDeleting] = useState<{ id: Id<"customers">; name: string } | null>(null);
+  const [viewing, setViewing] = useState<Id<"customers"> | null>(null);
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -101,6 +103,17 @@ export function CustomersPage() {
             <ul className="flex flex-col divide-y divide-line">
               {pager.pageRows.map((c) => (
                 <li key={c._id} className="flex items-start gap-3 px-4 py-4 sm:px-5">
+                  {/*
+                    The row opens the customer rather than a separate "view"
+                    icon: seeing what someone has bought is the reason to be
+                    on this page, so it should be the easiest thing to hit.
+                  */}
+                  <button
+                    type="button"
+                    onClick={() => setViewing(c._id)}
+                    className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                    aria-label={`${t("customers.theirSales")} — ${c.name}`}
+                  >
                   <span
                     className="flex size-10 shrink-0 items-center justify-center rounded-2xl text-[14px] font-bold text-white"
                     style={{ background: gradientFor(c.name) }}
@@ -128,6 +141,7 @@ export function CustomersPage() {
                         : t("customers.noOrdersYet")}
                     </p>
                   </div>
+                  </button>
                   <div className="flex shrink-0 gap-0.5">
                     <button
                       onClick={() => setEditing(c)}
@@ -168,6 +182,11 @@ export function CustomersPage() {
         {t("customers.footnote")}
       </p>
 
+      <CustomerDetailDialog
+        open={viewing !== null}
+        onClose={() => setViewing(null)}
+        customerId={viewing}
+      />
       <CustomerDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <CustomerDialog
         open={editing !== null}
