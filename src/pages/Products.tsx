@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   ArchiveRestore,
   Archive,
+  Layers,
   Minus,
   Package,
   PackagePlus,
@@ -18,6 +19,7 @@ import { useT } from "../lib/i18n";
 import { ProductDialog } from "../components/ProductDialog";
 import { ProductDetailDialog } from "../components/ProductDetailDialog";
 import { SaleDialog } from "../components/SaleDialog";
+import { BatchDialog } from "../components/BatchDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { gradientFor, initialOf } from "../lib/avatar";
@@ -39,6 +41,12 @@ export function ProductsPage() {
   const categories = useAuthedQuery(api.products.categories) ?? [];
 
   const restock = useAuthedMutation(api.products.restock);
+  /*
+    Lots with stock left, so a card can say what this product actually cost —
+    which is a range once it has been bought twice at two prices, not the one
+    figure on the product.
+  */
+  const openLots = useAuthedQuery(api.profit.openLots) ?? [];
   const setArchived = useAuthedMutation(api.products.setArchived);
   const remove = useAuthedMutation(api.products.remove);
 
@@ -47,6 +55,7 @@ export function ProductsPage() {
   const [selling, setSelling] = useState<Doc<"products"> | null>(null);
   const [deleting, setDeleting] = useState<Doc<"products"> | null>(null);
   const [viewing, setViewing] = useState<Doc<"products"> | null>(null);
+  const [lotFor, setLotFor] = useState<Doc<"products"> | null>(null);
 
   const visible = useMemo(() => {
     const filtered = (products ?? []).filter((p) => !category || p.category === category);
@@ -180,6 +189,8 @@ export function ProductsPage() {
               <ProductCard
                 key={product._id}
                 product={product}
+                lots={openLots.filter((l) => l.productId === product._id)}
+                onAddLot={() => setLotFor(product)}
                 onView={() => setViewing(product)}
                 onSell={() => setSelling(product)}
                 onEdit={() => setEditing(product)}
@@ -216,6 +227,11 @@ export function ProductsPage() {
         onClose={() => setViewing(null)}
         productId={viewing?._id ?? null}
       />
+      <BatchDialog
+        open={lotFor !== null}
+        onClose={() => setLotFor(null)}
+        presetProductId={lotFor?._id}
+      />
       <ProductDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <ProductDialog open={editing !== null} onClose={() => setEditing(null)} product={editing} />
       <SaleDialog
@@ -244,6 +260,8 @@ export function ProductsPage() {
 
 function ProductCard({
   product,
+  lots,
+  onAddLot,
   onView,
   onSell,
   onEdit,
@@ -253,6 +271,8 @@ function ProductCard({
   fmt,
 }: {
   product: Doc<"products">;
+  lots: { unitCost: number; remaining: number }[];
+  onAddLot: () => void;
   onView: () => void;
   onSell: () => void;
   onEdit: () => void;
@@ -262,6 +282,8 @@ function ProductCard({
   fmt: (v: number) => string;
 }) {
   const t = useT();
+  // Ascending, so the footer can read the cheapest and dearest off the ends.
+  const lotCosts = [...lots].map((l) => l.unitCost).sort((a, b) => a - b);
   const out = product.quantity === 0;
   const low = product.quantity > 0 && product.quantity <= 3;
   const [showAll, setShowAll] = useState(false);
@@ -282,6 +304,9 @@ function ProductCard({
         reserve its width and force the product name to truncate early.
       */}
       <div className="absolute top-3.5 right-3.5 z-10 flex items-center gap-0.5 rounded-xl bg-surface/90 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <IconButton label="Add lot" onClick={onAddLot}>
+          <Layers size={15} />
+        </IconButton>
         <IconButton label="Edit" onClick={onEdit}>
           <Pencil size={15} />
         </IconButton>
@@ -342,13 +367,30 @@ function ProductCard({
       </div>
 
       <div className="mt-auto flex items-end justify-between gap-3 border-t border-line px-5 pt-4 pb-5">
+        {/*
+          Once a product has been bought at two prices, one cost figure is a
+          lie of omission. The card shows the range it is actually sitting on
+          and how many lots make it up.
+        */}
         <div>
           <p className="text-[10.5px] font-bold tracking-[0.08em] text-ink-3 uppercase">
             Cost price
           </p>
           <p className="mt-1 text-[20px] leading-7 font-bold tracking-tight text-ink">
-            {fmt(product.costPrice)}
+            {lotCosts.length > 0
+              ? lotCosts[0] === lotCosts[lotCosts.length - 1]
+                ? fmt(lotCosts[0])
+                : `${fmt(lotCosts[0])}–${fmt(lotCosts[lotCosts.length - 1])}`
+              : fmt(product.costPrice)}
           </p>
+          {lots.length > 0 && (
+            <button
+              onClick={onView}
+              className="mt-0.5 text-[11.5px] font-semibold text-accent hover:underline"
+            >
+              {lots.length} {lots.length === 1 ? "lot" : "lots"}
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="flex h-10 items-center rounded-xl border border-line-strong bg-page">
