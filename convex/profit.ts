@@ -129,6 +129,8 @@ export const addBatch = mutation({
       label: args.label.trim() || "Stock",
       purchasedAt: args.purchasedAt,
       quantity: args.quantity,
+      // A lot starts with everything it was bought with still in it.
+      remaining: args.quantity,
       unitCost: args.unitCost,
       unitPrice: args.unitPrice,
       note: note ? note : undefined,
@@ -168,11 +170,18 @@ export const updateBatch = mutation({
       }
     }
 
+    /*
+      Resizing a lot moves what is left by the same amount, so the units
+      already sold out of it are not forgotten — buying ten more of a lot that
+      has three left leaves thirteen, not ten.
+    */
+    const soldFrom = batch.quantity - (batch.remaining ?? batch.quantity);
     const note = (args.note ?? "").trim();
     await ctx.db.patch(args.id, {
       label: args.label.trim() || "Stock",
       purchasedAt: args.purchasedAt,
       quantity: args.quantity,
+      remaining: Math.max(0, args.quantity - soldFrom),
       unitCost: args.unitCost,
       unitPrice: args.unitPrice,
       note: note ? note : undefined,
@@ -197,6 +206,31 @@ export const removeBatch = mutation({
       await ctx.db.patch(batch.productId, { quantity: product.quantity - batch.quantity });
     }
     await ctx.db.delete(args.id);
+  },
+});
+
+/**
+ * Lots with stock still in them, newest purchase last so the oldest is the
+ * natural first pick. What a shop wants at the counter is "which price am I
+ * selling out of", and that is a different question from the ledger below.
+ */
+export const openLots = query({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const rows = await ctx.db.query("stockBatches").withIndex("by_purchasedAt").collect();
+    return rows
+      .map((b) => ({
+        id: b._id,
+        productId: b.productId,
+        label: b.label,
+        purchasedAt: b.purchasedAt,
+        unitCost: b.unitCost,
+        unitPrice: b.unitPrice,
+        remaining: b.remaining ?? b.quantity,
+        quantity: b.quantity,
+      }))
+      .filter((b) => b.remaining > 0);
   },
 });
 
@@ -229,6 +263,7 @@ export const summary = query({
         label: b.label,
         purchasedAt: b.purchasedAt,
         quantity: b.quantity,
+        remaining: b.remaining ?? b.quantity,
         unitCost: b.unitCost,
         unitPrice: b.unitPrice,
         note: b.note,

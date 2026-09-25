@@ -1,7 +1,9 @@
-import { Layers, Package, Receipt, TrendingUp, Wallet } from "lucide-react";
+import { Layers, Package, Plus, Receipt, TrendingUp, Wallet } from "lucide-react";
+import { useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { Badge, Modal, cx } from "./ui";
+import { Badge, Button, Modal, cx } from "./ui";
+import { BatchDialog } from "./BatchDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor } from "../lib/avatar";
@@ -24,6 +26,7 @@ export function ProductDetailDialog({
   const { fmt, fmtNum, fmtPercent, fmtDateFull, fmtDateTime } = useSettings();
   const t = useT();
   const data = useAuthedQuery(api.products.detail, productId ? { id: productId } : "skip");
+  const [addingLot, setAddingLot] = useState(false);
 
   const name = data?.product.name ?? "";
 
@@ -83,7 +86,21 @@ export function ProductDetailDialog({
             </div>
           )}
 
-          <Section title={t("detail.stockLots")} empty={data.lots.length === 0} emptyText={t("detail.noLots")}>
+          {/*
+            Lots are bought against a product, so the place to add one is the
+            product — not a page away under Profit, where the connection has
+            to be remembered rather than seen.
+          */}
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">
+              {t("detail.stockLots")}
+            </p>
+            <Button size="sm" variant="secondary" onClick={() => setAddingLot(true)}>
+              <Plus size={15} />
+              {t("detail.addLot")}
+            </Button>
+          </div>
+          <Section title="" empty={data.lots.length === 0} emptyText={t("detail.noLots")}>
             <ul className="flex flex-col gap-2">
               {data.lots.map((l) => {
                 const unitProfit = l.unitPrice - l.unitCost;
@@ -97,8 +114,11 @@ export function ProductDetailDialog({
                         <Badge tone="accent">{l.label}</Badge>
                         <span className="text-[12px] text-ink-3">{fmtDateFull(l.purchasedAt)}</span>
                       </div>
+                      {/* What is left matters more than what was bought: it
+                          is the number you sell against. */}
                       <p className="mt-1 text-[12.5px] text-ink-3">
-                        {fmtNum(l.quantity)} × {fmt(l.unitCost)} → {fmt(l.unitPrice)}
+                        {fmtNum(l.remaining ?? l.quantity)} {t("detail.leftOf")}{" "}
+                        {fmtNum(l.quantity)} · {fmt(l.unitCost)} → {fmt(l.unitPrice)}
                       </p>
                     </div>
                     <span
@@ -147,6 +167,11 @@ export function ProductDetailDialog({
           </Section>
         </div>
       )}
+      <BatchDialog
+        open={addingLot}
+        onClose={() => setAddingLot(false)}
+        presetProductId={productId ?? undefined}
+      />
     </Modal>
   );
 }

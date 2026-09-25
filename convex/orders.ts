@@ -23,6 +23,12 @@ const itemInput = v.object({
   productId: v.id("products"),
   quantity: v.number(),
   unitPrice: v.number(),
+  /*
+    Which purchase lot to sell out of. Optional: a product with no lots, or a
+    sale nobody wants to attribute, still works and falls back to the
+    product's own cost price.
+  */
+  batchId: v.optional(v.id("stockBatches")),
 });
 
 type Totals = { subtotal: number; total: number };
@@ -75,24 +81,57 @@ function validate(
  * cost. Returns which lines exceed available stock so the caller can decide
  * whether that needs an override.
  */
-async function resolveItems(ctx: MutationCtx, items: { productId: Id<"products">; quantity: number; unitPrice: number }[]) {
+async function resolveItems(
+  ctx: MutationCtx,
+  items: {
+    productId: Id<"products">;
+    quantity: number;
+    unitPrice: number;
+    batchId?: Id<"stockBatches">;
+  }[],
+) {
   const resolved = [];
   const short: string[] = [];
   for (const line of items) {
     const product = await ctx.db.get(line.productId);
-    if (!product) throw new ConvexError("A product on this order no longer exists.");
+    if (!product) throw new ConvexError("A product on this sale no longer exists.");
     if (line.quantity > product.quantity) {
       short.push(
         `${product.name}: ${line.quantity} requested, ${product.quantity} ${product.unit ?? DEFAULT_UNIT} available`,
       );
     }
+
+    /*
+      Cost comes from the chosen lot when there is one. The same product
+      bought twice at different prices makes two different profits, and
+      averaging them into a single cost price is how a shop convinces itself
+      a bad buy was fine. The figure is snapshotted here, so editing the lot
+      later cannot rewrite what this sale earned.
+    */
+    let unitCost = product.costPrice;
+    if (line.batchId) {
+      const batch = await ctx.db.get(line.batchId);
+      if (!batch) throw new ConvexError("That stock lot no longer exists.");
+      if (batch.productId !== line.productId) {
+        throw new ConvexError(`${batch.label} is not a lot of ${product.name}.`);
+      }
+      const left = batch.remaining ?? batch.quantity;
+      if (line.quantity > left) {
+        short.push(
+          `${product.name} (${batch.label}): ${line.quantity} requested, ${left} left in that lot`,
+        );
+      }
+      unitCost = batch.unitCost;
+    }
+
     resolved.push({
       productId: line.productId,
       productName: product.name,
       quantity: line.quantity,
       unit: product.unit ?? DEFAULT_UNIT,
       unitPrice: line.unitPrice,
-      unitCost: product.costPrice,
+      unitCost,
+      batchId: line.batchId,
     });
   }
   return { resolved, short };
@@ -241,10 +280,19 @@ async function fulfil(ctx: MutationCtx, id: Id<"orders">) {
     if (product) {
       await ctx.db.patch(line.productId, { quantity: product.quantity - line.quantity });
     }
+    // The lot empties along with the shelf it sits on.
+    if (line.batchId) {
+      const batch = await ctx.db.get(line.batchId);
+      if (batch) {
+        const left = batch.remaining ?? batch.quantity;
+        await ctx.db.patch(line.batchId, { remaining: Math.max(0, left - line.quantity) });
+      }
+    }
     const effectivePrice = line.unitPrice * (1 - discountRatio);
     saleIds.push(
       await ctx.db.insert("sales", {
         productId: line.productId,
+        batchId: line.batchId,
         productName: line.productName,
         unitCost: line.unitCost,
         unitPrice: effectivePrice,
@@ -322,6 +370,16 @@ export const cancel = mutation({
       const product = await ctx.db.get(sale.productId);
       if (product) {
         await ctx.db.patch(sale.productId, { quantity: product.quantity + sale.quantity });
+      }
+      // Back to the lot it was drawn from, not just to the shelf total.
+      if (sale.batchId) {
+        const batch = await ctx.db.get(sale.batchId);
+        if (batch) {
+          const left = batch.remaining ?? batch.quantity;
+          await ctx.db.patch(sale.batchId, {
+            remaining: Math.min(batch.quantity, left + sale.quantity),
+          });
+        }
       }
       await ctx.db.delete(saleId);
     }
@@ -499,6 +557,16 @@ export const remove = mutation({
       const product = await ctx.db.get(sale.productId);
       if (product) {
         await ctx.db.patch(sale.productId, { quantity: product.quantity + sale.quantity });
+      }
+      // Back to the lot it was drawn from, not just to the shelf total.
+      if (sale.batchId) {
+        const batch = await ctx.db.get(sale.batchId);
+        if (batch) {
+          const left = batch.remaining ?? batch.quantity;
+          await ctx.db.patch(sale.batchId, {
+            remaining: Math.min(batch.quantity, left + sale.quantity),
+          });
+        }
       }
       await ctx.db.delete(saleId);
     }

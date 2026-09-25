@@ -32,6 +32,17 @@ type Line = {
   unitCost: number;
   quantity: string;
   unitPrice: string;
+  /** The purchase lot this line sells out of; empty means the product's own cost. */
+  batchId: string;
+};
+
+type OpenLot = {
+  id: Id<"stockBatches">;
+  productId: Id<"products">;
+  label: string;
+  unitCost: number;
+  unitPrice: number;
+  remaining: number;
 };
 
 let lineSeq = 0;
@@ -59,6 +70,7 @@ export function SaleDialog({
   const toast = useToast();
   const products = useAuthedQuery(api.products.list, {});
   const customers = useAuthedQuery(api.customers.list) ?? [];
+  const openLots = (useAuthedQuery(api.profit.openLots) ?? []) as OpenLot[];
   const create = useAuthedMutation(api.orders.create);
 
   const [name, setName] = useState("");
@@ -113,8 +125,20 @@ export function SaleDialog({
     setAddress(c.address ?? "");
   }
 
-  /** One order line from a product, with its price and cost snapshotted. */
+  /** Lots of this product with stock left, oldest purchase first. */
+  function lotsOf(productId: Id<"products">) {
+    return openLots.filter((l) => l.productId === productId);
+  }
+
+  /** One sale line from a product, with its price and cost snapshotted. */
   function lineFor(p: Doc<"products">): Line {
+    /*
+      The oldest open lot is chosen for you. A shop sells what it bought
+      first, and making the common case a decision would mean picking a lot
+      forty times a day to say the obvious thing — but it is only a default,
+      and the row says which one it landed on.
+    */
+    const lot = openLots.filter((l) => l.productId === p._id)[0];
     return {
       key: `l${lineSeq++}`,
       productId: p._id,
@@ -127,8 +151,14 @@ export function SaleDialog({
         silently guaranteeing zero profit on every line; an empty box that
         asks for a number is far better than a wrong one that looks filled.
       */
-      unitPrice: p.sellPrice !== undefined ? String(p.sellPrice) : "",
-      unitCost: p.costPrice,
+      unitPrice:
+        lot?.unitPrice !== undefined
+          ? String(lot.unitPrice)
+          : p.sellPrice !== undefined
+            ? String(p.sellPrice)
+            : "",
+      unitCost: lot ? lot.unitCost : p.costPrice,
+      batchId: lot ? (lot.id as string) : "",
     };
   }
 
@@ -189,6 +219,7 @@ export function SaleDialog({
           productId: l.productId,
           quantity: l.qty,
           unitPrice: l.price,
+          batchId: l.batchId ? (l.batchId as Id<"stockBatches">) : undefined,
         })),
         discount: discountValue,
         deliveryCharge: deliveryValue,
@@ -335,6 +366,51 @@ export function SaleDialog({
                           <Trash2 size={15} />
                         </button>
                       </div>
+
+                      {/*
+                        Which lot this comes out of. Every option carries its
+                        buy price and what is left in it, because that is the
+                        question being answered — not which lot has the nicer
+                        label.
+                      */}
+                      {lotsOf(line.productId).length > 0 && (
+                        <label className="mt-2.5 block">
+                          <span className="mb-1 block text-[11px] font-semibold text-ink-3">
+                            {t("orders.sellFromLot")}
+                          </span>
+                          <Select
+                            value={line.batchId}
+                            onChange={(e) => {
+                              const picked = openLots.find((l) => l.id === e.target.value);
+                              setLines((p) =>
+                                p.map((l) =>
+                                  l.key === line.key
+                                    ? {
+                                        ...l,
+                                        batchId: e.target.value,
+                                        // The cost always follows the lot; the
+                                        // asking price only fills a blank, so a
+                                        // price already typed is never overwritten.
+                                        unitCost: picked ? picked.unitCost : l.unitCost,
+                                        unitPrice:
+                                          l.unitPrice === "" && picked
+                                            ? String(picked.unitPrice)
+                                            : l.unitPrice,
+                                      }
+                                    : l,
+                                ),
+                              );
+                            }}
+                          >
+                            {lotsOf(line.productId).map((l) => (
+                              <option key={l.id} value={l.id}>
+                                {fmt(l.unitCost)} · {fmtNum(l.remaining)} {line.unit} · {l.label}
+                              </option>
+                            ))}
+                            <option value="">{t("orders.noLot")}</option>
+                          </Select>
+                        </label>
+                      )}
 
                       <div className="mt-2.5 flex flex-wrap items-end gap-3">
                         <label className="flex-1">

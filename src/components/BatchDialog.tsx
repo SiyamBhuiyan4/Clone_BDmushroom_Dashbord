@@ -37,11 +37,14 @@ export function BatchDialog({
   open,
   onClose,
   batch,
+  presetProductId,
 }: {
   open: boolean;
   onClose: () => void;
   /** Present when editing an existing lot. */
   batch?: BatchRow | null;
+  /** Opened from a product, so the product is already decided. */
+  presetProductId?: string;
 }) {
   const { fmt } = useSettings();
   const toast = useToast();
@@ -69,7 +72,7 @@ export function BatchDialog({
       setUnitPrice(String(batch.unitPrice));
       setNote(batch.note ?? "");
     } else {
-      setProductId("");
+      setProductId(presetProductId ?? "");
       setLabel("");
       setPurchasedAt(toLocalInputValue(Date.now()));
       setQuantity("");
@@ -77,7 +80,7 @@ export function BatchDialog({
       setUnitPrice("");
       setNote("");
     }
-  }, [open, batch]);
+  }, [open, batch, presetProductId]);
 
   const selected = useMemo(
     () => products?.find((p) => p._id === productId),

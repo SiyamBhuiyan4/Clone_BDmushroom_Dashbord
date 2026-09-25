@@ -53,6 +53,13 @@ export default defineSchema({
         unit: v.string(),
         unitPrice: v.number(),
         unitCost: v.number(),
+        /*
+          The purchase lot this line was sold from, when one was picked. The
+          cost above is still the figure that counts — it is snapshotted the
+          moment the sale is made — but the link is what lets the lot's
+          remaining stock be put back if the sale is cancelled.
+        */
+        batchId: v.optional(v.id("stockBatches")),
       }),
     ),
     subtotal: v.number(),
@@ -130,7 +137,14 @@ export default defineSchema({
     productName: v.string(),
     label: v.string(),
     purchasedAt: v.number(),
+    /** How many were bought. */
     quantity: v.number(),
+    /*
+      How many of them are left. Optional because lots recorded before this
+      existed have never been drawn from — those fall back to the full
+      quantity, which is exactly what they have left.
+    */
+    remaining: v.optional(v.number()),
     unitCost: v.number(),
     unitPrice: v.number(),
     note: v.optional(v.string()),
@@ -252,6 +266,8 @@ export default defineSchema({
 
   sales: defineTable({
     productId: v.id("products"),
+    /** The purchase lot this sale drew from, when one was picked. */
+    batchId: v.optional(v.id("stockBatches")),
     // Name and cost are snapshotted so history stays correct if the
     // product is later renamed, repriced, or deleted.
     productName: v.string(),
