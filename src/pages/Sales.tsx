@@ -4,9 +4,9 @@ import {
   Download,
   Eye,
   FileText,
+  Pencil,
   Plus,
   Receipt,
-  Wallet,
   RotateCcw,
   Search,
   TrendingUp,
@@ -477,8 +477,13 @@ export function SalesPage() {
                     {t("orders.preview")}
                   </Button>
 
+                  {/*
+                    Labelled for the job rather than the noun: this is where
+                    you come to change what a customer has paid, and "Payment"
+                    alone did not read as something you could press to edit.
+                  */}
                   <Button size="sm" variant="secondary" onClick={() => setPaying(order)}>
-                    <Wallet size={15} />
+                    <Pencil size={15} />
                     {t("orders.payment")}
                   </Button>
 
