@@ -16,12 +16,12 @@ import { StatTile } from "../components/StatTile";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { BatchDialog, type BatchRow } from "../components/BatchDialog";
 import { DateRangeControls, rangeLabel, useDateRange } from "../components/DateRange";
-import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT, type MessageKey } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
 import { plural } from "../lib/format";
-import { errorMessage, useToast } from "../lib/toast";
+import { useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 
 /** One bucket's share of an amount. Percentages already total 100. */
@@ -345,23 +345,19 @@ export function ProfitPage() {
 
       <BatchDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <BatchDialog open={editing !== null} onClose={() => setEditing(null)} batch={editing} />
-      <ConfirmDialog
+      <PasscodeConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}
         title="Delete this stock lot?"
         body={
           deleting
-            ? `${deleting.label} of ${deleting.productName} — ${plural(deleting.quantity, "unit")} — comes off your projected profit.`
+            ? `${deleting.label} of ${deleting.productName}\n${plural(deleting.quantity, "unit")} come off your stock and your projected profit.`
             : ""
         }
-        onConfirm={async () => {
+        onConfirm={async (passcode) => {
           if (!deleting) return;
-          try {
-            await removeBatch({ id: deleting.id as never });
-            toast.ok("Stock lot deleted.");
-          } catch (err) {
-            toast.error(errorMessage(err));
-          }
+          await removeBatch({ id: deleting.id as never, passcode });
+          toast.ok("Stock lot deleted.");
         }}
       />
     </div>

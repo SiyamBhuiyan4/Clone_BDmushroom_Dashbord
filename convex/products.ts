@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
-import { requireSession } from "./auth";
+import { requireSession, verifyPasscode } from "./auth";
 
 export const list = query({
   args: {
@@ -153,9 +153,10 @@ export const setArchived = mutation({
  * a product you no longer stock toward your projected profit.
  */
 export const remove = mutation({
-  args: { token: v.string(), id: v.id("products") },
+  args: { token: v.string(), id: v.id("products"), passcode: v.string() },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
     const lots = await ctx.db
       .query("stockBatches")
       .withIndex("by_product", (q) => q.eq("productId", args.id))

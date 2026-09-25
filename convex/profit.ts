@@ -1,6 +1,6 @@
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
-import { requireSession } from "./auth";
+import { requireSession, verifyPasscode } from "./auth";
 
 /*
   Profit allocation.
@@ -190,9 +190,10 @@ export const updateBatch = mutation({
 });
 
 export const removeBatch = mutation({
-  args: { token: v.string(), id: v.id("stockBatches") },
+  args: { token: v.string(), id: v.id("stockBatches"), passcode: v.string() },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
     const batch = await ctx.db.get(args.id);
     if (!batch) return;
 

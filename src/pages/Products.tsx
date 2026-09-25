@@ -20,7 +20,7 @@ import { ProductDialog } from "../components/ProductDialog";
 import { ProductDetailDialog } from "../components/ProductDetailDialog";
 import { SaleDialog } from "../components/SaleDialog";
 import { BatchDialog } from "../components/BatchDialog";
-import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { gradientFor, initialOf } from "../lib/avatar";
 import { errorMessage, useToast } from "../lib/toast";
@@ -239,19 +239,17 @@ export function ProductsPage() {
         onClose={() => setSelling(null)}
         presetProduct={selling}
       />
-      <ConfirmDialog
+      <PasscodeConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}
         title={t("confirm.deleteProduct")}
-        body={t("confirm.deleteProductBody")}
-        onConfirm={async () => {
+        body={
+          deleting ? `${deleting.name}\n${t("confirm.deleteProductBody")}` : ""
+        }
+        onConfirm={async (passcode) => {
           if (!deleting) return;
-          try {
-            await remove({ id: deleting._id });
-            toast.ok(t("toast.productDeleted"));
-          } catch (err) {
-            toast.error(errorMessage(err));
-          }
+          await remove({ id: deleting._id, passcode });
+          toast.ok(t("toast.productDeleted"));
         }}
       />
     </div>

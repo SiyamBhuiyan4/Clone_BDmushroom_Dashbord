@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
-import { requireSession } from "./auth";
+import { requireSession, verifyPasscode } from "./auth";
 
 export const list = query({
   args: { token: v.string(), limit: v.optional(v.number()) },
@@ -112,9 +112,10 @@ export const update = mutation({
 
 /** Deletes a sale and returns its units to stock. */
 export const remove = mutation({
-  args: { token: v.string(), id: v.id("sales") },
+  args: { token: v.string(), id: v.id("sales"), passcode: v.string() },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
     const sale = await ctx.db.get(args.id);
     if (!sale) return;
     const product = await ctx.db.get(sale.productId);
