@@ -235,6 +235,9 @@ const EN = {
 
   "orders.recordPayment": "Record payment",
   "orders.amountPaid": "Amount paid",
+  "orders.receivedNow": "Received now",
+  "orders.totalPaidMode": "Correct the total",
+  "orders.settlesInFull": "This settles the sale in full.",
   "orders.paidSoFar": "Paid so far",
   "orders.remainingDue": "Still due",
   "orders.partialRange": "A partial payment must be more than zero and less than",
@@ -569,6 +572,9 @@ const BN: Partial<Record<MessageKey, string>> = {
 
   "orders.recordPayment": "পেমেন্ট লিখুন",
   "orders.amountPaid": "যত টাকা দিয়েছেন",
+  "orders.receivedNow": "এখন পেলেন",
+  "orders.totalPaidMode": "মোট ঠিক করুন",
+  "orders.settlesInFull": "এতে বিক্রয়টি সম্পূর্ণ পরিশোধ হয়ে যাবে।",
   "orders.paidSoFar": "এ পর্যন্ত পরিশোধিত",
   "orders.remainingDue": "বাকি আছে",
   "orders.partialRange": "আংশিক পেমেন্ট শূন্যের বেশি এবং এর কম হতে হবে:",

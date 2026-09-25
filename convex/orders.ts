@@ -407,34 +407,59 @@ export const setPayment = mutation({
   args: {
     token: v.string(),
     id: v.id("orders"),
-    paymentStatus: v.union(v.literal("paid"), v.literal("due"), v.literal("partial")),
+    paymentStatus: v.optional(v.union(v.literal("paid"), v.literal("due"), v.literal("partial"))),
     paidAmount: v.optional(v.number()),
+    /*
+      What the customer has just handed over, as opposed to what they have
+      paid in total. A second instalment is the common case and the shopkeeper
+      should not have to add it up — and doing the sum here rather than in the
+      browser means a stale figure on screen cannot double-count it.
+    */
+    addAmount: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
     const order = await ctx.db.get(args.id);
-    if (!order) throw new ConvexError("That order no longer exists.");
+    if (!order) throw new ConvexError("That sale no longer exists.");
+
+    const alreadyPaid =
+      order.paidAmount ?? (order.paymentStatus === "paid" ? order.total : 0);
 
     let paidAmount: number;
-    if (args.paymentStatus === "paid") {
+    if (args.addAmount !== undefined) {
+      if (!Number.isFinite(args.addAmount) || args.addAmount <= 0) {
+        throw new ConvexError("Enter how much was received.");
+      }
+      /*
+        Capped at the total. Paying more than the bill is not a credit the
+        shop owes — it is change handed back at the counter — and recording
+        it would put a negative due on the receipt.
+      */
+      paidAmount = Math.min(alreadyPaid + args.addAmount, order.total);
+    } else if (args.paymentStatus === "paid") {
       paidAmount = order.total;
     } else if (args.paymentStatus === "due") {
       paidAmount = 0;
-    } else {
+    } else if (args.paymentStatus === "partial") {
       const amount = args.paidAmount ?? 0;
-      if (!Number.isFinite(amount) || amount <= 0) {
+      if (!Number.isFinite(amount) || amount < 0) {
         throw new ConvexError("Enter how much has been paid.");
       }
-      if (amount >= order.total) {
-        throw new ConvexError(
-          `That is the full amount — mark the order paid instead of partial.`,
-        );
-      }
-      paidAmount = amount;
+      paidAmount = Math.min(amount, order.total);
+    } else {
+      throw new ConvexError("Say what was paid.");
     }
 
-    await ctx.db.patch(args.id, { paymentStatus: args.paymentStatus, paidAmount });
-    return { paidAmount, due: order.total - paidAmount };
+    // The status follows the figure rather than being set beside it, so the
+    // two can never disagree about whether a sale is settled.
+    const paymentStatus =
+      paidAmount >= order.total ? "paid" : paidAmount <= 0 ? "due" : "partial";
+
+    await ctx.db.patch(args.id, {
+      paymentStatus,
+      paidAmount: paymentStatus === "partial" ? paidAmount : undefined,
+    });
+    return { paymentStatus, paidAmount, due: order.total - paidAmount };
   },
 });
 

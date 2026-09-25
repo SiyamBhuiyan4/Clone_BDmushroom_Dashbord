@@ -12,11 +12,17 @@ import { useAuthedMutation } from "../lib/session";
 type Status = "due" | "partial" | "paid";
 
 /**
- * Records what a customer has paid against an order.
+ * Records what a customer has paid against a sale.
  *
- * The amount box only appears for a partial payment, because for the other
- * two the amount is implied — full or nothing — and offering an editable
- * figure there just invites the two to disagree.
+ * The amount box only appears for a part payment, because for the other two
+ * the amount is implied — full or nothing — and offering an editable figure
+ * there just invites the two to disagree.
+ *
+ * A customer who has already paid something and hands over more is the common
+ * case, so the box asks what was received now rather than what they have paid
+ * in total. Correcting an earlier figure is the rarer job and gets the second
+ * tab. Nothing already paid needs that distinction, so the tabs only appear
+ * once there is a figure to add to.
  */
 export function PaymentDialog({
   open,
@@ -33,31 +39,50 @@ export function PaymentDialog({
   const setPayment = useAuthedMutation(api.orders.setPayment);
 
   const [status, setStatus] = useState<Status>("due");
+  const [mode, setMode] = useState<"add" | "set">("add");
   const [amount, setAmount] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open || !order) return;
     setStatus(order.paymentStatus as Status);
-    setAmount(order.paidAmount ? String(order.paidAmount) : "");
+    setMode("add");
+    setAmount("");
   }, [open, order]);
 
   if (!order) return null;
 
-  const paid = status === "paid" ? order.total : status === "due" ? 0 : Number(amount) || 0;
+  const alreadyPaid =
+    order.paidAmount ?? (order.paymentStatus === "paid" ? order.total : 0);
+  const entered = Number(amount) || 0;
+  const showTabs = alreadyPaid > 0;
+
+  const paid =
+    status === "paid"
+      ? order.total
+      : status === "due"
+        ? 0
+        : Math.min(mode === "add" ? alreadyPaid + entered : entered, order.total);
   const due = order.total - paid;
-  const partialValid = status !== "partial" || (paid > 0 && paid < order.total);
+  // Anything that reaches the total settles the sale rather than erroring —
+  // a customer paying the rest is the whole point of the box.
+  const settles = status === "partial" && amount !== "" && paid >= order.total;
+  const partialValid = status !== "partial" || (amount !== "" && entered > 0);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!order || !partialValid || saving) return;
     setSaving(true);
     try {
-      await setPayment({
-        id: order._id,
-        paymentStatus: status,
-        paidAmount: status === "partial" ? paid : undefined,
-      });
+      await setPayment(
+        status === "partial" && mode === "add"
+          ? { id: order._id, addAmount: entered }
+          : {
+              id: order._id,
+              paymentStatus: status,
+              paidAmount: status === "partial" ? paid : undefined,
+            },
+      );
       toast.ok(t("orders.paymentSaved"));
       onClose();
     } catch (err) {
@@ -107,7 +132,36 @@ export function PaymentDialog({
 
           {status === "partial" && (
             <div className="ac-fade-in flex flex-col gap-2.5">
-              <SectionLabel>{t("orders.amountPaid")}</SectionLabel>
+              {showTabs ? (
+                <>
+                  <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-page p-1">
+                    {(["add", "set"] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => {
+                          setMode(m);
+                          setAmount("");
+                        }}
+                        aria-pressed={mode === m}
+                        className={cx(
+                          "h-8 rounded-lg text-[12.5px] font-bold transition-all",
+                          mode === m
+                            ? "bg-surface text-accent shadow-[var(--shadow-sm)]"
+                            : "text-ink-3 hover:text-ink",
+                        )}
+                      >
+                        {m === "add" ? t("orders.receivedNow") : t("orders.totalPaidMode")}
+                      </button>
+                    ))}
+                  </div>
+                  <SectionLabel>
+                    {mode === "add" ? t("orders.receivedNow") : t("orders.amountPaid")}
+                  </SectionLabel>
+                </>
+              ) : (
+                <SectionLabel>{t("orders.amountPaid")}</SectionLabel>
+              )}
               <AmountInput
                 symbol={CURRENCY_SYMBOL}
                 value={amount}
@@ -115,6 +169,16 @@ export function PaymentDialog({
                 placeholder="0"
                 autoFocus
               />
+              {mode === "add" && alreadyPaid > 0 && entered > 0 && (
+                <p className="text-[12px] text-ink-3">
+                  {fmt(alreadyPaid)} + {fmt(entered)} = <b className="text-ink">{fmt(paid)}</b>
+                </p>
+              )}
+              {settles && (
+                <p className="text-[12px] font-semibold text-good-ink">
+                  {t("orders.settlesInFull")}
+                </p>
+              )}
               {!partialValid && amount !== "" && (
                 <p className="text-[12px] font-semibold text-critical-ink">
                   {t("orders.partialRange")} {fmt(order.total)}.
