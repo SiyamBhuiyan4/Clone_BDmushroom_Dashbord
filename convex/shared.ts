@@ -35,3 +35,26 @@ export function customerKey(name: string, phone?: string) {
   if (digits) return `p:${digits}`;
   return `n:${name.trim().toLowerCase().replace(/\s+/g, " ")}`;
 }
+
+/**
+ * A wa.me link for a Bangladeshi number, or null when there is nothing to
+ * link to. wa.me wants the country code with no plus and no separators, so
+ * the local 01… form is converted rather than passed through.
+ */
+export function whatsappUrl(phone?: string) {
+  const digits = normalisePhone(phone);
+  if (digits.length < 10) return null;
+  const international = digits.startsWith("0") ? `880${digits.slice(1)}` : digits;
+  return `https://wa.me/${international}`;
+}
+
+/**
+ * A link that works whether or not the shopkeeper typed the protocol —
+ * "facebook.com/rahim.store" pasted from a browser bar is the common case,
+ * and left alone it would resolve against the app's own origin.
+ */
+export function externalUrl(raw?: string) {
+  const value = (raw ?? "").trim();
+  if (!value) return null;
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}

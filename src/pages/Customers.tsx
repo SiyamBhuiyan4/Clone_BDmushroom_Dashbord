@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Pencil, Phone, Plus, Search, Trash2, UserRound, Users } from "lucide-react";
+import { Globe, MessageCircle, Pencil, Phone, Plus, Search, Trash2, UserRound, Users } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Button, Card, EmptyState, Input } from "../components/ui";
@@ -10,7 +10,7 @@ import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
-import { normalisePhone } from "../../convex/shared";
+import { externalUrl, normalisePhone, whatsappUrl } from "../../convex/shared";
 import { useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 
@@ -37,7 +37,9 @@ export function CustomersPage() {
       (c) =>
         c.name.toLowerCase().includes(term) ||
         (c.address ?? "").toLowerCase().includes(term) ||
-        (digits.length > 2 && normalisePhone(c.phone).includes(digits)),
+        (digits.length > 2 &&
+          (normalisePhone(c.phone).includes(digits) ||
+            normalisePhone(c.whatsapp).includes(digits))),
     );
   }, [customers, search]);
 
@@ -142,7 +144,31 @@ export function CustomersPage() {
                     </p>
                   </div>
                   </button>
-                  <div className="flex shrink-0 gap-0.5">
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {whatsappUrl(c.whatsapp ?? c.phone) && (
+                      <a
+                        href={whatsappUrl(c.whatsapp ?? c.phone)!}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        aria-label={`${t("customers.message")} ${c.name}`}
+                        title={t("customers.whatsapp")}
+                        className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-good-ink"
+                      >
+                        <MessageCircle size={15} />
+                      </a>
+                    )}
+                    {externalUrl(c.facebookUrl) && (
+                      <a
+                        href={externalUrl(c.facebookUrl)!}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        aria-label={`${t("customers.facebook")} — ${c.name}`}
+                        title={t("customers.facebook")}
+                        className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-accent"
+                      >
+                        <Globe size={15} />
+                      </a>
+                    )}
                     <button
                       onClick={() => setEditing(c)}
                       aria-label={`${t("common.edit")} ${c.name}`}

@@ -82,6 +82,8 @@ export const list = query({
         _id: c._id,
         name: c.name,
         phone: c.phone,
+        whatsapp: c.whatsapp,
+        facebookUrl: c.facebookUrl,
         address: c.address,
         orderCount: c.orderCount,
         lastOrderedAt: c.lastOrderedAt,
@@ -126,6 +128,8 @@ export const detail = query({
         _id: customer._id,
         name: customer.name,
         phone: customer.phone,
+        whatsapp: customer.whatsapp,
+        facebookUrl: customer.facebookUrl,
         address: customer.address,
         orderCount: customer.orderCount,
         lastOrderedAt: customer.lastOrderedAt,
@@ -148,6 +152,8 @@ export const create = mutation({
     token: v.string(),
     name: v.string(),
     phone: v.optional(v.string()),
+    whatsapp: v.optional(v.string()),
+    facebookUrl: v.optional(v.string()),
     address: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -172,6 +178,8 @@ export const create = mutation({
     return await ctx.db.insert("customers", {
       name,
       phone,
+      whatsapp: args.whatsapp?.trim() || undefined,
+      facebookUrl: args.facebookUrl?.trim() || undefined,
       address: args.address?.trim() || undefined,
       key,
       // Added by hand, so nothing has been bought under this name yet.
@@ -192,6 +200,8 @@ export const update = mutation({
     id: v.id("customers"),
     name: v.string(),
     phone: v.optional(v.string()),
+    whatsapp: v.optional(v.string()),
+    facebookUrl: v.optional(v.string()),
     address: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -216,6 +226,9 @@ export const update = mutation({
     await ctx.db.patch(args.id, {
       name,
       phone,
+      // Undefined clears each of these, which is what emptying a box means.
+      whatsapp: args.whatsapp?.trim() || undefined,
+      facebookUrl: args.facebookUrl?.trim() || undefined,
       address: args.address?.trim() || undefined,
       key,
     });

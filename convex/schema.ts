@@ -195,6 +195,14 @@ export default defineSchema({
   customers: defineTable({
     name: v.string(),
     phone: v.optional(v.string()),
+    /*
+      How you actually reach them. Kept apart from `phone` because the number
+      that identifies a customer and the number you message are not always the
+      same one, and because a shop that sells over WhatsApp needs the second
+      even when it has the first.
+    */
+    whatsapp: v.optional(v.string()),
+    facebookUrl: v.optional(v.string()),
     address: v.optional(v.string()),
     /** Digits of the phone, else the lowercased name. */
     key: v.string(),

@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { Eye, FileText, MapPin, Package, Phone, Receipt, UserRound, Wallet } from "lucide-react";
+import {
+  Eye,
+  FileText,
+  Globe,
+  MapPin,
+  MessageCircle,
+  Package,
+  Phone,
+  Receipt,
+  UserRound,
+  Wallet,
+} from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Badge, Modal, cx } from "./ui";
@@ -10,6 +21,7 @@ import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedQuery } from "../lib/session";
 import { downloadReceipt, previewReceipt } from "../lib/pdf";
 import type { ReceiptOrder } from "../lib/receipt";
+import { externalUrl, whatsappUrl } from "../../convex/shared";
 
 /** The receipt shape, from a stored sale. */
 function toReceipt(order: Doc<"orders">): ReceiptOrder {
@@ -104,13 +116,38 @@ export function CustomerDetailDialog({
         <div className="ac-skeleton h-64 bg-surface" aria-hidden />
       ) : (
         <div className="flex flex-col gap-6 px-6 py-6">
-          {(data.customer.phone || data.customer.address) && (
-            <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-[13px] text-ink-2">
+          {(data.customer.phone || data.customer.address || data.customer.facebookUrl) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-ink-2">
               {data.customer.phone && (
                 <span className="inline-flex items-center gap-1.5">
                   <Phone size={14} className="text-ink-3" aria-hidden />
                   {data.customer.phone}
                 </span>
+              )}
+              {/* The two that are worth a click get one. */}
+              {whatsappUrl(data.customer.whatsapp ?? data.customer.phone) && (
+                <a
+                  href={whatsappUrl(data.customer.whatsapp ?? data.customer.phone)!}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-1.5 font-semibold text-good-ink hover:underline"
+                >
+                  <MessageCircle size={14} aria-hidden />
+                  {data.customer.whatsapp && data.customer.whatsapp !== data.customer.phone
+                    ? data.customer.whatsapp
+                    : t("customers.whatsapp")}
+                </a>
+              )}
+              {externalUrl(data.customer.facebookUrl) && (
+                <a
+                  href={externalUrl(data.customer.facebookUrl)!}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-1.5 font-semibold text-accent hover:underline"
+                >
+                  <Globe size={14} aria-hidden />
+                  {t("customers.facebook")}
+                </a>
               )}
               {data.customer.address && (
                 <span className="inline-flex items-center gap-1.5">
