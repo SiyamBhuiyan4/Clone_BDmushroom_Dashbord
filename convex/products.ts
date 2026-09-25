@@ -202,7 +202,11 @@ export const detail = query({
     let projected = 0;
     let purchased = 0;
     for (const l of lots) {
-      projected += (l.unitPrice - l.unitCost) * l.quantity;
+      // A lot with no price of its own is projected at the product's asking
+      // price, and at cost when there is none — no margin rather than a made
+      // up one, and never a loss invented out of a missing figure.
+      const price = l.unitPrice ?? product.sellPrice ?? l.unitCost;
+      projected += (price - l.unitCost) * l.quantity;
       purchased += l.quantity;
     }
 

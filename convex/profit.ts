@@ -90,12 +90,13 @@ export const setBuckets = mutation({
 
 /* ---------------------------------------------------------------- batches */
 
-function validateBatch(quantity: number, unitCost: number, unitPrice: number) {
+function validateBatch(quantity: number, unitCost: number, unitPrice?: number) {
   if (!Number.isFinite(quantity) || quantity <= 0) {
     throw new ConvexError("Quantity must be more than zero.");
   }
   if (!Number.isFinite(unitCost) || unitCost < 0) throw new ConvexError("Buy price cannot be negative.");
-  if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+  // Only checked when one was given; leaving it out is allowed.
+  if (unitPrice !== undefined && (!Number.isFinite(unitPrice) || unitPrice < 0)) {
     throw new ConvexError("Sell price cannot be negative.");
   }
 }
@@ -108,7 +109,7 @@ export const addBatch = mutation({
     purchasedAt: v.number(),
     quantity: v.number(),
     unitCost: v.number(),
-    unitPrice: v.number(),
+    unitPrice: v.optional(v.number()),
     note: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -146,7 +147,7 @@ export const updateBatch = mutation({
     purchasedAt: v.number(),
     quantity: v.number(),
     unitCost: v.number(),
-    unitPrice: v.number(),
+    unitPrice: v.optional(v.number()),
     note: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -249,6 +250,18 @@ export const summary = query({
     await requireSession(ctx, args.token);
 
     const rows = await ctx.db.query("stockBatches").withIndex("by_purchasedAt").order("desc").collect();
+    /*
+      A lot with no sell price of its own is projected at the product's asking
+      price, and at cost when there is not one of those either — which shows
+      no margin rather than inventing one. Counting it as zero revenue would
+      report the whole purchase as a loss, which is worse than saying nothing.
+    */
+    const askingPrice = new Map<string, number>();
+    for (const p of await ctx.db.query("products").collect()) {
+      if (p.sellPrice !== undefined) askingPrice.set(p._id as string, p.sellPrice);
+    }
+    const priceOf = (b: (typeof rows)[number]) =>
+      b.unitPrice ?? askingPrice.get(b.productId as string) ?? b.unitCost;
     const bucketRows = await ctx.db.query("allocationBuckets").withIndex("by_order").collect();
     const buckets =
       bucketRows.length > 0
@@ -256,7 +269,8 @@ export const summary = query({
         : DEFAULT_BUCKETS;
 
     const batches = rows.map((b) => {
-      const unitProfit = b.unitPrice - b.unitCost;
+      const unitPrice = priceOf(b);
+      const unitProfit = unitPrice - b.unitCost;
       return {
         id: b._id as string,
         productId: b.productId as string,
@@ -267,10 +281,11 @@ export const summary = query({
         remaining: b.remaining ?? b.quantity,
         unitCost: b.unitCost,
         unitPrice: b.unitPrice,
+        projectedPrice: unitPrice,
         note: b.note,
         unitProfit,
         totalCost: b.unitCost * b.quantity,
-        totalRevenue: b.unitPrice * b.quantity,
+        totalRevenue: unitPrice * b.quantity,
         totalProfit: unitProfit * b.quantity,
       };
     });

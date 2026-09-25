@@ -27,7 +27,8 @@ export type BatchRow = {
   purchasedAt: number;
   quantity: number;
   unitCost: number;
-  unitPrice: number;
+  /** Absent when the lot was recorded without deciding a price. */
+  unitPrice?: number;
   note?: string;
   unitProfit: number;
   totalProfit: number;
@@ -69,7 +70,7 @@ export function BatchDialog({
       setPurchasedAt(toLocalInputValue(batch.purchasedAt));
       setQuantity(String(batch.quantity));
       setUnitCost(String(batch.unitCost));
-      setUnitPrice(String(batch.unitPrice));
+      setUnitPrice(batch.unitPrice !== undefined ? String(batch.unitPrice) : "");
       setNote(batch.note ?? "");
     } else {
       setProductId(presetProductId ?? "");
@@ -92,14 +93,22 @@ export function BatchDialog({
   const price = Number(unitPrice);
   const qtyOk = quantity.trim() !== "" && Number.isFinite(qty) && qty > 0;
   const costOk = unitCost.trim() !== "" && Number.isFinite(cost) && cost >= 0;
-  const priceOk = unitPrice.trim() !== "" && Number.isFinite(price) && price >= 0;
+  // Blank is allowed: a lot can be bought before anyone decides what it sells
+  // for, and forcing a number here would invent one.
+  const priceOk = unitPrice.trim() === "" || (Number.isFinite(price) && price >= 0);
   const valid = Boolean(productId) && qtyOk && costOk && priceOk && !saving;
 
-  const ready = qtyOk && costOk && priceOk;
+  /*
+    With no sell price there is no margin to preview — the figures read zero
+    rather than pretending the lot sells at cost, and the summary below says
+    so in words instead of showing a confident ৳0.
+  */
+  const priced = unitPrice.trim() !== "" && Number.isFinite(price);
+  const ready = qtyOk && costOk && priced;
   const unitProfit = ready ? price - cost : 0;
   const totalProfit = ready ? unitProfit * qty : 0;
   const margin = ready && price > 0 ? unitProfit / price : 0;
-  const loss = unitProfit < 0;
+  const loss = ready && unitProfit < 0;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -112,7 +121,7 @@ export function BatchDialog({
         purchasedAt: when,
         quantity: qty,
         unitCost: cost,
-        unitPrice: price,
+        unitPrice: unitPrice.trim() === "" ? undefined : price,
         note,
       };
       if (batch) {
@@ -120,7 +129,11 @@ export function BatchDialog({
         toast.ok("Stock lot updated.");
       } else {
         await add({ productId: productId as Id<"products">, ...payload });
-        toast.ok(`Added ${label.trim() || "stock lot"} — ${fmt(totalProfit)} profit.`);
+        toast.ok(
+          priced
+            ? `Added ${label.trim() || "stock lot"} — ${fmt(totalProfit)} profit.`
+            : `Added ${label.trim() || "stock lot"}.`,
+        );
       }
       onClose();
     } catch (err) {
@@ -216,13 +229,15 @@ export function BatchDialog({
               />
             </div>
             <div className="flex flex-col gap-2.5">
-              <SectionLabel>Sell price (per unit)</SectionLabel>
+              <div className="flex items-baseline justify-between gap-3">
+                <SectionLabel>Sell price (per unit)</SectionLabel>
+                <span className="text-[11.5px] text-ink-3">Optional</span>
+              </div>
               <AmountInput
                 symbol={CURRENCY_SYMBOL}
                 value={unitPrice}
                 onChange={(e) => setUnitPrice(e.target.value)}
-                placeholder="0"
-                required
+                placeholder="—"
               />
             </div>
           </div>
@@ -254,19 +269,23 @@ export function BatchDialog({
                 ) : (
                   <TrendingUp size={16} className="text-good" aria-hidden />
                 )}
-                {loss ? "Loss" : "Total profit"}
+                {!priced ? "Profit" : loss ? "Loss" : "Total profit"}
                 {ready && price > 0 && (
                   <span className="text-[12px] font-semibold text-ink-3">{percent(margin)}</span>
                 )}
               </span>
-              <span
-                className={cx(
-                  "text-[28px] leading-9 font-bold tracking-tight tabular-nums",
-                  loss ? "text-critical-ink" : "text-good-ink",
-                )}
-              >
-                {loss ? `−${fmt(Math.abs(totalProfit))}` : fmt(totalProfit)}
-              </span>
+              {!priced ? (
+                <span className="text-[13px] text-ink-3">Set a sell price to see it</span>
+              ) : (
+                <span
+                  className={cx(
+                    "text-[28px] leading-9 font-bold tracking-tight tabular-nums",
+                    loss ? "text-critical-ink" : "text-good-ink",
+                  )}
+                >
+                  {loss ? `−${fmt(Math.abs(totalProfit))}` : fmt(totalProfit)}
+                </span>
+              )}
             </div>
           </div>
 

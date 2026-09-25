@@ -103,7 +103,8 @@ export function ProductDetailDialog({
           <Section title="" empty={data.lots.length === 0} emptyText={t("detail.noLots")}>
             <ul className="flex flex-col gap-2">
               {data.lots.map((l) => {
-                const unitProfit = l.unitPrice - l.unitCost;
+                // Nothing to show a margin from until a price is decided.
+                const unitProfit = l.unitPrice !== undefined ? l.unitPrice - l.unitCost : null;
                 return (
                   <li
                     key={l._id}
@@ -118,17 +119,22 @@ export function ProductDetailDialog({
                           is the number you sell against. */}
                       <p className="mt-1 text-[12.5px] text-ink-3">
                         {fmtNum(l.remaining ?? l.quantity)} {t("detail.leftOf")}{" "}
-                        {fmtNum(l.quantity)} · {fmt(l.unitCost)} → {fmt(l.unitPrice)}
+                        {fmtNum(l.quantity)} · {fmt(l.unitCost)} →{" "}
+                        {l.unitPrice !== undefined ? fmt(l.unitPrice) : t("detail.priceOpen")}
                       </p>
                     </div>
-                    <span
-                      className={cx(
-                        "text-[14px] font-bold tabular-nums",
-                        unitProfit < 0 ? "text-critical-ink" : "text-good-ink",
-                      )}
-                    >
-                      {fmt(unitProfit * l.quantity)}
-                    </span>
+                    {unitProfit === null ? (
+                      <span className="text-[12.5px] text-ink-3">{t("detail.priceOpen")}</span>
+                    ) : (
+                      <span
+                        className={cx(
+                          "text-[14px] font-bold tabular-nums",
+                          unitProfit < 0 ? "text-critical-ink" : "text-good-ink",
+                        )}
+                      >
+                        {fmt(unitProfit * l.quantity)}
+                      </span>
+                    )}
                   </li>
                 );
               })}

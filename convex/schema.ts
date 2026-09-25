@@ -146,7 +146,12 @@ export default defineSchema({
     */
     remaining: v.optional(v.number()),
     unitCost: v.number(),
-    unitPrice: v.number(),
+    /*
+      What you expect to get for one. Optional: plenty of stock is bought
+      without a price decided yet, and a lot that has to invent one in order
+      to be recorded would put a made-up figure into the profit projection.
+    */
+    unitPrice: v.optional(v.number()),
     note: v.optional(v.string()),
   })
     .index("by_purchasedAt", ["purchasedAt"])

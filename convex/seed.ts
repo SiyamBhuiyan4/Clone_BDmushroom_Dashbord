@@ -342,7 +342,7 @@ export const backfillSellPrice = internalMutation({
       const key = l.productId as string;
       const seen = latestLot.get(key);
       if (!seen || l.purchasedAt > seen.at) {
-        latestLot.set(key, { at: l.purchasedAt, price: l.unitPrice });
+        latestLot.set(key, { at: l.purchasedAt, price: l.unitPrice ?? 0 });
       }
     }
     const retail = new Map(CATALOGUE.map((c) => [c.name, c.retailLow]));
