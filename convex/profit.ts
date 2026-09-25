@@ -200,12 +200,23 @@ export const removeBatch = mutation({
 
     const product = await ctx.db.get(batch.productId);
     if (product) {
-      if (product.quantity - batch.quantity < 0) {
-        throw new ConvexError(
-          `Deleting this lot would take stock below zero — only ${product.quantity} unit(s) remain, so some of this lot has already been sold.`,
-        );
-      }
-      await ctx.db.patch(batch.productId, { quantity: product.quantity - batch.quantity });
+      /*
+        Only what is still in the lot comes off. Units already sold out of it
+        left stock the moment they sold, so subtracting the size it was bought
+        at would take them off a second time — which is why this used to
+        refuse the delete outright the moment a lot had sold anything, and
+        refuse it for an untouched lot whenever a sibling lot of the same
+        product had sold enough.
+
+        Clamped at zero because a plain sale does not say which lot it drew
+        from, so `remaining` can overstate what is physically there. Stock
+        that reads zero is wrong by less than stock that reads below it, and
+        far less than a delete the shopkeeper cannot perform at all.
+      */
+      const left = batch.remaining ?? batch.quantity;
+      await ctx.db.patch(batch.productId, {
+        quantity: Math.max(0, product.quantity - left),
+      });
     }
     await ctx.db.delete(args.id);
   },

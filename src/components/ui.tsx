@@ -280,6 +280,13 @@ export function Badge({
 
 /* ----------------------------------------------------------------- Modal */
 
+/*
+  Every open dialog, innermost last. Escape is listened for on the document,
+  so without somewhere to ask "am I the top one?" each open dialog would
+  answer the same key press.
+*/
+const OPEN_MODALS: object[] = [];
+
 export function Modal({
   open,
   onClose,
@@ -301,12 +308,31 @@ export function Modal({
   width?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  /*
+    Held in a ref so the effect below keys on `open` alone. Callers pass an
+    inline arrow for `onClose`, which is a fresh function on every render of
+    the page holding the dialog — as a dependency it tore the whole thing down
+    and set it up again each time, and the setup ends by moving focus. Opening
+    a lot on the Products page re-rendered it on every query update, so typing
+    into a dialog kept losing the caret to the panel behind it.
+  */
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  /** Identity for the stack below; the object itself is never read. */
+  const idRef = useRef({});
 
   useEffect(() => {
     if (!open) return;
 
+    const id = idRef.current;
+    OPEN_MODALS.push(id);
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // Only the dialog on top answers. Otherwise one press dismisses the
+      // sheet and the dialog it was opened from, together.
+      if (OPEN_MODALS[OPEN_MODALS.length - 1] !== id) return;
+      closeRef.current();
     };
     document.addEventListener("keydown", onKey);
 
@@ -342,11 +368,13 @@ export function Modal({
 
     return () => {
       document.removeEventListener("keydown", onKey);
+      const at = OPEN_MODALS.lastIndexOf(id);
+      if (at !== -1) OPEN_MODALS.splice(at, 1);
       document.body.style.overflow = prevOverflow;
       document.body.style.paddingRight = prevPadding;
       opener?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

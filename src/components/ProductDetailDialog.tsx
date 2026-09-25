@@ -1,13 +1,36 @@
-import { Layers, Package, Plus, Receipt, TrendingUp, Wallet } from "lucide-react";
+import { Layers, Package, Pencil, Plus, Receipt, Trash2, TrendingUp, Wallet } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Modal, cx } from "./ui";
-import { BatchDialog } from "./BatchDialog";
+import { BatchDialog, type BatchInput } from "./BatchDialog";
+import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor } from "../lib/avatar";
-import { useAuthedQuery } from "../lib/session";
+import { plural } from "../lib/format";
+import { useToast } from "../lib/toast";
+import { useAuthedMutation, useAuthedQuery } from "../lib/session";
+
+/*
+  A stored lot, as the form wants it. The detail query hands back the raw
+  rows; the dialog asks for its own shape so it cannot be handed a product or
+  a sale by mistake.
+*/
+function toBatchInput(lot: Doc<"stockBatches">): BatchInput {
+  return {
+    id: lot._id,
+    productId: lot.productId,
+    productName: lot.productName,
+    label: lot.label,
+    purchasedAt: lot.purchasedAt,
+    quantity: lot.quantity,
+    unitCost: lot.unitCost,
+    unitPrice: lot.unitPrice,
+    remaining: lot.remaining,
+    note: lot.note,
+  };
+}
 
 /**
  * Everything about one product in one place: stock, its lots, and the sales
@@ -25,8 +48,12 @@ export function ProductDetailDialog({
 }) {
   const { fmt, fmtNum, fmtPercent, fmtDateFull, fmtDateTime } = useSettings();
   const t = useT();
+  const toast = useToast();
   const data = useAuthedQuery(api.products.detail, productId ? { id: productId } : "skip");
+  const removeBatch = useAuthedMutation(api.profit.removeBatch);
   const [addingLot, setAddingLot] = useState(false);
+  const [editingLot, setEditingLot] = useState<BatchInput | null>(null);
+  const [deletingLot, setDeletingLot] = useState<BatchInput | null>(null);
 
   const name = data?.product.name ?? "";
 
@@ -87,59 +114,86 @@ export function ProductDetailDialog({
           )}
 
           {/*
-            Lots are bought against a product, so the place to add one is the
-            product — not a page away under Profit, where the connection has
-            to be remembered rather than seen.
+            Lots are bought against a product, so the place to keep them is
+            the product — adding, correcting and dropping one alike. Sending
+            the shopkeeper to the Profit page to fix a lot they just recorded
+            here makes the connection something to remember rather than see.
           */}
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">
-              {t("detail.stockLots")}
-            </p>
-            <Button size="sm" variant="secondary" onClick={() => setAddingLot(true)}>
-              <Plus size={15} />
-              {t("detail.addLot")}
-            </Button>
-          </div>
-          <Section title="" empty={data.lots.length === 0} emptyText={t("detail.noLots")}>
-            <ul className="flex flex-col gap-2">
-              {data.lots.map((l) => {
-                // Nothing to show a margin from until a price is decided.
-                const unitProfit = l.unitPrice !== undefined ? l.unitPrice - l.unitCost : null;
-                return (
-                  <li
-                    key={l._id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <Badge tone="accent">{l.label}</Badge>
-                        <span className="text-[12px] text-ink-3">{fmtDateFull(l.purchasedAt)}</span>
+          <div>
+            <div className="mb-2.5 flex items-center justify-between gap-3">
+              <p className="text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">
+                {t("detail.stockLots")}
+              </p>
+              <Button size="sm" variant="secondary" onClick={() => setAddingLot(true)}>
+                <Plus size={15} />
+                {t("detail.addLot")}
+              </Button>
+            </div>
+            {data.lots.length === 0 ? (
+              <p className="text-[13px] text-ink-3">{t("detail.noLots")}</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {data.lots.map((l) => {
+                  // Nothing to show a margin from until a price is decided.
+                  const unitProfit = l.unitPrice !== undefined ? l.unitPrice - l.unitCost : null;
+                  const lot = toBatchInput(l);
+                  return (
+                    <li
+                      key={l._id}
+                      className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Badge tone="accent">{l.label}</Badge>
+                          <span className="text-[12px] text-ink-3">{fmtDateFull(l.purchasedAt)}</span>
+                        </div>
+                        {/* What is left matters more than what was bought: it
+                            is the number you sell against. */}
+                        <p className="mt-1 text-[12.5px] text-ink-3">
+                          {fmtNum(l.remaining ?? l.quantity)} {t("detail.leftOf")}{" "}
+                          {fmtNum(l.quantity)} · {fmt(l.unitCost)} →{" "}
+                          {l.unitPrice !== undefined ? fmt(l.unitPrice) : t("detail.priceOpen")}
+                        </p>
+                        {l.note && <p className="mt-1 text-[12px] text-ink-3">{l.note}</p>}
                       </div>
-                      {/* What is left matters more than what was bought: it
-                          is the number you sell against. */}
-                      <p className="mt-1 text-[12.5px] text-ink-3">
-                        {fmtNum(l.remaining ?? l.quantity)} {t("detail.leftOf")}{" "}
-                        {fmtNum(l.quantity)} · {fmt(l.unitCost)} →{" "}
-                        {l.unitPrice !== undefined ? fmt(l.unitPrice) : t("detail.priceOpen")}
-                      </p>
-                    </div>
-                    {unitProfit === null ? (
-                      <span className="text-[12.5px] text-ink-3">{t("detail.priceOpen")}</span>
-                    ) : (
-                      <span
-                        className={cx(
-                          "text-[14px] font-bold tabular-nums",
-                          unitProfit < 0 ? "text-critical-ink" : "text-good-ink",
+                      <div className="flex shrink-0 items-center gap-1">
+                        {unitProfit === null ? (
+                          <span className="px-1 text-[12.5px] text-ink-3">
+                            {t("detail.priceOpen")}
+                          </span>
+                        ) : (
+                          <span
+                            className={cx(
+                              "px-1 text-[14px] font-bold tabular-nums",
+                              unitProfit < 0 ? "text-critical-ink" : "text-good-ink",
+                            )}
+                          >
+                            {fmt(unitProfit * l.quantity)}
+                          </span>
                         )}
-                      >
-                        {fmt(unitProfit * l.quantity)}
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </Section>
+                        <button
+                          onClick={() => setEditingLot(lot)}
+                          aria-label={`${t("detail.editLot")} — ${l.label}`}
+                          title={t("detail.editLot")}
+                          className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => setDeletingLot(lot)}
+                          aria-label={`${t("detail.deleteLot")} — ${l.label}`}
+                          title={t("detail.deleteLot")}
+                          className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-critical"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
 
           <Section
             title={t("detail.salesHistory")}
@@ -177,6 +231,26 @@ export function ProductDetailDialog({
         open={addingLot}
         onClose={() => setAddingLot(false)}
         presetProductId={productId ?? undefined}
+      />
+      <BatchDialog
+        open={editingLot !== null}
+        onClose={() => setEditingLot(null)}
+        batch={editingLot}
+      />
+      <PasscodeConfirmDialog
+        open={deletingLot !== null}
+        onClose={() => setDeletingLot(null)}
+        title={t("confirm.deleteLot")}
+        body={
+          deletingLot
+            ? `${deletingLot.label} · ${plural(deletingLot.remaining ?? deletingLot.quantity, "unit")} left\n${t("confirm.deleteLotBody")}`
+            : ""
+        }
+        onConfirm={async (passcode) => {
+          if (!deletingLot) return;
+          await removeBatch({ id: deletingLot.id as Id<"stockBatches">, passcode });
+          toast.ok(t("toast.lotDeleted"));
+        }}
       />
     </Modal>
   );

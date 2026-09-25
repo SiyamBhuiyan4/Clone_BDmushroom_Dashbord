@@ -351,7 +351,7 @@ export function ProfitPage() {
         title="Delete this stock lot?"
         body={
           deleting
-            ? `${deleting.label} of ${deleting.productName}\n${plural(deleting.quantity, "unit")} come off your stock and your projected profit.`
+            ? `${deleting.label} of ${deleting.productName}\n${plural(deleting.remaining ?? deleting.quantity, "unit")} still in it come off your stock, and the whole lot off your projected profit.`
             : ""
         }
         onConfirm={async (passcode) => {

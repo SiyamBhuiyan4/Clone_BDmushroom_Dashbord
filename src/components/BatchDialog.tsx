@@ -19,7 +19,13 @@ import { CURRENCY_SYMBOL, percent, plural, toLocalInputValue } from "../lib/form
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 
-export type BatchRow = {
+/*
+  A stock lot as it is stored — nothing derived. The product detail view holds
+  the rows straight from the database and has no profit figures to hand, so
+  demanding them here would mean computing two numbers the form never reads
+  just to open it.
+*/
+export type BatchInput = {
   id: string;
   productId: string;
   productName: string;
@@ -29,7 +35,17 @@ export type BatchRow = {
   unitCost: number;
   /** Absent when the lot was recorded without deciding a price. */
   unitPrice?: number;
+  /*
+    What is left in the lot. Not edited here — it follows from the quantity
+    and what has sold — but a caller about to delete the lot needs it to say
+    truthfully how much stock that costs.
+  */
+  remaining?: number;
   note?: string;
+};
+
+/** A lot with the profit the Profit page works out from it. */
+export type BatchRow = BatchInput & {
   unitProfit: number;
   totalProfit: number;
 };
@@ -43,7 +59,7 @@ export function BatchDialog({
   open: boolean;
   onClose: () => void;
   /** Present when editing an existing lot. */
-  batch?: BatchRow | null;
+  batch?: BatchInput | null;
   /** Opened from a product, so the product is already decided. */
   presetProductId?: string;
 }) {
