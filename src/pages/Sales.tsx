@@ -96,6 +96,7 @@ export function SalesPage() {
   const confirmOrder = useAuthedMutation(api.orders.confirm);
   const cancelOrder = useAuthedMutation(api.orders.cancel);
   const removeOrder = useAuthedMutation(api.orders.remove);
+  const restoreOrder = useAuthedMutation(api.orders.restore);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -205,6 +206,33 @@ export function SalesPage() {
     try {
       await fn();
       toast.ok(ok);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /*
+    Cancelling is the one action here that is easy to do by accident and
+    expensive to put right by hand: the ledger lines are gone and the stock
+    has moved. So it offers the way back rather than an apology.
+  */
+  async function cancelWithUndo(order: Doc<"orders">) {
+    setBusy(order._id);
+    try {
+      await cancelOrder({ id: order._id });
+      toast.undoable(t("orders.cancelledToast"), {
+        label: t("toast.undo"),
+        run: async () => {
+          try {
+            await restoreOrder({ id: order._id });
+            toast.ok(t("orders.restoredToast"));
+          } catch (err) {
+            toast.error(errorMessage(err));
+          }
+        },
+      });
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
@@ -450,7 +478,7 @@ export function SalesPage() {
                       variant="secondary"
                       disabled={busy === order._id}
                       onClick={() =>
-                        run(order._id, () => cancelOrder({ id: order._id }), t("orders.cancelledToast"))
+                        void cancelWithUndo(order)
                       }
                     >
                       <XCircle size={15} />

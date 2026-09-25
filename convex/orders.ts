@@ -310,7 +310,67 @@ export const cancel = mutation({
       }
       await ctx.db.delete(saleId);
     }
-    await ctx.db.patch(args.id, { orderStatus: "cancelled", saleIds: [] });
+    await ctx.db.patch(args.id, {
+      orderStatus: "cancelled",
+      saleIds: [],
+      cancelledFrom: order.orderStatus,
+    });
+  },
+});
+
+/**
+ * Undoes a cancellation, putting the sale back the way it was.
+ *
+ * A cancelled sale that had been confirmed takes its stock again and writes
+ * its ledger lines again; one that was only pending simply goes back to
+ * pending, because it never moved anything in the first place. Without the
+ * remembered status both would have to be treated alike, and one of the two
+ * answers is always wrong.
+ *
+ * The new ledger lines get new ids. Nothing points at them but the sale
+ * itself, which is repointed here, so the figures come back identical even
+ * though the rows are not the same rows.
+ */
+export const restore = mutation({
+  args: { token: v.string(), id: v.id("orders"), overridePasscode: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const order = await ctx.db.get(args.id);
+    if (!order) throw new ConvexError("That sale no longer exists.");
+    if (order.orderStatus !== "cancelled") return { status: order.orderStatus };
+
+    const target = order.cancelledFrom ?? "pending";
+    if (target === "pending") {
+      await ctx.db.patch(args.id, { orderStatus: "pending", cancelledFrom: undefined });
+      return { status: "pending" as const };
+    }
+
+    /*
+      Stock can have moved on while the sale sat cancelled, so restoring one
+      is checked exactly as confirming one is — and can be overridden the same
+      way, since the goods may well have gone out regardless.
+    */
+    const short: string[] = [];
+    for (const line of order.items) {
+      const product = await ctx.db.get(line.productId);
+      if (product && line.quantity > product.quantity) {
+        short.push(`${line.productName}: only ${product.quantity} left`);
+      }
+    }
+    if (short.length > 0) {
+      if (!args.overridePasscode) {
+        throw new ConvexError(
+          `Not enough stock to restore this sale — ${short.join("; ")}. Re-enter your passcode to restore anyway.`,
+        );
+      }
+      await verifyPasscode(ctx, args.overridePasscode);
+    }
+
+    await fulfil(ctx, args.id);
+    // `fulfil` marks it confirmed; one that had been delivered goes back to
+    // delivered rather than quietly losing a step.
+    await ctx.db.patch(args.id, { orderStatus: target, cancelledFrom: undefined });
+    return { status: target };
   },
 });
 

@@ -69,6 +69,16 @@ export default defineSchema({
     ),
     note: v.optional(v.string()),
     /*
+      The status a cancellation was made from, so undoing one puts the sale
+      back where it was rather than guessing. A cancelled pending order and a
+      cancelled confirmed order look identical afterwards — both are
+      "cancelled" with no sales against them — and only one of them should
+      take stock again when it is restored.
+    */
+    cancelledFrom: v.optional(
+      v.union(v.literal("pending"), v.literal("confirmed"), v.literal("delivered")),
+    ),
+    /*
       Sales written when the order was confirmed. Confirming an order records
       one sale per line, so the Dashboard, Profit and Sales ledger keep working
       unchanged and include order revenue — without this, orders would be a
