@@ -7,6 +7,7 @@ import {
   Plus,
   Receipt,
   Wallet,
+  RotateCcw,
   Search,
   TrendingUp,
   CircleDollarSign,
@@ -470,6 +471,29 @@ export function SalesPage() {
                     >
                       <CheckCircle2 size={15} />
                       {t("orders.confirm")}
+                    </Button>
+                  )}
+                  {/*
+                    A cancelled sale used to offer nothing at all, so the only
+                    way back was the Undo in a toast that had already gone.
+                    The way back belongs on the sale itself, where it is still
+                    there tomorrow.
+                  */}
+                  {order.orderStatus === "cancelled" && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy === order._id}
+                      onClick={() =>
+                        run(
+                          order._id,
+                          () => restoreOrder({ id: order._id }),
+                          t("orders.restoredToast"),
+                        )
+                      }
+                    >
+                      <RotateCcw size={15} />
+                      {t("orders.restore")}
                     </Button>
                   )}
                   {(order.orderStatus === "confirmed" || order.orderStatus === "delivered") && (
