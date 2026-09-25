@@ -21,7 +21,7 @@ import { Pagination, usePagination } from "../components/Pagination";
 import { StatTile } from "../components/StatTile";
 import { SaleDialog } from "../components/SaleDialog";
 import { PaymentDialog } from "../components/PaymentDialog";
-import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
@@ -103,7 +103,14 @@ export function SalesPage() {
   const [status, setStatus] = useState("");
   const [rangeDays, setRangeDays] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
-  const [deleting, setDeleting] = useState<Doc<"orders"> | null>(null);
+  /*
+    One piece of state for every passcode-gated action on a sale, so the four
+    of them cannot drift into four slightly different dialogs.
+  */
+  const [pending, setPending] = useState<{
+    kind: "confirm" | "cancel" | "restore" | "delete";
+    order: Doc<"orders">;
+  } | null>(null);
   const [paying, setPaying] = useState<Doc<"orders"> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -215,31 +222,46 @@ export function SalesPage() {
   }
 
   /*
-    Cancelling is the one action here that is easy to do by accident and
-    expensive to put right by hand: the ledger lines are gone and the stock
-    has moved. So it offers the way back rather than an apology.
+    The passcode replaces the one-click Undo that used to live in the toast:
+    a toast cannot ask for one. Cancelling is still reversible — the way back
+    is the Undo cancel button on the sale, which asks in the same way.
   */
-  async function cancelWithUndo(order: Doc<"orders">) {
-    setBusy(order._id);
-    try {
-      await cancelOrder({ id: order._id });
-      toast.undoable(t("orders.cancelledToast"), {
-        label: t("toast.undo"),
-        run: async () => {
-          try {
-            await restoreOrder({ id: order._id });
-            toast.ok(t("orders.restoredToast"));
-          } catch (err) {
-            toast.error(errorMessage(err));
-          }
-        },
-      });
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setBusy(null);
-    }
-  }
+  const ACTIONS = {
+    confirm: {
+      title: t("orders.confirmTitle"),
+      body: t("orders.confirmBody"),
+      label: t("orders.confirm"),
+      done: t("orders.confirmedToast"),
+      tone: "neutral" as const,
+      run: (id: Doc<"orders">["_id"], passcode: string) => confirmOrder({ id, passcode }),
+    },
+    cancel: {
+      title: t("orders.cancelTitle"),
+      body: t("orders.cancelBody"),
+      label: t("orders.cancel"),
+      done: t("orders.cancelledToast"),
+      tone: "critical" as const,
+      run: (id: Doc<"orders">["_id"], passcode: string) => cancelOrder({ id, passcode }),
+    },
+    restore: {
+      title: t("orders.restoreTitle"),
+      body: t("orders.restoreBody"),
+      label: t("orders.restore"),
+      done: t("orders.restoredToast"),
+      tone: "neutral" as const,
+      run: (id: Doc<"orders">["_id"], passcode: string) => restoreOrder({ id, passcode }),
+    },
+    delete: {
+      title: t("orders.deleteTitle"),
+      body: t("orders.deleteBody"),
+      label: t("common.delete"),
+      done: t("orders.deleted"),
+      tone: "critical" as const,
+      run: (id: Doc<"orders">["_id"], passcode: string) => removeOrder({ id, passcode }),
+    },
+  };
+
+  const action = pending ? ACTIONS[pending.kind] : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -465,9 +487,7 @@ export function SalesPage() {
                       size="sm"
                       variant="secondary"
                       disabled={busy === order._id}
-                      onClick={() =>
-                        run(order._id, () => confirmOrder({ id: order._id }), t("orders.confirmedToast"))
-                      }
+                      onClick={() => setPending({ kind: "confirm", order })}
                     >
                       <CheckCircle2 size={15} />
                       {t("orders.confirm")}
@@ -484,13 +504,7 @@ export function SalesPage() {
                       size="sm"
                       variant="secondary"
                       disabled={busy === order._id}
-                      onClick={() =>
-                        run(
-                          order._id,
-                          () => restoreOrder({ id: order._id }),
-                          t("orders.restoredToast"),
-                        )
-                      }
+                      onClick={() => setPending({ kind: "restore", order })}
                     >
                       <RotateCcw size={15} />
                       {t("orders.restore")}
@@ -501,9 +515,7 @@ export function SalesPage() {
                       size="sm"
                       variant="secondary"
                       disabled={busy === order._id}
-                      onClick={() =>
-                        void cancelWithUndo(order)
-                      }
+                      onClick={() => setPending({ kind: "cancel", order })}
                     >
                       <XCircle size={15} />
                       {t("orders.cancel")}
@@ -511,7 +523,7 @@ export function SalesPage() {
                   )}
 
                   <button
-                    onClick={() => setDeleting(order)}
+                    onClick={() => setPending({ kind: "delete", order })}
                     aria-label={t("common.delete")}
                     className={cx(
                       "ml-auto rounded-lg p-2 text-ink-3 transition-colors",
@@ -543,19 +555,21 @@ export function SalesPage() {
 
       <SaleDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <PaymentDialog open={paying !== null} onClose={() => setPaying(null)} order={paying} />
-      <ConfirmDialog
-        open={deleting !== null}
-        onClose={() => setDeleting(null)}
-        title={t("orders.deleteTitle")}
-        body={t("orders.deleteBody")}
-        onConfirm={async () => {
-          if (!deleting) return;
-          try {
-            await removeOrder({ id: deleting._id });
-            toast.ok(t("orders.deleted"));
-          } catch (err) {
-            toast.error(errorMessage(err));
-          }
+      <PasscodeConfirmDialog
+        open={pending !== null}
+        onClose={() => setPending(null)}
+        title={action?.title ?? ""}
+        body={
+          pending && action
+            ? `${pending.order.orderNo} · ${pending.order.customerName} · ${fmt(pending.order.total)}\n${action.body}`
+            : ""
+        }
+        confirmLabel={action?.label}
+        tone={action?.tone}
+        onConfirm={async (passcode) => {
+          if (!pending || !action) return;
+          await action.run(pending.order._id, passcode);
+          toast.ok(action.done);
         }}
       />
     </div>

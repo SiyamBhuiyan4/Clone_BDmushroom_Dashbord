@@ -119,6 +119,14 @@ export const get = query({
 
 /* ----------------------------------------------------------------- write */
 
+/*
+  Confirming, cancelling, undoing a cancellation and deleting all ask for the
+  passcode, not just a live session. Each one moves stock and rewrites the
+  ledger, and a browser left unlocked on the counter is not the same thing as
+  the owner deciding. The check is in the mutation rather than only the
+  dialog, so a caller that never opened the dialog is refused too.
+*/
+
 export const create = mutation({
   args: {
     token: v.string(),
@@ -261,9 +269,15 @@ async function fulfil(ctx: MutationCtx, id: Id<"orders">) {
  * product revenue, and folding it in would inflate margins.
  */
 export const confirm = mutation({
-  args: { token: v.string(), id: v.id("orders"), overridePasscode: v.optional(v.string()) },
+  args: {
+    token: v.string(),
+    id: v.id("orders"),
+    passcode: v.string(),
+    overridePasscode: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
     const order = await ctx.db.get(args.id);
     if (!order) throw new ConvexError("That order no longer exists.");
     if (order.orderStatus === "confirmed" || order.orderStatus === "delivered") {
@@ -294,9 +308,10 @@ export const confirm = mutation({
 
 /** Cancels a confirmed order: removes its sales and returns the stock. */
 export const cancel = mutation({
-  args: { token: v.string(), id: v.id("orders") },
+  args: { token: v.string(), id: v.id("orders"), passcode: v.string() },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
     const order = await ctx.db.get(args.id);
     if (!order) throw new ConvexError("That order no longer exists.");
     if (order.orderStatus === "cancelled") return;
@@ -332,9 +347,15 @@ export const cancel = mutation({
  * though the rows are not the same rows.
  */
 export const restore = mutation({
-  args: { token: v.string(), id: v.id("orders"), overridePasscode: v.optional(v.string()) },
+  args: {
+    token: v.string(),
+    id: v.id("orders"),
+    passcode: v.string(),
+    overridePasscode: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
     const order = await ctx.db.get(args.id);
     if (!order) throw new ConvexError("That sale no longer exists.");
     if (order.orderStatus !== "cancelled") return { status: order.orderStatus };
@@ -440,9 +461,10 @@ export const setStatus = mutation({
 });
 
 export const remove = mutation({
-  args: { token: v.string(), id: v.id("orders") },
+  args: { token: v.string(), id: v.id("orders"), passcode: v.string() },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
     const order = await ctx.db.get(args.id);
     if (!order) return;
     // Deleting a confirmed order must not leave its sales behind.
