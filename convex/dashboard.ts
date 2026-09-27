@@ -20,6 +20,13 @@ export const overview = query({
     await requireSession(ctx, args.token);
     const products = await ctx.db.query("products").collect();
     const sales = await ctx.db.query("sales").withIndex("by_soldAt").order("desc").collect();
+    /*
+      Operating costs — van fuel, the electricity bill — which is what turns
+      gross profit into net. Kept separate from a sale's `unitCost`, because
+      that one is recovered when the unit sells and an operating cost never
+      is; adding them together would make both figures meaningless.
+    */
+    const costs = await ctx.db.query("costs").withIndex("by_spentAt").order("desc").collect();
 
     let revenue = 0;
     let cost = 0;
@@ -29,6 +36,9 @@ export const overview = query({
       cost += s.unitCost * s.quantity;
       unitsSold += s.quantity;
     }
+
+    let operatingCost = 0;
+    for (const c of costs) operatingCost += c.amount;
 
     const active = products.filter((p) => !p.archived);
     let unitsInStock = 0;
@@ -45,10 +55,20 @@ export const overview = query({
       allTime: {
         revenue,
         cost,
+        /*
+          `profit` is gross — revenue less what the units cost to buy. `net`
+          takes the operating costs off that. Both are reported because a shop
+          that only sees one of them cannot tell a thin margin from an
+          expensive month.
+        */
         profit: revenue - cost,
+        operatingCost,
+        net: revenue - cost - operatingCost,
         margin: revenue > 0 ? (revenue - cost) / revenue : 0,
+        netMargin: revenue > 0 ? (revenue - cost - operatingCost) / revenue : 0,
         salesCount: sales.length,
         unitsSold,
+        costsCount: costs.length,
       },
       inventory: {
         productCount: active.length,
@@ -73,6 +93,20 @@ export const overview = query({
           units: s.quantity,
           revenue: s.unitPrice * s.quantity,
           profit: (s.unitPrice - s.unitCost) * s.quantity,
+        })),
+      /*
+        One dated row per cost in the window, for the same reason the sales
+        are not pre-aggregated: the page's range control is applied in the
+        browser's timezone, and a total summed here could not be re-scoped
+        without a second round trip.
+      */
+      windowCosts: costs
+        .filter((c) => c.spentAt >= since)
+        .map((c) => ({
+          id: c._id as string,
+          name: c.name,
+          spentAt: c.spentAt,
+          amount: c.amount,
         })),
       windowDays: WINDOW_DAYS,
     };

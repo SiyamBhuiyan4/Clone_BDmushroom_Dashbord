@@ -5,9 +5,11 @@ import {
   Package,
   PackagePlus,
   Plus,
+  PiggyBank,
   Receipt,
   RotateCcw,
   TrendingUp,
+  Wallet,
   AlertTriangle,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
@@ -62,6 +64,15 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
     const rows = data.windowSales.filter((s) => s.soldAt >= since);
     // The immediately preceding window of the same length, for the deltas.
     const prevRows = data.windowSales.filter((s) => s.soldAt >= prevSince && s.soldAt < since);
+    /*
+      Costs answer to the same bounds as the sales. A net figure that took its
+      revenue from one range and its costs from another would be wrong in a
+      way nothing on the page could reveal.
+    */
+    const costRows = data.windowCosts.filter((c) => c.spentAt >= since);
+    const prevCostRows = data.windowCosts.filter(
+      (c) => c.spentAt >= prevSince && c.spentAt < since,
+    );
 
     let revenue = 0;
     let profit = 0;
@@ -89,12 +100,17 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
       byProduct.set(s.productId, agg);
     }
 
+    let operatingCost = 0;
+    for (const c of costRows) operatingCost += c.amount;
+
     let prevRevenue = 0;
     let prevProfit = 0;
     for (const s of prevRows) {
       prevRevenue += s.revenue;
       prevProfit += s.profit;
     }
+    let prevOperatingCost = 0;
+    for (const c of prevCostRows) prevOperatingCost += c.amount;
 
     // Fill every day in the range so the line stays continuous through days
     // with no sales instead of skipping over them.
@@ -105,16 +121,32 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
       points.push({ ts, revenue: bucket?.revenue ?? 0, profit: bucket?.profit ?? 0 });
     }
 
+    // Gross profit less the operating costs carried in the same range.
+    const net = profit - operatingCost;
+    const prevNet = prevProfit - prevOperatingCost;
+
     return {
       revenue,
       profit,
+      operatingCost,
+      net,
       units,
       count: rows.length,
+      costCount: costRows.length,
       margin: revenue > 0 ? profit / revenue : 0,
+      netMargin: revenue > 0 ? net / revenue : 0,
       averageSale: rows.length > 0 ? revenue / rows.length : 0,
       deltaProfit: change(profit, prevProfit),
       deltaRevenue: change(revenue, prevRevenue),
       deltaCount: change(rows.length, prevRows.length),
+      deltaUnits: change(units, prevRows.reduce((n, s) => n + s.units, 0)),
+      /*
+        Spending less is an improvement, so the sign is flipped for the cost
+        tile — a month that spent 20% less should not be shown in red with a
+        downward arrow as though something had gone wrong.
+      */
+      deltaCost: change(prevOperatingCost, operatingCost),
+      deltaNet: change(net, prevNet),
       points,
       topProducts: [...byProduct.values()].sort((a, b) => b.profit - a.profit).slice(0, 6),
     };
@@ -203,11 +235,28 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
             </div>
           </div>
 
-          <div className="ac-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {/*
+            Read left to right, the tiles are the income statement: revenue,
+            what the goods cost to buy taken off it, the operating costs taken
+            off that, and what is left. Units sold and stock follow, because
+            they answer a different question from the money.
+
+            Three across rather than four — five money figures at quarter
+            width truncate the moment a total reaches six digits.
+          */}
+          <div className="ac-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <StatTile
               hero
+              accent="sky"
+              label={t("dash.revenue")}
+              value={<AnimatedNumber value={scoped.revenue} format={fmt} />}
+              icon={<CircleDollarSign size={17} />}
+              delta={vs(scoped.deltaRevenue)}
+              sub={`${fmt(allTime.revenue)} ${t("dash.allTime")}`}
+            />
+            <StatTile
               accent="violet"
-              label={t("dash.realisedProfit")}
+              label={t("dash.grossProfit")}
               value={
                 <AnimatedNumber
                   value={scoped.profit}
@@ -219,29 +268,57 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
               sub={
                 scoped.revenue > 0
                   ? `${fmtPercent(scoped.margin)} ${t("dash.margin")}`
-                  : t("profit.realisedHint")
+                  : t("dash.grossProfitHint")
               }
             />
             <StatTile
-              accent="sky"
-              label={t("dash.revenue")}
-              value={<AnimatedNumber value={scoped.revenue} format={fmt} />}
-              icon={<CircleDollarSign size={17} />}
-              delta={vs(scoped.deltaRevenue)}
-              sub={`${fmt(allTime.revenue)} ${t("dash.allTime")}`}
-            />
-            <StatTile
               accent="amber"
-              label={t("dash.sales")}
-              value={<AnimatedNumber value={scoped.count} format={fmtNum} />}
-              icon={<Receipt size={17} />}
-              delta={vs(scoped.deltaCount)}
+              label={t("dash.operatingCost")}
+              value={<AnimatedNumber value={scoped.operatingCost} format={fmt} />}
+              icon={<Wallet size={17} />}
+              delta={vs(scoped.deltaCost)}
               sub={
-                scoped.count > 0 ? `${fmt(scoped.averageSale)} ${t("dash.avg")}` : t("dash.noSales")
+                scoped.costCount > 0
+                  ? `${plural(scoped.costCount, "cost")} · ${fmt(allTime.operatingCost)} ${t("dash.allTime")}`
+                  : t("dash.noCosts")
               }
             />
             <StatTile
               accent="emerald"
+              label={t("dash.netProfit")}
+              value={
+                <AnimatedNumber
+                  value={scoped.net}
+                  format={(n) => (n < 0 ? `−${fmt(Math.abs(n))}` : fmt(n))}
+                />
+              }
+              icon={<PiggyBank size={17} />}
+              delta={vs(scoped.deltaNet)}
+              sub={
+                scoped.revenue > 0
+                  ? `${fmtPercent(scoped.netMargin)} ${t("dash.margin")}`
+                  : t("dash.netProfitHint")
+              }
+            />
+            <StatTile
+              accent="violet"
+              label={t("dash.unitsSold")}
+              value={
+                <AnimatedNumber
+                  value={scoped.units}
+                  format={(n) => `${fmtNum(n)} ${t("common.units")}`}
+                />
+              }
+              icon={<Receipt size={17} />}
+              delta={vs(scoped.deltaUnits)}
+              sub={
+                scoped.count > 0
+                  ? `${plural(scoped.count, "sale")} · ${fmt(scoped.averageSale)} ${t("dash.avg")}`
+                  : t("dash.noSales")
+              }
+            />
+            <StatTile
+              accent="sky"
               label={t("dash.availableStock")}
               value={
                 <AnimatedNumber
