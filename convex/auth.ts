@@ -32,6 +32,53 @@ const MIN_PASSCODE_LENGTH = 6;
 const MAX_FAILURES = 8;
 const FAILURE_WINDOW_MS = 10 * 60 * 1000;
 
+/*
+  Recording a failed attempt is the one thing in this file that cannot be done
+  on the way out of an error.
+
+  A Convex mutation is a transaction: "All operations within a mutation are
+  atomic", and a handler that throws has every write rolled back with it. So
+  `insert(loginFailures); throw` — which is what this file used to do in three
+  places — records nothing at all. The row is written and discarded together,
+  the count never reaches one, and the throttle never fires however many
+  guesses arrive.
+
+  The fix is that a guess which must be counted cannot abort. `login` and
+  `change` therefore report a wrong passcode by returning a result rather than
+  throwing, so the transaction commits with the failure in it. See
+  `verifyPasscode` for the case where that trade is not available.
+*/
+
+/**
+ * Drops failures that have aged out of the window.
+ *
+ * The lock only ever counts rows inside the window, so these change nothing
+ * about who is let in — but now that a failure actually persists, nothing else
+ * would ever remove them and the table would grow for the life of the
+ * deployment.
+ */
+async function purgeStaleFailures(ctx: MutationCtx, since: number) {
+  const stale = await ctx.db
+    .query("loginFailures")
+    .withIndex("by_at", (q) => q.lt("at", since))
+    .take(200);
+  for (const f of stale) await ctx.db.delete(f._id);
+}
+
+/** The throttle's verdict, and the rows that would be cleared by a success. */
+async function throttleState(ctx: MutationCtx) {
+  const now = Date.now();
+  const since = now - FAILURE_WINDOW_MS;
+  const recent = await ctx.db
+    .query("loginFailures")
+    .withIndex("by_at", (q) => q.gte("at", since))
+    .collect();
+  // Index order is ascending, so the first row is the one that ages out next.
+  const retryInMin =
+    recent.length > 0 ? Math.max(1, Math.ceil((recent[0].at + FAILURE_WINDOW_MS - now) / 60000)) : 0;
+  return { now, since, recent, locked: recent.length >= MAX_FAILURES, retryInMin };
+}
+
 /* ------------------------------------------------------------ primitives */
 
 function toHex(buffer: ArrayBuffer): string {
@@ -101,28 +148,33 @@ export async function requireSession(ctx: QueryCtx | MutationCtx, token: string)
 
 /**
  * Re-checks the passcode for an action a live session alone should not
- * authorise. Throws on failure and records the attempt against the same
- * throttle as the login screen, so this cannot be used as an oracle to
- * guess the passcode faster.
+ * authorise — a delete, an order confirmation, a range reset.
+ *
+ * This one *observes* the throttle but cannot add to it. Its whole job is to
+ * abort the mutation it was called from, and an abort rolls back every write in
+ * that transaction, so a failure recorded here would be discarded along with
+ * the delete it prevented. The insert that used to sit on this path was dead
+ * code for exactly that reason.
+ *
+ * So the count comes from `login` and `change`, which can return instead of
+ * throwing, and this honours the lock they build. The gap that leaves is
+ * narrow: reaching here at all needs a live session, so a stranger cannot use
+ * it as an oracle — only someone already signed in, who has the data anyway.
+ * Closing it properly means verifying in a mutation of its own and handing the
+ * action a short-lived proof, which is a larger change than this comment.
  */
 export async function verifyPasscode(ctx: MutationCtx, passcode: string) {
   const config = await ctx.db.query("authConfig").first();
   if (!config) throw new ConvexError("No passcode has been set yet.");
 
-  const since = Date.now() - FAILURE_WINDOW_MS;
-  const recent = await ctx.db
-    .query("loginFailures")
-    .withIndex("by_at", (q) => q.gte("at", since))
-    .collect();
-  if (recent.length >= MAX_FAILURES) {
-    throw new ConvexError("Too many failed attempts. Try again shortly.");
-  }
+  const { recent, locked } = await throttleState(ctx);
+  if (locked) throw new ConvexError("Too many failed attempts. Try again shortly.");
 
   const candidate = await derive(passcode, config.saltHex, config.iterations);
   if (!timingSafeEqual(candidate, config.hashHex)) {
-    await ctx.db.insert("loginFailures", { at: Date.now() });
     throw new ConvexError("Incorrect passcode.");
   }
+  // A correct passcode is proof enough to clear the lock, as a login is.
   for (const f of recent) await ctx.db.delete(f._id);
 }
 
@@ -212,49 +264,81 @@ export const setPasscode = internalMutation({
   },
 });
 
+/**
+ * Signs in.
+ *
+ * A wrong passcode is returned, not thrown, because throwing would roll back
+ * the row that records it — see the note at the top of this file. `ok` is what
+ * the caller must branch on; a throw from here means something structural (no
+ * passcode set at all), not a bad guess.
+ */
 export const login = mutation({
   args: { passcode: v.string() },
   handler: async (ctx, args) => {
     const config = await ctx.db.query("authConfig").first();
     if (!config) throw new ConvexError("No passcode has been set yet.");
 
-    // Throttle: count recent failures, and drop ones outside the window.
-    const since = Date.now() - FAILURE_WINDOW_MS;
-    const recent = await ctx.db
-      .query("loginFailures")
-      .withIndex("by_at", (q) => q.gte("at", since))
-      .collect();
-    if (recent.length >= MAX_FAILURES) {
-      const retryInMin = Math.ceil((recent[0].at + FAILURE_WINDOW_MS - Date.now()) / 60000);
-      throw new ConvexError(`Too many attempts. Try again in ${Math.max(1, retryInMin)} minutes.`);
+    const { now, since, recent, locked, retryInMin } = await throttleState(ctx);
+    if (locked) {
+      return {
+        ok: false as const,
+        error: `Too many attempts. Try again in ${retryInMin} minutes.`,
+      };
     }
 
     const candidate = await derive(args.passcode, config.saltHex, config.iterations);
     if (!timingSafeEqual(candidate, config.hashHex)) {
-      await ctx.db.insert("loginFailures", { at: Date.now() });
-      throw new ConvexError("Incorrect passcode.");
+      await ctx.db.insert("loginFailures", { at: now });
+      await purgeStaleFailures(ctx, since);
+      return { ok: false as const, error: "Incorrect passcode." };
     }
 
     // Success clears the failure log.
     for (const f of recent) await ctx.db.delete(f._id);
-    return await issueSession(ctx);
+    await purgeStaleFailures(ctx, since);
+    const session = await issueSession(ctx);
+    return { ok: true as const, token: session.token, expiresAt: session.expiresAt };
   },
 });
 
+/**
+ * Changes the passcode.
+ *
+ * Takes a session token and answers to the same throttle as the login screen.
+ * Without both it was a better brute-force target than the login screen it sat
+ * beside: a public endpoint that checked the passcode, counted nothing, and
+ * required no session — so guesses could be posted at it indefinitely, faster
+ * than the front door and without signing in first.
+ *
+ * A wrong current passcode returns rather than throws, for the same reason
+ * login does: a throw takes the record of the attempt with it.
+ */
 export const change = mutation({
-  args: { currentPasscode: v.string(), newPasscode: v.string() },
+  args: { token: v.string(), currentPasscode: v.string(), newPasscode: v.string() },
   handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
     const config = await ctx.db.query("authConfig").first();
     if (!config) throw new ConvexError("No passcode has been set yet.");
     if (args.newPasscode.length < MIN_PASSCODE_LENGTH) {
       throw new ConvexError(`Passcode must be at least ${MIN_PASSCODE_LENGTH} characters.`);
     }
 
+    const { now, since, recent, locked, retryInMin } = await throttleState(ctx);
+    if (locked) {
+      return {
+        ok: false as const,
+        error: `Too many attempts. Try again in ${retryInMin} minutes.`,
+      };
+    }
+
     const candidate = await derive(args.currentPasscode, config.saltHex, config.iterations);
     if (!timingSafeEqual(candidate, config.hashHex)) {
-      await ctx.db.insert("loginFailures", { at: Date.now() });
-      throw new ConvexError("Current passcode is incorrect.");
+      await ctx.db.insert("loginFailures", { at: now });
+      await purgeStaleFailures(ctx, since);
+      return { ok: false as const, error: "Current passcode is incorrect." };
     }
+    for (const f of recent) await ctx.db.delete(f._id);
+    await purgeStaleFailures(ctx, since);
 
     const saltHex = randomHex(16);
     await ctx.db.patch(config._id, {
@@ -267,7 +351,8 @@ export const change = mutation({
     // Changing the passcode invalidates every existing session, including
     // any an attacker might be holding.
     for (const s of await ctx.db.query("sessions").collect()) await ctx.db.delete(s._id);
-    return await issueSession(ctx);
+    const session = await issueSession(ctx);
+    return { ok: true as const, token: session.token, expiresAt: session.expiresAt };
   },
 });
 

@@ -84,9 +84,21 @@ function PasscodeScreen({
     setBusy(true);
     setError(null);
     try {
+      /*
+        A wrong passcode comes back as `ok: false`, not as a thrown error. It
+        has to: the server records the failed attempt in the same transaction,
+        and a throw would roll that record back — which is why the throttle
+        counted nothing for as long as this waited on a `catch`.
+      */
       const result = await login({ passcode });
+      if (!result.ok) {
+        setError(result.error);
+        setPasscode("");
+        return;
+      }
       onSignedIn(result.token, result.expiresAt);
     } catch (err) {
+      // Still reachable: no passcode configured, or the network dropped.
       setError(errorMessage(err));
       setPasscode("");
     } finally {
