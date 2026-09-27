@@ -109,19 +109,19 @@ async function derive(passcode: string, saltHex: string, iterations: number): Pr
   return toHex(bits);
 }
 
-async function sha256Hex(input: string): Promise<string> {
+export async function sha256Hex(input: string): Promise<string> {
   return toHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input)));
 }
 
 /** Constant-time string compare, so a wrong guess cannot be timed. */
-function timingSafeEqual(a: string, b: string): boolean {
+export function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
 }
 
-function randomHex(bytes: number): string {
+export function randomHex(bytes: number): string {
   const buf = new Uint8Array(bytes);
   crypto.getRandomValues(buf);
   return [...buf].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -204,7 +204,7 @@ export const validate = query({
   },
 });
 
-async function issueSession(ctx: MutationCtx) {
+export async function issueSession(ctx: MutationCtx) {
   // Opportunistic cleanup of anything already expired.
   const stale = await ctx.db
     .query("sessions")
@@ -265,41 +265,45 @@ export const setPasscode = internalMutation({
 });
 
 /**
- * Signs in.
+ * The passcode half of signing in, against the brute-force throttle.
  *
- * A wrong passcode is returned, not thrown, because throwing would roll back
- * the row that records it — see the note at the top of this file. `ok` is what
- * the caller must branch on; a throw from here means something structural (no
- * passcode set at all), not a bad guess.
+ * A plain helper rather than a mutation of its own. It used to be the public
+ * `auth.login` and the whole of the sign-in; leaving it exported in any form
+ * would keep a door open beside the one the emailed code guards, since the
+ * passcode alone would still be enough and the email step would be
+ * decoration. `otp.completeLogin` calls this, and nothing else does.
+ *
+ * Calling it directly rather than through `ctx.runMutation` also keeps the
+ * writes in the caller's transaction, which is what lets a recorded failure
+ * survive — see the note at the top of this file.
+ *
+ * Returns rather than throws for that same reason: a throw would roll back
+ * the attempt it just counted.
  */
-export const login = mutation({
-  args: { passcode: v.string() },
-  handler: async (ctx, args) => {
-    const config = await ctx.db.query("authConfig").first();
-    if (!config) throw new ConvexError("No passcode has been set yet.");
+export async function attemptPasscode(
+  ctx: MutationCtx,
+  passcode: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const config = await ctx.db.query("authConfig").first();
+  if (!config) throw new ConvexError("No passcode has been set yet.");
 
-    const { now, since, recent, locked, retryInMin } = await throttleState(ctx);
-    if (locked) {
-      return {
-        ok: false as const,
-        error: `Too many attempts. Try again in ${retryInMin} minutes.`,
-      };
-    }
+  const { now, since, recent, locked, retryInMin } = await throttleState(ctx);
+  if (locked) {
+    return { ok: false, error: `Too many attempts. Try again in ${retryInMin} minutes.` };
+  }
 
-    const candidate = await derive(args.passcode, config.saltHex, config.iterations);
-    if (!timingSafeEqual(candidate, config.hashHex)) {
-      await ctx.db.insert("loginFailures", { at: now });
-      await purgeStaleFailures(ctx, since);
-      return { ok: false as const, error: "Incorrect passcode." };
-    }
-
-    // Success clears the failure log.
-    for (const f of recent) await ctx.db.delete(f._id);
+  const candidate = await derive(passcode, config.saltHex, config.iterations);
+  if (!timingSafeEqual(candidate, config.hashHex)) {
+    await ctx.db.insert("loginFailures", { at: now });
     await purgeStaleFailures(ctx, since);
-    const session = await issueSession(ctx);
-    return { ok: true as const, token: session.token, expiresAt: session.expiresAt };
-  },
-});
+    return { ok: false, error: "Incorrect passcode." };
+  }
+
+  // Success clears the failure log.
+  for (const f of recent) await ctx.db.delete(f._id);
+  await purgeStaleFailures(ctx, since);
+  return { ok: true };
+}
 
 /**
  * Changes the passcode.

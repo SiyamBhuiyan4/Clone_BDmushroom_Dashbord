@@ -105,6 +105,57 @@ export default defineSchema({
     value: v.number(),
   }).index("by_name", ["name"]),
 
+  /*
+    Who may sign in.
+
+    An allowlist rather than a registration flow: this is a two-person shop,
+    and the rows are meant to be edited in the Convex dashboard by hand. An
+    address that is not here cannot ask for a code, so the sign-in screen has
+    nothing to offer a stranger who reaches it.
+
+    `email` is stored lowercased and trimmed, because Gmail treats addresses
+    case-insensitively and an allowlist that does not would let one typo lock
+    the owner out of their own shop.
+  */
+  loginEmails: defineTable({
+    email: v.string(),
+    /** Who it is, for whoever is reading the table later. */
+    label: v.optional(v.string()),
+    /*
+      Kept rather than deleted when access is withdrawn, so the row that
+      recorded someone's access is still there to be seen afterwards.
+    */
+    active: v.boolean(),
+    createdAt: v.number(),
+    lastLoginAt: v.optional(v.number()),
+  }).index("by_email", ["email"]),
+
+  /*
+    A sign-in code, and the short-lived permission it becomes.
+
+    The code itself is never stored — only a SHA-256 of it, for the same
+    reason the passcode and session tokens are not kept in the clear: a dump
+    of this table must not be replayable as a sign-in.
+
+    `grantHash` appears once the code has been entered correctly, and is what
+    opens the passcode step. Holding it server-side is the point: a client
+    that simply enabled its own passcode field would be deciding its own
+    authorisation, which is not a decision a browser gets to make.
+  */
+  otpChallenges: defineTable({
+    email: v.string(),
+    codeHash: v.string(),
+    expiresAt: v.number(),
+    /** Wrong codes entered against this challenge, so it cannot be ground down. */
+    attempts: v.number(),
+    grantHash: v.optional(v.string()),
+    grantExpiresAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_email", ["email"])
+    .index("by_grantHash", ["grantHash"])
+    .index("by_expiresAt", ["expiresAt"]),
+
   /** Failed login timestamps, for throttling brute force. */
   loginFailures: defineTable({
     at: v.number(),

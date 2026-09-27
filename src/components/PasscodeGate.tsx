@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { useMutation } from "convex/react";
-import { KeyRound, Loader2, ShieldCheck, Wallet } from "lucide-react";
+import { useAction, useMutation } from "convex/react";
+import { KeyRound, Loader2, Mail, ShieldCheck, Wallet } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Button, Input, cx } from "./ui";
 import { useSession } from "../lib/session";
@@ -19,7 +19,7 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
   // A deployment with no passcode cannot be claimed from the browser — it has
   // to be set with admin credentials. See NotConfigured.
   if (!configured) return <NotConfigured />;
-  return <PasscodeScreen onSignedIn={signIn} />;
+  return <SignInScreen onSignedIn={signIn} />;
 }
 
 function Booting() {
@@ -58,52 +58,133 @@ function NotConfigured() {
           {"'"}
         </pre>
         <p className="mt-3 text-[12px] leading-5 text-ink-3">
-          Add <code className="text-ink-2">--prod</code> to target production.
+          Then add the addresses allowed to sign in:
         </p>
+        <pre className="mt-2 overflow-x-auto rounded-xl border border-line bg-surface px-4 py-3 text-left text-[12.5px] text-ink">
+          npx convex run otp:allowEmail {"'"}
+          {'{"email":"you@gmail.com"}'}
+          {"'"}
+        </pre>
       </div>
     </div>
   );
 }
 
-function PasscodeScreen({
+/** Which proof the screen is currently asking for. */
+type Step = "email" | "code" | "passcode";
+
+/**
+ * Signing in, in two proofs.
+ *
+ * The emailed code comes first, and the passcode field stays shut until it is
+ * answered. A wrong passcode does not simply clear the field: the server
+ * revokes the grant behind it, so the screen returns to the start and the next
+ * attempt costs another email. That ordering is the point — it limits passcode
+ * guessing to the speed of an inbox rather than the speed of typing.
+ *
+ * The browser decides none of this. It holds a grant token the server issued
+ * and can withdraw; an enabled field here is a consequence of that token
+ * existing, never the cause of being let in.
+ */
+function SignInScreen({
   onSignedIn,
 }: {
   onSignedIn: (token: string, expiresAt: number) => void;
 }) {
-  const login = useMutation(api.auth.login);
+  const requestCode = useAction(api.otp.requestCode);
+  const verifyCode = useMutation(api.otp.verifyCode);
+  const completeLogin = useMutation(api.otp.completeLogin);
 
+  const [step, setStep] = useState<Step>("email");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [passcode, setPasscode] = useState("");
+  const [grantToken, setGrantToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const canSubmit = passcode.length > 0 && !busy;
+  async function sendCode(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (busy || !email.trim()) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await requestCode({ email });
+      if (!result.ok) {
+        setError(result.error ?? "The code could not be sent.");
+        return;
+      }
+      setCode("");
+      setStep("code");
+      setNotice(`Code sent to ${email.trim().toLowerCase()}. It expires in 10 minutes.`);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
-  async function submit(e: React.FormEvent) {
+  async function submitCode(e: React.FormEvent) {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (busy || code.trim().length === 0) return;
     setBusy(true);
     setError(null);
     try {
-      /*
-        A wrong passcode comes back as `ok: false`, not as a thrown error. It
-        has to: the server records the failed attempt in the same transaction,
-        and a throw would roll that record back — which is why the throttle
-        counted nothing for as long as this waited on a `catch`.
-      */
-      const result = await login({ passcode });
+      const result = await verifyCode({ email, code });
       if (!result.ok) {
         setError(result.error);
+        setCode("");
+        return;
+      }
+      setGrantToken(result.grantToken);
+      setPasscode("");
+      setStep("passcode");
+      setNotice("Code accepted. Now enter your passcode.");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitPasscode(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy || !grantToken || passcode.length === 0) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await completeLogin({ grantToken, passcode });
+      if (!result.ok) {
+        /*
+          The grant is spent whether or not the passcode was right, so there is
+          nothing left to retry against. Back to the start, with the address
+          kept so the only thing to redo is the code itself.
+        */
+        setGrantToken(null);
         setPasscode("");
+        setCode("");
+        setStep("email");
+        setError(`${result.error} Verify by email again to unlock the passcode.`);
         return;
       }
       onSignedIn(result.token, result.expiresAt);
     } catch (err) {
-      // Still reachable: no passcode configured, or the network dropped.
       setError(errorMessage(err));
-      setPasscode("");
     } finally {
       setBusy(false);
     }
+  }
+
+  function startOver() {
+    setGrantToken(null);
+    setStep("email");
+    setCode("");
+    setPasscode("");
+    setError(null);
+    setNotice(null);
   }
 
   return (
@@ -118,55 +199,146 @@ function PasscodeScreen({
           </span>
           <h1 className="text-[22px] leading-7 font-bold tracking-tight text-ink">Ledger</h1>
           <p className="mt-1.5 max-w-xs text-[13.5px] leading-6 text-ink-3">
-            Enter your passcode to continue.
+            {step === "email"
+              ? "Sign in with your email, then your passcode."
+              : step === "code"
+                ? "Enter the code we emailed you."
+                : "Code accepted. Now your passcode."}
           </p>
         </div>
 
-        <form
-          onSubmit={submit}
-          className="rounded-card border border-line bg-surface p-6 shadow-[var(--shadow-card)]"
-        >
-          <div className="flex flex-col gap-4">
-            <label className="flex flex-col gap-2">
-              <span className="text-[13px] font-semibold text-ink-2">Passcode</span>
-              <div className="relative">
-                <KeyRound
-                  size={16}
-                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-3"
-                  aria-hidden
-                />
+        <StepDots step={step} />
+
+        <div className="rounded-card border border-line bg-surface p-6 shadow-[var(--shadow-card)]">
+          {step === "email" && (
+            <form onSubmit={sendCode} className="flex flex-col gap-4">
+              <label className="flex flex-col gap-2">
+                <span className="text-[13px] font-semibold text-ink-2">Email</span>
+                <div className="relative">
+                  <Mail
+                    size={16}
+                    className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-3"
+                    aria-hidden
+                  />
+                  <Input
+                    type="email"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setError(null);
+                    }}
+                    placeholder="you@gmail.com"
+                    autoComplete="email"
+                    autoFocus
+                    className="pl-10"
+                  />
+                </div>
+              </label>
+              <Message error={error} notice={notice} />
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={busy || !email.trim()}
+                className="w-full"
+              >
+                {busy ? "Sending…" : "Email me a code"}
+              </Button>
+            </form>
+          )}
+
+          {step === "code" && (
+            <form onSubmit={submitCode} className="flex flex-col gap-4">
+              <label className="flex flex-col gap-2">
+                <span className="text-[13px] font-semibold text-ink-2">Six-digit code</span>
                 <Input
-                  type="password"
-                  value={passcode}
+                  value={code}
                   onChange={(e) => {
-                    setPasscode(e.target.value);
+                    // Digits only, so a pasted "123 456" still works.
+                    setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
                     setError(null);
                   }}
-                  placeholder="••••••••"
-                  autoComplete="current-password"
+                  placeholder="000000"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
                   autoFocus
-                  className="pl-10"
+                  className="text-center text-[22px] font-bold tracking-[0.4em] tabular-nums"
                 />
-              </div>
-            </label>
-
-            {error && (
-              <p
-                role="alert"
-                className={cx(
-                  "rounded-xl border border-[color-mix(in_srgb,var(--critical)_28%,transparent)]",
-                  "bg-critical-soft px-3.5 py-2.5 text-[12.5px] font-medium text-critical-ink",
-                )}
+              </label>
+              <Message error={error} notice={notice} />
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={busy || code.length < 6}
+                className="w-full"
               >
-                {error}
-              </p>
-            )}
+                {busy ? "Checking…" : "Verify code"}
+              </Button>
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={startOver}
+                  className="text-[12.5px] font-semibold text-ink-3 hover:text-ink"
+                >
+                  Use another email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => sendCode()}
+                  disabled={busy}
+                  className="text-[12.5px] font-semibold text-accent hover:underline disabled:opacity-40"
+                >
+                  Send again
+                </button>
+              </div>
+            </form>
+          )}
 
-            <Button type="submit" variant="primary" disabled={!canSubmit} className="w-full">
-              {busy ? "Checking…" : "Unlock"}
-            </Button>
-          </div>
-        </form>
+          {step === "passcode" && (
+            <form onSubmit={submitPasscode} className="flex flex-col gap-4">
+              <label className="flex flex-col gap-2">
+                <span className="text-[13px] font-semibold text-ink-2">Passcode</span>
+                <div className="relative">
+                  <KeyRound
+                    size={16}
+                    className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-3"
+                    aria-hidden
+                  />
+                  <Input
+                    type="password"
+                    value={passcode}
+                    onChange={(e) => {
+                      setPasscode(e.target.value);
+                      setError(null);
+                    }}
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    autoFocus
+                    className="pl-10"
+                  />
+                </div>
+              </label>
+              <Message error={error} notice={notice} />
+              <p className="text-[12px] leading-4.5 text-ink-3">
+                One try. A wrong passcode closes this step and needs a fresh emailed code.
+              </p>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={busy || passcode.length === 0}
+                className="w-full"
+              >
+                {busy ? "Checking…" : "Unlock"}
+              </Button>
+              <button
+                type="button"
+                onClick={startOver}
+                className="text-[12.5px] font-semibold text-ink-3 hover:text-ink"
+              >
+                Start again
+              </button>
+            </form>
+          )}
+        </div>
 
         <p className="mt-5 flex items-start justify-center gap-2 px-2 text-center text-[12px] leading-5 text-ink-3">
           <ShieldCheck size={14} className="mt-0.5 shrink-0" aria-hidden />
@@ -175,4 +347,48 @@ function PasscodeScreen({
       </div>
     </div>
   );
+}
+
+/** Where you are in the two proofs, so the screen never feels like a loop. */
+function StepDots({ step }: { step: Step }) {
+  const order: Step[] = ["email", "code", "passcode"];
+  const at = order.indexOf(step);
+  return (
+    <ol className="mb-3 flex items-center justify-center gap-2" aria-label="Sign-in progress">
+      {order.map((s, i) => (
+        <li
+          key={s}
+          aria-current={i === at ? "step" : undefined}
+          className={cx(
+            "h-1.5 rounded-full transition-all duration-300",
+            i === at ? "w-7 bg-accent" : i < at ? "w-4 bg-accent/45" : "w-4 bg-line-strong",
+          )}
+        />
+      ))}
+    </ol>
+  );
+}
+
+function Message({ error, notice }: { error: string | null; notice: string | null }) {
+  if (error) {
+    return (
+      <p
+        role="alert"
+        className={cx(
+          "rounded-xl border border-[color-mix(in_srgb,var(--critical)_28%,transparent)]",
+          "bg-critical-soft px-3.5 py-2.5 text-[12.5px] font-medium text-critical-ink",
+        )}
+      >
+        {error}
+      </p>
+    );
+  }
+  if (notice) {
+    return (
+      <p className="rounded-xl border border-line bg-page px-3.5 py-2.5 text-[12.5px] text-ink-2">
+        {notice}
+      </p>
+    );
+  }
+  return null;
 }
