@@ -70,32 +70,39 @@ function NotConfigured() {
   );
 }
 
-/** Which proof the screen is currently asking for. */
-type Step = "email" | "code" | "passcode";
+/**
+ * Which step the screen is on.
+ *
+ * `passcode` is where every sign-in starts and usually ends. The other two
+ * exist for the case the server escalates into: after five wrong passcodes it
+ * stops accepting one on its own, and the way back is an emailed code.
+ */
+type Step = "passcode" | "email" | "code";
 
 /**
- * Signing in, in two proofs.
+ * Signing in: the passcode, and an emailed code only when it is needed.
  *
- * The emailed code comes first, and the passcode field stays shut until it is
- * answered. A wrong passcode does not simply clear the field: the server
- * revokes the grant behind it, so the screen returns to the start and the next
- * attempt costs another email. That ordering is the point — it limits passcode
- * guessing to the speed of an inbox rather than the speed of typing.
+ * Normally this is one field. After five wrong passcodes the server answers
+ * `otpRequired`, and the screen switches to asking for an address and the code
+ * sent to it; a passcode is accepted again only against the grant that
+ * produces. A correct passcode at any point clears the count and the next
+ * sign-in is one field again.
  *
- * The browser decides none of this. It holds a grant token the server issued
- * and can withdraw; an enabled field here is a consequence of that token
- * existing, never the cause of being let in.
+ * The browser decides none of this. It never counts failures itself or
+ * chooses when to escalate — it goes where the server's answer sends it, and
+ * the grant token it holds is one the server issued and can withdraw.
  */
 function SignInScreen({
   onSignedIn,
 }: {
   onSignedIn: (token: string, expiresAt: number) => void;
 }) {
+  const login = useMutation(api.auth.login);
   const requestCode = useAction(api.otp.requestCode);
   const verifyCode = useMutation(api.otp.verifyCode);
   const completeLogin = useMutation(api.otp.completeLogin);
 
-  const [step, setStep] = useState<Step>("email");
+  const [step, setStep] = useState<Step>("passcode");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [passcode, setPasscode] = useState("");
@@ -103,6 +110,13 @@ function SignInScreen({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  /*
+    Whether the emailed-code detour is in play. It is never chosen here — it
+    follows from the server having answered `otpRequired`, which is what moved
+    the screen off the passcode step in the first place.
+  */
+  const escalated = step !== "passcode" || grantToken !== null;
 
   async function sendCode(e?: React.FormEvent) {
     e?.preventDefault();
@@ -151,23 +165,47 @@ function SignInScreen({
 
   async function submitPasscode(e: React.FormEvent) {
     e.preventDefault();
-    if (busy || !grantToken || passcode.length === 0) return;
+    if (busy || passcode.length === 0) return;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      const result = await completeLogin({ grantToken, passcode });
+      /*
+        Two routes to the same place. Ordinarily the passcode stands on its
+        own; once the server has escalated, it is only accepted against the
+        grant a verified code produced. Which one applies is the server's
+        call — this just follows the answer it gave.
+      */
+      if (grantToken) {
+        const result = await completeLogin({ grantToken, passcode });
+        if (!result.ok) {
+          /*
+            The grant is spent whether or not the passcode was right, so there
+            is nothing left to retry against. Back to the email step, with the
+            address kept so the only thing to redo is the code.
+          */
+          setGrantToken(null);
+          setPasscode("");
+          setCode("");
+          setStep("email");
+          setError(`${result.error} Verify by email again to unlock the passcode.`);
+          return;
+        }
+        onSignedIn(result.token, result.expiresAt);
+        return;
+      }
+
+      const result = await login({ passcode });
       if (!result.ok) {
-        /*
-          The grant is spent whether or not the passcode was right, so there is
-          nothing left to retry against. Back to the start, with the address
-          kept so the only thing to redo is the code itself.
-        */
-        setGrantToken(null);
         setPasscode("");
-        setCode("");
-        setStep("email");
-        setError(`${result.error} Verify by email again to unlock the passcode.`);
+        if (result.otpRequired) {
+          // Escalated. The passcode alone will not be looked at again until a
+          // code has been answered.
+          setStep("email");
+          setError(result.error);
+          return;
+        }
+        setError(result.error);
         return;
       }
       onSignedIn(result.token, result.expiresAt);
@@ -178,9 +216,10 @@ function SignInScreen({
     }
   }
 
+  /** Back to the plain passcode field, abandoning a half-finished escalation. */
   function startOver() {
     setGrantToken(null);
-    setStep("email");
+    setStep("passcode");
     setCode("");
     setPasscode("");
     setError(null);
@@ -200,14 +239,16 @@ function SignInScreen({
           <h1 className="text-[22px] leading-7 font-bold tracking-tight text-ink">Ledger</h1>
           <p className="mt-1.5 max-w-xs text-[13.5px] leading-6 text-ink-3">
             {step === "email"
-              ? "Sign in with your email, then your passcode."
+              ? "Verify by email to unlock the passcode again."
               : step === "code"
                 ? "Enter the code we emailed you."
-                : "Code accepted. Now your passcode."}
+                : grantToken
+                  ? "Code accepted. Now your passcode."
+                  : "Enter your passcode to continue."}
           </p>
         </div>
 
-        <StepDots step={step} />
+        {escalated && <StepDots step={step} />}
 
         <div className="rounded-card border border-line bg-surface p-6 shadow-[var(--shadow-card)]">
           {step === "email" && (
@@ -318,9 +359,11 @@ function SignInScreen({
                 </div>
               </label>
               <Message error={error} notice={notice} />
-              <p className="text-[12px] leading-4.5 text-ink-3">
-                One try. A wrong passcode closes this step and needs a fresh emailed code.
-              </p>
+              {grantToken && (
+                <p className="text-[12px] leading-4.5 text-ink-3">
+                  One try. A wrong passcode closes this step and needs a fresh emailed code.
+                </p>
+              )}
               <Button
                 type="submit"
                 variant="primary"
@@ -329,13 +372,15 @@ function SignInScreen({
               >
                 {busy ? "Checking…" : "Unlock"}
               </Button>
-              <button
-                type="button"
-                onClick={startOver}
-                className="text-[12.5px] font-semibold text-ink-3 hover:text-ink"
-              >
-                Start again
-              </button>
+              {escalated && (
+                <button
+                  type="button"
+                  onClick={startOver}
+                  className="text-[12.5px] font-semibold text-ink-3 hover:text-ink"
+                >
+                  Start again
+                </button>
+              )}
             </form>
           )}
         </div>
@@ -352,6 +397,8 @@ function SignInScreen({
 /** Where you are in the two proofs, so the screen never feels like a loop. */
 function StepDots({ step }: { step: Step }) {
   const order: Step[] = ["email", "code", "passcode"];
+  // The escalation runs email -> code -> passcode, which is why `passcode`
+  // is last here even though an ordinary sign-in starts on it.
   const at = order.indexOf(step);
   return (
     <ol className="mb-3 flex items-center justify-center gap-2" aria-label="Sign-in progress">

@@ -11,14 +11,18 @@ import {
 } from "./auth";
 
 /*
-  Signing in, in two proofs.
+  The way back in after too many wrong passcodes.
 
-  First an emailed code, which proves the person is holding one of the inboxes
-  in `loginEmails`. Only then does the passcode field open, and only for one
-  attempt: a wrong passcode revokes the grant, so guessing costs a fresh email
-  round trip every time rather than a keystroke. That is the whole point of
-  the ordering — it puts a rate limit the attacker does not control in front
-  of the secret that never changes.
+  Signing in is normally the passcode alone. Five wrong ones in the window and
+  `auth.login` starts answering `otpRequired`, at which point this is the only
+  route: a code emailed to one of the inboxes in `loginEmails`, then the
+  passcode again. So the emailed code is not a second factor on every sign-in
+  — it is what a lockout costs, and what clears it.
+
+  The grant a verified code produces is good for exactly one passcode attempt.
+  A wrong one revokes it, so guessing past the escalation costs a fresh email
+  round trip each time rather than a keystroke — a rate limit the guesser does
+  not control, in front of a secret that never changes.
 
   Nothing here throws to report a bad guess. A Convex mutation is a
   transaction and a throw rolls back its writes, so a mutation that threw
@@ -308,12 +312,16 @@ export const verifyCode = mutation({
 });
 
 /**
- * The second proof: the passcode, against a live grant.
+ * The passcode again, this time against a verified code.
  *
- * A wrong passcode deletes the challenge outright. That is the behaviour
- * asked for — the passcode field closes again and a fresh code has to be
- * fetched — and it is also what makes the arrangement worth having, since it
- * caps passcode guesses at one per email rather than one per keystroke.
+ * `viaOtp` is passed so the escalation does not refuse the very attempt it
+ * asked for — the code has just been answered, and demanding another would
+ * be a loop with no exit.
+ *
+ * A wrong passcode deletes the challenge outright, so the passcode step
+ * closes and a fresh code has to be fetched. That is what caps guesses at one
+ * per email rather than one per keystroke. A right one clears the failure
+ * count, and the next sign-in is back to the passcode alone.
  */
 export const completeLogin = mutation({
   args: { grantToken: v.string(), passcode: v.string() },
@@ -340,7 +348,7 @@ export const completeLogin = mutation({
       };
     }
 
-    const result = await attemptPasscode(ctx, args.passcode);
+    const result = await attemptPasscode(ctx, args.passcode, true);
     if (!result.ok) {
       // Burned either way: one grant, one attempt.
       await ctx.db.delete(challenge._id);

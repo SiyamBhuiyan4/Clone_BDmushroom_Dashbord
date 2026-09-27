@@ -27,9 +27,19 @@ const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // one day
 const PBKDF2_ITERATIONS = 210_000; // OWASP guidance for PBKDF2-SHA256
 const MIN_PASSCODE_LENGTH = 6;
 
-// Brute-force throttle. Global rather than per-IP: Convex does not surface a
-// client address, and this is a single-tenant dashboard.
-const MAX_FAILURES = 8;
+/*
+  Brute-force throttle. Global rather than per-IP: Convex does not surface a
+  client address, and this is a single-tenant dashboard.
+
+  Five wrong passcodes in the window and the passcode stops being enough on
+  its own — an emailed code has to be answered first, and only then is a
+  passcode accepted again. That is a gate rather than a wall: the old
+  behaviour was a flat ten-minute lockout, which punishes the owner
+  mistyping their own passcode exactly as hard as it punishes an attacker,
+  and gives the owner no way through. This way a real mistake costs one
+  email, and guessing costs an inbox round trip per attempt.
+*/
+const OTP_REQUIRED_AFTER = 5;
 const FAILURE_WINDOW_MS = 10 * 60 * 1000;
 
 /*
@@ -65,7 +75,13 @@ async function purgeStaleFailures(ctx: MutationCtx, since: number) {
   for (const f of stale) await ctx.db.delete(f._id);
 }
 
-/** The throttle's verdict, and the rows that would be cleared by a success. */
+/**
+ * How many wrong passcodes are on the clock, and what that means.
+ *
+ * `otpRequired` is the only verdict now. Nothing here bars an attempt
+ * outright — it decides whether a passcode alone still counts, and the
+ * emailed code is the way back rather than a wait.
+ */
 async function throttleState(ctx: MutationCtx) {
   const now = Date.now();
   const since = now - FAILURE_WINDOW_MS;
@@ -73,10 +89,14 @@ async function throttleState(ctx: MutationCtx) {
     .query("loginFailures")
     .withIndex("by_at", (q) => q.gte("at", since))
     .collect();
-  // Index order is ascending, so the first row is the one that ages out next.
-  const retryInMin =
-    recent.length > 0 ? Math.max(1, Math.ceil((recent[0].at + FAILURE_WINDOW_MS - now) / 60000)) : 0;
-  return { now, since, recent, locked: recent.length >= MAX_FAILURES, retryInMin };
+  return {
+    now,
+    since,
+    recent,
+    failures: recent.length,
+    otpRequired: recent.length >= OTP_REQUIRED_AFTER,
+    triesLeft: Math.max(0, OTP_REQUIRED_AFTER - recent.length),
+  };
 }
 
 /* ------------------------------------------------------------ primitives */
@@ -167,8 +187,17 @@ export async function verifyPasscode(ctx: MutationCtx, passcode: string) {
   const config = await ctx.db.query("authConfig").first();
   if (!config) throw new ConvexError("No passcode has been set yet.");
 
-  const { recent, locked } = await throttleState(ctx);
-  if (locked) throw new ConvexError("Too many failed attempts. Try again shortly.");
+  /*
+    While the sign-in screen is demanding an emailed code, the passcode is
+    under suspicion, so it stops being enough to authorise a delete either.
+    Signing in properly clears the count and this with it.
+  */
+  const { recent, otpRequired } = await throttleState(ctx);
+  if (otpRequired) {
+    throw new ConvexError(
+      "Too many wrong passcodes. Sign out and back in — you will be asked to verify by email.",
+    );
+  }
 
   const candidate = await derive(passcode, config.saltHex, config.iterations);
   if (!timingSafeEqual(candidate, config.hashHex)) {
@@ -265,45 +294,99 @@ export const setPasscode = internalMutation({
 });
 
 /**
- * The passcode half of signing in, against the brute-force throttle.
+ * Checks the passcode and keeps the failure count.
  *
- * A plain helper rather than a mutation of its own. It used to be the public
- * `auth.login` and the whole of the sign-in; leaving it exported in any form
- * would keep a door open beside the one the emailed code guards, since the
- * passcode alone would still be enough and the email step would be
- * decoration. `otp.completeLogin` calls this, and nothing else does.
+ * A plain helper rather than a mutation, so its writes stay in the caller's
+ * transaction — which is what lets a recorded failure survive, since a throw
+ * would roll it back. See the note at the top of this file. It returns rather
+ * than throws for that same reason.
  *
- * Calling it directly rather than through `ctx.runMutation` also keeps the
- * writes in the caller's transaction, which is what lets a recorded failure
- * survive — see the note at the top of this file.
- *
- * Returns rather than throws for that same reason: a throw would roll back
- * the attempt it just counted.
+ * `viaOtp` says an emailed code has already been answered for this attempt.
+ * That is the one thing allowed to bypass the escalation: the code is what
+ * the escalation was asking for, so demanding it again after it has been
+ * given would be a loop with no way out.
  */
 export async function attemptPasscode(
   ctx: MutationCtx,
   passcode: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+  viaOtp = false,
+): Promise<
+  | { ok: true }
+  | { ok: false; otpRequired: true; error: string }
+  | { ok: false; otpRequired: false; triesLeft: number; error: string }
+> {
   const config = await ctx.db.query("authConfig").first();
   if (!config) throw new ConvexError("No passcode has been set yet.");
 
-  const { now, since, recent, locked, retryInMin } = await throttleState(ctx);
-  if (locked) {
-    return { ok: false, error: `Too many attempts. Try again in ${retryInMin} minutes.` };
+  const { now, since, recent, otpRequired } = await throttleState(ctx);
+
+  /*
+    Refused before the passcode is even derived. Checking it first and then
+    refusing would make this an oracle: the response time alone would still
+    say whether the guess was right, which is the whole thing the escalation
+    is meant to stop.
+  */
+  if (otpRequired && !viaOtp) {
+    return {
+      ok: false,
+      otpRequired: true,
+      error: "Too many wrong passcodes. Verify by email to unlock the passcode.",
+    };
   }
 
   const candidate = await derive(passcode, config.saltHex, config.iterations);
   if (!timingSafeEqual(candidate, config.hashHex)) {
     await ctx.db.insert("loginFailures", { at: now });
     await purgeStaleFailures(ctx, since);
-    return { ok: false, error: "Incorrect passcode." };
+    const left = Math.max(0, OTP_REQUIRED_AFTER - (recent.length + 1));
+    return {
+      ok: false,
+      otpRequired: false,
+      triesLeft: left,
+      error:
+        left > 0
+          ? `Incorrect passcode. ${left} ${left === 1 ? "try" : "tries"} left before email verification is needed.`
+          : "Incorrect passcode. Email verification is now needed to try again.",
+    };
   }
 
-  // Success clears the failure log.
+  // Success clears the failure log, so the count starts again from zero.
   for (const f of recent) await ctx.db.delete(f._id);
   await purgeStaleFailures(ctx, since);
   return { ok: true };
 }
+
+/**
+ * Signs in with the passcode alone, which is the normal way.
+ *
+ * Public again. The emailed code is no longer a permanent second factor but
+ * an escalation: after five wrong passcodes in the window this returns
+ * `otpRequired`, and the caller has to go through `otp.requestCode`,
+ * `otp.verifyCode` and `otp.completeLogin` instead. A correct passcode at any
+ * point clears the count.
+ */
+export const login = mutation({
+  args: { passcode: v.string() },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<
+    | { ok: true; token: string; expiresAt: number }
+    | { ok: false; otpRequired: boolean; triesLeft?: number; error: string }
+  > => {
+    const result = await attemptPasscode(ctx, args.passcode);
+    if (!result.ok) {
+      return {
+        ok: false,
+        otpRequired: result.otpRequired,
+        ...(result.otpRequired ? {} : { triesLeft: result.triesLeft }),
+        error: result.error,
+      };
+    }
+    const session = await issueSession(ctx);
+    return { ok: true, token: session.token, expiresAt: session.expiresAt };
+  },
+});
 
 /**
  * Changes the passcode.
@@ -327,11 +410,11 @@ export const change = mutation({
       throw new ConvexError(`Passcode must be at least ${MIN_PASSCODE_LENGTH} characters.`);
     }
 
-    const { now, since, recent, locked, retryInMin } = await throttleState(ctx);
-    if (locked) {
+    const { now, since, recent, otpRequired } = await throttleState(ctx);
+    if (otpRequired) {
       return {
         ok: false as const,
-        error: `Too many attempts. Try again in ${retryInMin} minutes.`,
+        error: "Too many wrong passcodes. Verify by email from the sign-in screen first.",
       };
     }
 
@@ -357,6 +440,29 @@ export const change = mutation({
     for (const s of await ctx.db.query("sessions").collect()) await ctx.db.delete(s._id);
     const session = await issueSession(ctx);
     return { ok: true as const, token: session.token, expiresAt: session.expiresAt };
+  },
+});
+
+/**
+ * Clears the wrong-passcode count, so the passcode is enough on its own again.
+ *
+ * The count clears itself two ways already — a correct passcode, or ten
+ * minutes passing — so this is for the third case: someone is locked into the
+ * email step and cannot wait, or cannot reach the inbox. Internal, because an
+ * endpoint that resets an attacker's own failure count would undo the whole
+ * escalation:
+ *
+ *   npx convex run auth:clearFailures
+ */
+export const clearFailures = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    let cleared = 0;
+    for (const f of await ctx.db.query("loginFailures").collect()) {
+      await ctx.db.delete(f._id);
+      cleared++;
+    }
+    return `Cleared ${cleared} failed attempt(s). The passcode alone works again.`;
   },
 });
 
