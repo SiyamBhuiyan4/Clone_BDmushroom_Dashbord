@@ -295,6 +295,8 @@ export default defineSchema({
 
   products: defineTable({
     name: v.string(),
+    /** The product's photo, stored in Convex file storage. */
+    photoId: v.optional(v.id("_storage")),
     // What it costs you to acquire one unit.
     costPrice: v.number(),
     /*

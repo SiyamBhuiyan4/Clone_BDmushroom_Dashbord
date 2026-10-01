@@ -21,10 +21,14 @@ import { ProductDetailDialog } from "../components/ProductDetailDialog";
 import { SaleDialog } from "../components/SaleDialog";
 import { BatchDialog } from "../components/BatchDialog";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
+import { RangePills } from "../components/RangePills";
 import { useSettings } from "../lib/settings";
+import { useRangeFilter } from "../lib/dateRange";
 import { gradientFor, initialOf } from "../lib/avatar";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedQuery, useAuthedMutation } from "../lib/session";
+
+type ProductRow = Doc<"products"> & { photoUrl: string | null };
 
 type SortKey = "newest" | "name" | "stockLow" | "stockHigh" | "costHigh";
 
@@ -39,6 +43,21 @@ export function ProductsPage() {
 
   const products = useAuthedQuery(api.products.list, { search, includeArchived: showArchived });
   const categories = useAuthedQuery(api.products.categories) ?? [];
+  const range = useRangeFilter("ac.range.products");
+  const salesWindow = useAuthedQuery(api.products.salesWindow);
+
+  // Per-product profit for the picked range: each sale already carries the
+  // profit it actually made, so this is a sum, never a recalculation against
+  // today's prices.
+  const profitByProduct = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!salesWindow) return map;
+    for (const s of salesWindow) {
+      if (s.soldAt < range.since || s.soldAt >= range.untilExclusive) continue;
+      map.set(s.productId, (map.get(s.productId) ?? 0) + s.profit);
+    }
+    return map;
+  }, [salesWindow, range.since, range.untilExclusive]);
 
   const restock = useAuthedMutation(api.products.restock);
   /*
@@ -50,7 +69,7 @@ export function ProductsPage() {
   const setArchived = useAuthedMutation(api.products.setArchived);
   const remove = useAuthedMutation(api.products.remove);
 
-  const [editing, setEditing] = useState<Doc<"products"> | null>(null);
+  const [editing, setEditing] = useState<ProductRow | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [selling, setSelling] = useState<Doc<"products"> | null>(null);
   const [deleting, setDeleting] = useState<Doc<"products"> | null>(null);
@@ -152,6 +171,15 @@ export function ProductsPage() {
         </label>
       </div>
 
+      {/* Scopes every card's profit figure — the same control as the Dashboard. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[13.5px] text-ink-3">
+          {t("products.profitFor")}{" "}
+          <span className="font-semibold text-ink-2">{range.activeLabel.full}</span>
+        </p>
+        <RangePills range={range} />
+      </div>
+
       {products === undefined ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-hidden>
           {[0, 1, 2].map((i) => (
@@ -203,6 +231,8 @@ export function ProductsPage() {
                 }}
                 onAdjust={(delta) => adjust(product, delta)}
                 fmt={fmt}
+                profit={profitByProduct.get(product._id) ?? 0}
+                rangeLabel={range.activeLabel.full}
               />
             ))}
           </div>
@@ -267,8 +297,10 @@ function ProductCard({
   onArchiveToggle,
   onAdjust,
   fmt,
+  profit,
+  rangeLabel,
 }: {
-  product: Doc<"products">;
+  product: ProductRow;
   lots: { unitCost: number; remaining: number }[];
   onAddLot: () => void;
   onView: () => void;
@@ -278,6 +310,9 @@ function ProductCard({
   onArchiveToggle: () => void;
   onAdjust: (delta: number) => void;
   fmt: (v: number) => string;
+  /** This product's actual profit in the page's selected date range. */
+  profit: number;
+  rangeLabel: string;
 }) {
   const t = useT();
   // Ascending, so the footer can read the cheapest and dearest off the ends.
@@ -317,13 +352,21 @@ function ProductCard({
       </div>
 
       <div className="flex items-start gap-3 px-5 pt-5">
-        <span
-          className="flex size-11 shrink-0 items-center justify-center rounded-2xl text-[16px] font-bold text-white shadow-[var(--shadow-sm)]"
-          style={{ background: gradientFor(product.name) }}
-          aria-hidden
-        >
-          {initialOf(product.name)}
-        </span>
+        {product.photoUrl ? (
+          <img
+            src={product.photoUrl}
+            alt=""
+            className="size-11 shrink-0 rounded-2xl object-cover shadow-[var(--shadow-sm)]"
+          />
+        ) : (
+          <span
+            className="flex size-11 shrink-0 items-center justify-center rounded-2xl text-[16px] font-bold text-white shadow-[var(--shadow-sm)]"
+            style={{ background: gradientFor(product.name) }}
+            aria-hidden
+          >
+            {initialOf(product.name)}
+          </span>
+        )}
         <button
           onClick={onView}
           className="mt-0.5 line-clamp-2 min-w-0 flex-1 text-left text-[15.5px] leading-5.5 font-bold tracking-tight text-ink transition-colors hover:text-accent"
@@ -364,33 +407,47 @@ function ProductCard({
         )}
       </div>
 
-      <div className="mt-auto flex items-end justify-between gap-3 border-t border-line px-5 pt-4 pb-5">
+      <div className="mt-auto border-t border-line px-5 pt-4 pb-5">
         {/*
           Once a product has been bought at two prices, one cost figure is a
-          lie of omission. The card shows the range it is actually sitting on
-          and how many lots make it up.
+          lie of omission. The cost tile shows the range it is actually
+          sitting on; profit is this product's real, already-sold total for
+          whatever range the page is scoped to — never a recalculation
+          against today's prices.
         */}
-        <div>
-          <p className="text-[10.5px] font-bold tracking-[0.08em] text-ink-3 uppercase">
-            Cost price
-          </p>
-          <p className="mt-1 text-[20px] leading-7 font-bold tracking-tight text-ink">
-            {lotCosts.length > 0
-              ? lotCosts[0] === lotCosts[lotCosts.length - 1]
-                ? fmt(lotCosts[0])
-                : `${fmt(lotCosts[0])}–${fmt(lotCosts[lotCosts.length - 1])}`
-              : fmt(product.costPrice)}
-          </p>
-          {lots.length > 0 && (
-            <button
-              onClick={onView}
-              className="mt-0.5 text-[11.5px] font-semibold text-accent hover:underline"
-            >
-              {lots.length} {lots.length === 1 ? "lot" : "lots"}
-            </button>
-          )}
+        <div className="grid grid-cols-3 gap-2">
+          <MoneyStat
+            label="Cost price"
+            value={
+              lotCosts.length > 0
+                ? lotCosts[0] === lotCosts[lotCosts.length - 1]
+                  ? fmt(lotCosts[0])
+                  : `${fmt(lotCosts[0])}–${fmt(lotCosts[lotCosts.length - 1])}`
+                : fmt(product.costPrice)
+            }
+          />
+          <MoneyStat
+            label={t("products.sellPrice")}
+            value={product.sellPrice !== undefined ? fmt(product.sellPrice) : "—"}
+          />
+          <MoneyStat
+            label={t("sales.profit")}
+            value={profit < 0 ? `−${fmt(Math.abs(profit))}` : fmt(profit)}
+            tone={profit > 0 ? "good" : profit < 0 ? "critical" : undefined}
+            sub={rangeLabel}
+          />
         </div>
-        <div className="flex items-center gap-2">
+
+        {lots.length > 0 && (
+          <button
+            onClick={onView}
+            className="mt-2 text-[11.5px] font-semibold text-accent hover:underline"
+          >
+            {lots.length} {lots.length === 1 ? "lot" : "lots"}
+          </button>
+        )}
+
+        <div className="mt-3 flex items-center justify-between gap-2">
           <div className="flex h-10 items-center rounded-xl border border-line-strong bg-page">
             <button
               onClick={() => onAdjust(-1)}
@@ -417,6 +474,33 @@ function ProductCard({
         </div>
       </div>
     </Card>
+  );
+}
+
+function MoneyStat({
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "good" | "critical";
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="truncate text-[10px] font-bold tracking-[0.06em] text-ink-3 uppercase">{label}</p>
+      <p
+        className={cx(
+          "mt-1 truncate text-[15px] leading-6 font-bold tracking-tight tabular-nums",
+          tone === "good" ? "text-good-ink" : tone === "critical" ? "text-critical-ink" : "text-ink",
+        )}
+      >
+        {value}
+      </p>
+      {sub && <p className="mt-0.5 truncate text-[10.5px] text-ink-3">{sub}</p>}
+    </div>
   );
 }
 

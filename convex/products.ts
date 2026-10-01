@@ -1,7 +1,14 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
 import { requireSession, verifyPasscode } from "./auth";
+
+/** Attaches a signed, short-lived photo URL to a product row — the stored `photoId` is never useful to the browser on its own. */
+async function withPhoto<T extends { photoId?: Id<"_storage"> }>(ctx: QueryCtx, p: T) {
+  const photoUrl = p.photoId ? await ctx.storage.getUrl(p.photoId) : null;
+  return { ...p, photoUrl };
+}
 
 export const list = query({
   args: {
@@ -13,7 +20,7 @@ export const list = query({
     await requireSession(ctx, args.token);
     const all = await ctx.db.query("products").withIndex("by_createdAt").order("desc").collect();
     const term = (args.search ?? "").trim().toLowerCase();
-    return all.filter((p) => {
+    const filtered = all.filter((p) => {
       if (!args.includeArchived && p.archived) return false;
       if (!term) return true;
       return (
@@ -22,6 +29,7 @@ export const list = query({
         (p.category ?? "").toLowerCase().includes(term)
       );
     });
+    return await Promise.all(filtered.map((p) => withPhoto(ctx, p)));
   },
 });
 
@@ -29,7 +37,70 @@ export const get = query({
   args: { token: v.string(), id: v.id("products") },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
-    return await ctx.db.get(args.id);
+    const product = await ctx.db.get(args.id);
+    return product ? await withPhoto(ctx, product) : null;
+  },
+});
+
+/**
+ * One row per sale in the last year, with nothing but what a per-product
+ * profit-by-range card needs. Same shape as the Dashboard's own window
+ * query, and for the same reason: bucketing by a date range picked in the
+ * browser has to happen in the browser, not in a query that does not know
+ * the browser's timezone.
+ */
+export const salesWindow = query({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const since = Date.now() - 366 * 24 * 60 * 60 * 1000;
+    const sales = await ctx.db
+      .query("sales")
+      .withIndex("by_soldAt", (q) => q.gte("soldAt", since))
+      .collect();
+    return sales.map((s) => ({
+      productId: s.productId as string,
+      profit: (s.unitPrice - s.unitCost) * s.quantity,
+      soldAt: s.soldAt,
+    }));
+  },
+});
+
+/** A one-time URL the browser can POST a photo to directly. */
+export const generateUploadUrl = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+/**
+ * Points a product at a newly uploaded photo, replacing whichever one it had.
+ * The old file is deleted rather than left behind — nothing else can ever
+ * reference it, since the product row was its only pointer.
+ */
+export const setPhoto = mutation({
+  args: { token: v.string(), id: v.id("products"), storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const product = await ctx.db.get(args.id);
+    if (!product) throw new ConvexError("That product no longer exists.");
+    await ctx.db.patch(args.id, { photoId: args.storageId });
+    if (product.photoId) await ctx.storage.delete(product.photoId);
+  },
+});
+
+export const removePhoto = mutation({
+  args: { token: v.string(), id: v.id("products") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const product = await ctx.db.get(args.id);
+    if (!product) throw new ConvexError("That product no longer exists.");
+    if (product.photoId) {
+      await ctx.db.patch(args.id, { photoId: undefined });
+      await ctx.storage.delete(product.photoId);
+    }
   },
 });
 
@@ -211,7 +282,7 @@ export const detail = query({
     }
 
     return {
-      product,
+      product: await withPhoto(ctx, product),
       lots: [...lots].sort((a, b) => b.purchasedAt - a.purchasedAt),
       sales: [...sales].sort((a, b) => b.soldAt - a.soldAt).slice(0, 50),
       totals: {

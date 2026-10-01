@@ -61,7 +61,13 @@ export function ProductDetailDialog({
     <Modal
       open={open}
       onClose={onClose}
-      icon={<Package size={19} />}
+      icon={
+        data?.product.photoUrl ? (
+          <img src={data.product.photoUrl} alt="" className="size-11 rounded-2xl object-cover" />
+        ) : (
+          <Package size={19} />
+        )
+      }
       gradient={name ? gradientFor(name) : undefined}
       title={name || t("detail.title")}
       subtitle={data?.product.category ?? undefined}
