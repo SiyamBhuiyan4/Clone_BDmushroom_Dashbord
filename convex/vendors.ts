@@ -1,8 +1,19 @@
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { requireSession, verifyPasscode } from "./auth";
 import { VENDOR_CATEGORIES, type VendorCategory } from "./shared";
+
+/** Attaches a signed, short-lived photo URL — the stored `photoId` is never useful to the browser on its own. */
+async function withPhoto<T extends { photoId?: Id<"_storage"> }>(ctx: QueryCtx, p: T) {
+  const photoUrl = p.photoId ? await ctx.storage.getUrl(p.photoId) : null;
+  return { ...p, photoUrl };
+}
+
+/** Trims a list of extra numbers down to the ones actually typed in. */
+function cleanPhones(phones: string[] | undefined) {
+  return (phones ?? []).map((p) => p.trim()).filter(Boolean);
+}
 
 /*
   Suppliers — who the shop buys stock from. The mirror image of `customers`,
@@ -24,7 +35,8 @@ export const list = query({
           .withIndex("by_category", (q) => q.eq("category", args.category as VendorCategory))
           .collect()
       : await ctx.db.query("vendors").collect();
-    return [...rows].sort((a, b) => a.name.localeCompare(b.name));
+    const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+    return await Promise.all(sorted.map((v) => withPhoto(ctx, v)));
   },
 });
 
@@ -76,7 +88,7 @@ export const detail = query({
     );
 
     return {
-      vendor,
+      vendor: await withPhoto(ctx, vendor),
       folders: [...folders].sort((a, b) => a.createdAt - b.createdAt),
       media: mediaWithUrl,
       lots: [...lots].sort((a, b) => b.purchasedAt - a.purchasedAt),
@@ -97,7 +109,9 @@ export const create = mutation({
     name: v.string(),
     category: v.string(),
     phone: v.optional(v.string()),
+    extraPhones: v.optional(v.array(v.string())),
     whatsapp: v.optional(v.string()),
+    facebookUrl: v.optional(v.string()),
     address: v.optional(v.string()),
     tin: v.optional(v.string()),
     tradeLicenseNo: v.optional(v.string()),
@@ -111,7 +125,9 @@ export const create = mutation({
       name: args.name.trim(),
       category: args.category as VendorCategory,
       phone: args.phone?.trim() || undefined,
+      extraPhones: cleanPhones(args.extraPhones),
       whatsapp: args.whatsapp?.trim() || undefined,
+      facebookUrl: args.facebookUrl?.trim() || undefined,
       address: args.address?.trim() || undefined,
       tin: args.tin?.trim() || undefined,
       tradeLicenseNo: args.tradeLicenseNo?.trim() || undefined,
@@ -132,7 +148,9 @@ export const update = mutation({
     name: v.string(),
     category: v.string(),
     phone: v.optional(v.string()),
+    extraPhones: v.optional(v.array(v.string())),
     whatsapp: v.optional(v.string()),
+    facebookUrl: v.optional(v.string()),
     address: v.optional(v.string()),
     tin: v.optional(v.string()),
     tradeLicenseNo: v.optional(v.string()),
@@ -147,12 +165,39 @@ export const update = mutation({
       name: args.name.trim(),
       category: args.category as VendorCategory,
       phone: args.phone?.trim() || undefined,
+      extraPhones: cleanPhones(args.extraPhones),
       whatsapp: args.whatsapp?.trim() || undefined,
+      facebookUrl: args.facebookUrl?.trim() || undefined,
       address: args.address?.trim() || undefined,
       tin: args.tin?.trim() || undefined,
       tradeLicenseNo: args.tradeLicenseNo?.trim() || undefined,
       note: args.note?.trim() || undefined,
     });
+  },
+});
+
+/** Points a vendor at a newly uploaded photo, replacing whichever one they had. */
+export const setPhoto = mutation({
+  args: { token: v.string(), id: v.id("vendors"), storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const vendor = await ctx.db.get(args.id);
+    if (!vendor) throw new ConvexError("That vendor no longer exists.");
+    await ctx.db.patch(args.id, { photoId: args.storageId });
+    if (vendor.photoId) await ctx.storage.delete(vendor.photoId);
+  },
+});
+
+export const removePhoto = mutation({
+  args: { token: v.string(), id: v.id("vendors") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const vendor = await ctx.db.get(args.id);
+    if (!vendor) throw new ConvexError("That vendor no longer exists.");
+    if (vendor.photoId) {
+      await ctx.db.patch(args.id, { photoId: undefined });
+      await ctx.storage.delete(vendor.photoId);
+    }
   },
 });
 

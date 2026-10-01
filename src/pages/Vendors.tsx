@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { MessageCircle, Pencil, Phone, Plus, Search, Trash2, Truck } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Doc, Id } from "../../convex/_generated/dataModel";
+import type { Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Card, EmptyState, Input, cx } from "../components/ui";
 import { Pagination, usePagination } from "../components/Pagination";
-import { VendorDialog } from "../components/VendorDialog";
+import { VendorDialog, type EditableVendor } from "../components/VendorDialog";
 import { VendorDetailDialog } from "../components/VendorDetailDialog";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useT } from "../lib/i18n";
@@ -30,7 +30,7 @@ export function VendorsPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<VendorCategory | "">("");
   const [addOpen, setAddOpen] = useState(false);
-  const [editing, setEditing] = useState<Doc<"vendors"> | null>(null);
+  const [editing, setEditing] = useState<EditableVendor | null>(null);
   const [deleting, setDeleting] = useState<{ id: Id<"vendors">; name: string } | null>(null);
   const [viewing, setViewing] = useState<Id<"vendors"> | null>(null);
 

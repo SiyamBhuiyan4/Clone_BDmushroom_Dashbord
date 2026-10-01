@@ -16,7 +16,7 @@ import {
 } from "./ui";
 import { ProductPicker } from "./ProductPicker";
 import { CustomerPicker, type SavedCustomer } from "./CustomerPicker";
-import { customerKey } from "../../convex/shared";
+import { customerKey, variantAvailable } from "../../convex/shared";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { CURRENCY_SYMBOL } from "../lib/format";
@@ -34,6 +34,8 @@ type Line = {
   unitPrice: string;
   /** The purchase lot this line sells out of; empty means the product's own cost. */
   batchId: string;
+  /** Which size, for a product sold in variants; empty for a plain product. */
+  variantId: string;
 };
 
 type OpenLot = {
@@ -130,8 +132,32 @@ export function SaleDialog({
     return openLots.filter((l) => l.productId === productId);
   }
 
-  /** One sale line from a product, with its price and cost snapshotted. */
+  function productOf(productId: Id<"products">) {
+    return products?.find((p) => p._id === productId);
+  }
+
+  /**
+   * One sale line from a product, with its price and cost snapshotted. A
+   * product sold in sizes picks the first one by default — same reasoning
+   * as the lot below: not a guess to leave unstated, just a default that
+   * the row shows and a dropdown can change.
+   */
   function lineFor(p: Doc<"products">): Line {
+    const variant = p.variants?.[0];
+    if (variant) {
+      return {
+        key: `l${lineSeq++}`,
+        productId: p._id,
+        productName: p.name,
+        unit: variant.label,
+        stock: variantAvailable(p, variant.id),
+        quantity: "1",
+        unitPrice: variant.sellPrice !== undefined ? String(variant.sellPrice) : "",
+        unitCost: variant.costPrice,
+        batchId: "",
+        variantId: variant.id,
+      };
+    }
     /*
       The oldest open lot is chosen for you. A shop sells what it bought
       first, and making the common case a decision would mean picking a lot
@@ -159,6 +185,7 @@ export function SaleDialog({
             : "",
       unitCost: lot ? lot.unitCost : p.costPrice,
       batchId: lot ? (lot.id as string) : "",
+      variantId: "",
     };
   }
 
@@ -220,6 +247,7 @@ export function SaleDialog({
           quantity: l.qty,
           unitPrice: l.price,
           batchId: l.batchId ? (l.batchId as Id<"stockBatches">) : undefined,
+          variantId: l.variantId || undefined,
         })),
         discount: discountValue,
         deliveryCharge: deliveryValue,
@@ -368,12 +396,52 @@ export function SaleDialog({
                       </div>
 
                       {/*
-                        Which lot this comes out of. Every option carries its
-                        buy price and what is left in it, because that is the
-                        question being answered — not which lot has the nicer
-                        label.
+                        Which size this line is. Lots are a purchase-side
+                        idea and sizes a selling-side one, so a product with
+                        sizes picks from these instead of a lot — picking
+                        both would leave two different costs claiming the
+                        same line.
                       */}
-                      {lotsOf(line.productId).length > 0 && (
+                      {productOf(line.productId)?.variants?.length ? (
+                        <label className="mt-2.5 block">
+                          <span className="mb-1 block text-[11px] font-semibold text-ink-3">
+                            {t("products.variantLabel")}
+                          </span>
+                          <Select
+                            value={line.variantId}
+                            onChange={(e) => {
+                              const product = productOf(line.productId);
+                              const picked = product?.variants?.find((v) => v.id === e.target.value);
+                              setLines((p) =>
+                                p.map((l) =>
+                                  l.key === line.key && picked && product
+                                    ? {
+                                        ...l,
+                                        variantId: picked.id,
+                                        unit: picked.label,
+                                        stock: variantAvailable(product, picked.id),
+                                        unitCost: picked.costPrice,
+                                        // The asking price only fills a blank,
+                                        // so a price already typed stands.
+                                        unitPrice:
+                                          l.unitPrice === "" && picked.sellPrice !== undefined
+                                            ? String(picked.sellPrice)
+                                            : l.unitPrice,
+                                      }
+                                    : l,
+                                ),
+                              );
+                            }}
+                          >
+                            {productOf(line.productId)?.variants?.map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.label} · {fmt(v.costPrice)}
+                              </option>
+                            ))}
+                          </Select>
+                        </label>
+                      ) : (
+                        lotsOf(line.productId).length > 0 && (
                         <label className="mt-2.5 block">
                           <span className="mb-1 block text-[11px] font-semibold text-ink-3">
                             {t("orders.sellFromLot")}
@@ -410,6 +478,7 @@ export function SaleDialog({
                             <option value="">{t("orders.noLot")}</option>
                           </Select>
                         </label>
+                        )
                       )}
 
                       <div className="mt-2.5 flex flex-wrap items-end gap-3">

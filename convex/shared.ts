@@ -66,3 +66,31 @@ export function externalUrl(raw?: string) {
  */
 export const VENDOR_CATEGORIES = ["spawn", "materials", "equipment", "packaging", "other"] as const;
 export type VendorCategory = (typeof VENDOR_CATEGORIES)[number];
+
+/** One size/package option on a product — "500 gram" at one price, "1 kg" at another. */
+export type ProductVariant = {
+  id: string;
+  label: string;
+  costPrice: number;
+  sellPrice?: number;
+  /** This variant's own stock count — set in "separate" mode. */
+  quantity?: number;
+  /** How many base units one of this variant is — set in "shared" mode. */
+  baseQuantity?: number;
+};
+
+/**
+ * How many of one variant are actually available to sell right now.
+ * "separate" stock: the variant's own count. "shared" stock: however many
+ * whole ones fit in what is left of the pooled total.
+ */
+export function variantAvailable(
+  product: { quantity: number; stockMode?: "separate" | "shared"; variants?: ProductVariant[] },
+  variantId: string,
+): number {
+  const variant = product.variants?.find((v) => v.id === variantId);
+  if (!variant) return 0;
+  if (product.stockMode === "separate") return variant.quantity ?? 0;
+  const baseQuantity = variant.baseQuantity ?? 1;
+  return Math.floor(product.quantity / baseQuantity);
+}

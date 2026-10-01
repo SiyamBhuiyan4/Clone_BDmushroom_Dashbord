@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Folder,
   FolderPlus,
+  Globe,
   Image as ImageIcon,
   MapPin,
   MessageCircle,
@@ -15,11 +16,12 @@ import {
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Input, Modal, cx } from "./ui";
+import { ContactPhotoAvatar } from "./ContactPhotoAvatar";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useT } from "../lib/i18n";
 import { gradientFor } from "../lib/avatar";
 import { plural } from "../lib/format";
-import { whatsappUrl } from "../../convex/shared";
+import { externalUrl, whatsappUrl } from "../../convex/shared";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { mediaKindOf, uploadFile, useFileDrop } from "../lib/upload";
@@ -49,6 +51,7 @@ export function VendorDetailDialog({
   const generateUploadUrl = useAuthedMutation(api.vendors.generateUploadUrl);
   const attachMedia = useAuthedMutation(api.vendors.attachMedia);
   const removeMedia = useAuthedMutation(api.vendors.removeMedia);
+  const setPhoto = useAuthedMutation(api.vendors.setPhoto);
 
   const [openFolderId, setOpenFolderId] = useState<Id<"vendorFolders"> | "unfiled" | null>(null);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -113,7 +116,21 @@ export function VendorDetailDialog({
         setOpenFolderId(null);
         onClose();
       }}
-      icon={<Truck size={19} />}
+      icon={
+        data?.vendor ? (
+          <ContactPhotoAvatar
+            photoUrl={data.vendor.photoUrl}
+            onUpload={async (file) => {
+              const uploadUrl = await generateUploadUrl({});
+              const storageId = await uploadFile(uploadUrl, file);
+              await setPhoto({ id: data.vendor._id, storageId });
+            }}
+          />
+        ) : (
+          <Truck size={19} />
+        )
+      }
+      iconInteractive={Boolean(data?.vendor)}
       gradient={name ? gradientFor(name) : undefined}
       title={name || t("vendors.title")}
       subtitle={data ? t(CATEGORY_KEY[data.vendor.category]) : undefined}
@@ -130,6 +147,12 @@ export function VendorDetailDialog({
                 {data.vendor.phone}
               </span>
             )}
+            {data.vendor.extraPhones?.map((p, i) => (
+              <span key={i} className="inline-flex items-center gap-1.5">
+                <Phone size={14} className="text-ink-3" aria-hidden />
+                {p}
+              </span>
+            ))}
             {whatsappUrl(data.vendor.whatsapp ?? data.vendor.phone) && (
               <a
                 href={whatsappUrl(data.vendor.whatsapp ?? data.vendor.phone)!}
@@ -139,6 +162,17 @@ export function VendorDetailDialog({
               >
                 <MessageCircle size={14} aria-hidden />
                 {t("customers.whatsapp")}
+              </a>
+            )}
+            {externalUrl(data.vendor.facebookUrl) && (
+              <a
+                href={externalUrl(data.vendor.facebookUrl)!}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1.5 font-semibold text-accent hover:underline"
+              >
+                <Globe size={14} aria-hidden />
+                {t("contacts.facebook")}
               </a>
             )}
             {data.vendor.address && (

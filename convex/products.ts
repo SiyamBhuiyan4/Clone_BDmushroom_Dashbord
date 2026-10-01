@@ -1,4 +1,4 @@
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
@@ -132,6 +132,95 @@ function validate(name: string, costPrice: number, quantity: number, sellPrice?:
   }
 }
 
+const variantInput = v.object({
+  id: v.string(),
+  label: v.string(),
+  costPrice: v.number(),
+  sellPrice: v.optional(v.number()),
+  quantity: v.optional(v.number()),
+  baseQuantity: v.optional(v.number()),
+});
+type VariantInput = {
+  id: string;
+  label: string;
+  costPrice: number;
+  sellPrice?: number;
+  quantity?: number;
+  baseQuantity?: number;
+};
+type StockMode = "separate" | "shared";
+
+/**
+ * A product with no variants keeps its three plain fields, exactly as
+ * before. One with variants gets them computed instead — the admin edits
+ * sizes, never these — so every screen that only knows about a flat
+ * cost/sell/quantity (the Dashboard, the sort by profit, the CSV import)
+ * keeps working without having to learn what a variant is.
+ */
+function validateVariants(variants: VariantInput[] | undefined, stockMode: StockMode | undefined) {
+  if (!variants || variants.length === 0) return;
+  if (stockMode !== "separate" && stockMode !== "shared") {
+    throw new ConvexError("Choose how stock is tracked for these sizes.");
+  }
+  for (const variant of variants) {
+    const label = variant.label.trim() || "A size";
+    if (!variant.label.trim()) throw new ConvexError("Every size needs a name.");
+    if (!Number.isFinite(variant.costPrice) || variant.costPrice < 0) {
+      throw new ConvexError(`${label}: cost price must be zero or more.`);
+    }
+    if (variant.sellPrice !== undefined && (!Number.isFinite(variant.sellPrice) || variant.sellPrice < 0)) {
+      throw new ConvexError(`${label}: sell price must be zero or more.`);
+    }
+    if (stockMode === "separate") {
+      const qty = variant.quantity ?? 0;
+      if (!Number.isInteger(qty) || qty < 0) {
+        throw new ConvexError(`${label}: stock must be a whole number, zero or more.`);
+      }
+    } else {
+      if (!Number.isFinite(variant.baseQuantity) || (variant.baseQuantity ?? 0) <= 0) {
+        throw new ConvexError(`${label}: needs how much of the base stock one of these is.`);
+      }
+    }
+  }
+}
+
+/**
+ * Cost price is the lowest size's — the figure every other screen treats as
+ * "what this costs" has to mean something real, and the cheapest size is the
+ * only one true of all of them. Sell price the same, when any size has one.
+ * Quantity is the sum of the sizes in "separate" mode; in "shared" mode the
+ * admin's own total stands, since the sizes do not have stock of their own.
+ */
+function effectiveFromVariants(
+  variants: VariantInput[],
+  stockMode: StockMode,
+  fallbackQuantity: number,
+) {
+  const costPrice = Math.min(...variants.map((v) => v.costPrice));
+  const sellCandidates = variants
+    .map((v) => v.sellPrice)
+    .filter((p): p is number => p !== undefined);
+  const sellPrice = sellCandidates.length > 0 ? Math.min(...sellCandidates) : undefined;
+  const quantity =
+    stockMode === "separate"
+      ? variants.reduce((sum, v) => sum + (v.quantity ?? 0), 0)
+      : fallbackQuantity;
+  return { costPrice, sellPrice, quantity };
+}
+
+function cleanVariants(variants: VariantInput[] | undefined) {
+  return variants && variants.length > 0
+    ? variants.map((v) => ({
+        id: v.id,
+        label: v.label.trim(),
+        costPrice: v.costPrice,
+        sellPrice: v.sellPrice,
+        quantity: v.quantity,
+        baseQuantity: v.baseQuantity,
+      }))
+    : undefined;
+}
+
 export const create = mutation({
   args: {
     token: v.string(),
@@ -146,18 +235,27 @@ export const create = mutation({
     details: v.string(),
     category: v.optional(v.string()),
     quantity: v.number(),
+    variants: v.optional(v.array(variantInput)),
+    stockMode: v.optional(v.union(v.literal("separate"), v.literal("shared"))),
   },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
-    validate(args.name, args.costPrice, args.quantity, args.sellPrice);
+    const variants = cleanVariants(args.variants);
+    validateVariants(variants, args.stockMode);
+    const effective = variants
+      ? effectiveFromVariants(variants, args.stockMode as StockMode, args.quantity)
+      : { costPrice: args.costPrice, sellPrice: args.sellPrice, quantity: args.quantity };
+    validate(args.name, effective.costPrice, effective.quantity, effective.sellPrice);
     const category = (args.category ?? "").trim();
     return await ctx.db.insert("products", {
       name: args.name.trim(),
-      costPrice: args.costPrice,
-      sellPrice: args.sellPrice,
+      costPrice: effective.costPrice,
+      sellPrice: effective.sellPrice,
       details: args.details.trim(),
       category: category ? category : undefined,
-      quantity: args.quantity,
+      quantity: effective.quantity,
+      variants,
+      stockMode: variants ? (args.stockMode as StockMode) : undefined,
       archived: false,
       createdAt: Date.now(),
     });
@@ -174,21 +272,30 @@ export const update = mutation({
     details: v.string(),
     category: v.optional(v.string()),
     quantity: v.number(),
+    variants: v.optional(v.array(variantInput)),
+    stockMode: v.optional(v.union(v.literal("separate"), v.literal("shared"))),
   },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
     const existing = await ctx.db.get(args.id);
     if (!existing) throw new ConvexError("That product no longer exists.");
-    validate(args.name, args.costPrice, args.quantity, args.sellPrice);
+    const variants = cleanVariants(args.variants);
+    validateVariants(variants, args.stockMode);
+    const effective = variants
+      ? effectiveFromVariants(variants, args.stockMode as StockMode, args.quantity)
+      : { costPrice: args.costPrice, sellPrice: args.sellPrice, quantity: args.quantity };
+    validate(args.name, effective.costPrice, effective.quantity, effective.sellPrice);
     const category = (args.category ?? "").trim();
     await ctx.db.patch(args.id, {
       name: args.name.trim(),
-      costPrice: args.costPrice,
+      costPrice: effective.costPrice,
       // Undefined clears it, which is what emptying the field means.
-      sellPrice: args.sellPrice,
+      sellPrice: effective.sellPrice,
       details: args.details.trim(),
       category: category ? category : undefined,
-      quantity: args.quantity,
+      quantity: effective.quantity,
+      variants,
+      stockMode: variants ? (args.stockMode as StockMode) : undefined,
     });
   },
 });
@@ -393,3 +500,38 @@ export const bulkImport = mutation({
     return { created, updated, skipped, errors };
   },
 });
+
+/**
+ * Moves one product's stock by `delta` units, variant-aware. A sale going
+ * out passes a negative delta; a cancellation or restore passes a positive
+ * one — same convention both callers already used before variants existed.
+ *
+ * With no variant (or a product that has none), this is exactly the old
+ * `quantity + delta` patch. With one, "separate" stock moves that variant's
+ * own count and keeps `quantity` as their sum; "shared" stock moves the
+ * pooled total by `delta` sizes' worth of the base unit.
+ */
+export async function adjustStock(
+  ctx: MutationCtx,
+  productId: Id<"products">,
+  variantId: string | undefined,
+  delta: number,
+) {
+  const product = await ctx.db.get(productId);
+  if (!product) return;
+  const variant = variantId ? product.variants?.find((v) => v.id === variantId) : undefined;
+  if (!variant) {
+    await ctx.db.patch(productId, { quantity: product.quantity + delta });
+    return;
+  }
+  if (product.stockMode === "separate") {
+    const nextVariants = product.variants!.map((v) =>
+      v.id === variant.id ? { ...v, quantity: (v.quantity ?? 0) + delta } : v,
+    );
+    const quantity = nextVariants.reduce((sum, v) => sum + (v.quantity ?? 0), 0);
+    await ctx.db.patch(productId, { variants: nextVariants, quantity });
+  } else {
+    const baseQuantity = variant.baseQuantity ?? 1;
+    await ctx.db.patch(productId, { quantity: product.quantity + delta * baseQuantity });
+  }
+}

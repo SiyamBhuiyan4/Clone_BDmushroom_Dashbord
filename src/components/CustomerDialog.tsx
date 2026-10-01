@@ -1,18 +1,22 @@
-import { useEffect, useState } from "react";
-import { ArrowRight, Globe, MessageCircle, UserRound } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight, Camera, Globe, MessageCircle, Trash2, Upload, UserRound } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { Button, Field, Input, Modal, ModalFooter, Textarea } from "./ui";
+import { Button, Field, Input, Modal, ModalFooter, Textarea, cx } from "./ui";
+import { PhoneListField } from "./PhoneListField";
 import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation } from "../lib/session";
 import { normalisePhone } from "../../convex/shared";
+import { uploadFile, useFileDrop } from "../lib/upload";
 
 /** What the dialog needs to edit someone — the list query's shape, not the row's. */
 export type EditableCustomer = {
   _id: Id<"customers">;
   name: string;
+  photoUrl?: string | null;
   phone?: string;
+  extraPhones?: string[];
   whatsapp?: string;
   facebookUrl?: string;
   address?: string;
@@ -40,12 +44,23 @@ export function CustomerDialog({
   const toast = useToast();
   const create = useAuthedMutation(api.customers.create);
   const update = useAuthedMutation(api.customers.update);
+  const generateUploadUrl = useAuthedMutation(api.customers.generateUploadUrl);
+  const setPhotoMutation = useAuthedMutation(api.customers.setPhoto);
+  const removePhotoMutation = useAuthedMutation(api.customers.removePhoto);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [extraPhones, setExtraPhones] = useState<string[]>([]);
   const [whatsapp, setWhatsapp] = useState("");
   const [facebookUrl, setFacebookUrl] = useState("");
   const [address, setAddress] = useState("");
+  /* Same independent-of-the-prop state machine as ProductDialog's photo —
+     see the comment there for why `customer.photoUrl` alone is not enough. */
+  const [savedPhotoUrl, setSavedPhotoUrl] = useState<string | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
   /*
     On by default, because in this trade the phone and the WhatsApp number are
     the same one far more often than not. Ticked, the field follows the phone
@@ -59,9 +74,13 @@ export function CustomerDialog({
     if (!open) return;
     setName(customer?.name ?? "");
     setPhone(customer?.phone ?? "");
+    setExtraPhones(customer?.extraPhones ?? []);
     setWhatsapp(customer?.whatsapp ?? "");
     setFacebookUrl(customer?.facebookUrl ?? "");
     setAddress(customer?.address ?? "");
+    setSavedPhotoUrl(customer?.photoUrl ?? null);
+    setPhotoPreview(customer?.photoUrl ?? null);
+    setPendingPhoto(null);
     /*
       Editing starts ticked only when the two numbers really are the same
       one — compared as digits, so "+8801711…" and "01711-…" count as equal.
@@ -81,17 +100,69 @@ export function CustomerDialog({
 
   const valid = name.trim() !== "";
 
+  async function pickPhoto(file: File) {
+    const preview = URL.createObjectURL(file);
+    setPhotoPreview(preview);
+
+    if (!customer) {
+      // No customer to attach it to yet — uploaded once Save creates one.
+      setPendingPhoto(file);
+      return;
+    }
+    setPhotoBusy(true);
+    try {
+      const uploadUrl = await generateUploadUrl({});
+      const storageId = await uploadFile(uploadUrl, file);
+      await setPhotoMutation({ id: customer._id, storageId });
+      setSavedPhotoUrl(preview);
+      toast.ok(t("contacts.photoUpdated"));
+    } catch (err) {
+      toast.error(errorMessage(err));
+      setPhotoPreview(savedPhotoUrl);
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  const { dragOver, dropProps } = useFileDrop((file) => void pickPhoto(file));
+
+  async function clearPhoto() {
+    if (!customer || !savedPhotoUrl) {
+      setPhotoPreview(null);
+      setPendingPhoto(null);
+      return;
+    }
+    setPhotoBusy(true);
+    try {
+      await removePhotoMutation({ id: customer._id });
+      setSavedPhotoUrl(null);
+      setPhotoPreview(null);
+      toast.ok(t("contacts.photoRemoved"));
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!valid || saving) return;
     setSaving(true);
     try {
-      const payload = { name, phone, whatsapp: whatsappValue, facebookUrl, address };
+      const payload = { name, phone, extraPhones, whatsapp: whatsappValue, facebookUrl, address };
       if (customer) {
         await update({ id: customer._id, ...payload });
         toast.ok(t("customers.updated"));
       } else {
-        await create(payload);
+        const id = await create(payload);
+        // A photo picked before the customer existed uploads now, against
+        // the id Save just produced.
+        if (pendingPhoto) {
+          const uploadUrl = await generateUploadUrl({});
+          const storageId = await uploadFile(uploadUrl, pendingPhoto);
+          await setPhotoMutation({ id, storageId });
+        }
         toast.ok(t("customers.added"));
       }
       onClose();
@@ -112,6 +183,64 @@ export function CustomerDialog({
     >
       <form onSubmit={submit}>
         <div className="flex flex-col gap-5 px-6 py-6">
+          <div className="flex items-center gap-4">
+            <div
+              {...dropProps}
+              className={cx(
+                "relative flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-page transition-colors",
+                dragOver ? "border-accent ring-2 ring-accent" : "border-line-strong",
+              )}
+            >
+              {photoPreview ? (
+                <img src={photoPreview} alt="" className="size-full object-cover" />
+              ) : (
+                <Camera size={22} className="text-ink-3" aria-hidden />
+              )}
+              {photoBusy && (
+                <div className="absolute inset-0 flex items-center justify-center bg-page/70">
+                  <div className="ac-skeleton size-5 rounded-full" aria-hidden />
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void pickPhoto(file);
+                }}
+              />
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={photoBusy}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload size={14} />
+                  {photoPreview ? t("contacts.changePhoto") : t("contacts.uploadPhoto")}
+                </Button>
+                {photoPreview && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={photoBusy}
+                    onClick={() => void clearPhoto()}
+                  >
+                    <Trash2 size={14} />
+                    {t("contacts.removePhoto")}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+
           <Field label={t("orders.customerName")}>
             {(id) => (
               <Input
@@ -136,6 +265,7 @@ export function CustomerDialog({
               />
             )}
           </Field>
+          <PhoneListField phones={extraPhones} onChange={setExtraPhones} />
           {/* ------------------------------------------------- WhatsApp */}
           <div className="flex flex-col gap-2.5">
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line-strong bg-page px-3.5 py-3">

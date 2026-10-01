@@ -1,7 +1,19 @@
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v, ConvexError } from "convex/values";
 import { requireSession, verifyPasscode } from "./auth";
 import { customerKey } from "./shared";
+
+/** Attaches a signed, short-lived photo URL — the stored `photoId` is never useful to the browser on its own. */
+async function withPhoto<T extends { photoId?: Id<"_storage"> }>(ctx: QueryCtx, p: T) {
+  const photoUrl = p.photoId ? await ctx.storage.getUrl(p.photoId) : null;
+  return { ...p, photoUrl };
+}
+
+/** Trims a list of extra numbers down to the ones actually typed in. */
+function cleanPhones(phones: string[] | undefined) {
+  return (phones ?? []).map((p) => p.trim()).filter(Boolean);
+}
 
 /*
   The shop's address book.
@@ -98,12 +110,16 @@ export const list = query({
     await requireSession(ctx, args.token);
     const rows = await ctx.db.query("customers").collect();
     const balances = await customerBalances(ctx);
-    return rows
-      .sort((a, b) => b.orderCount - a.orderCount || a.name.localeCompare(b.name))
-      .map((c) => ({
+    const sorted = rows.sort(
+      (a, b) => b.orderCount - a.orderCount || a.name.localeCompare(b.name),
+    );
+    return await Promise.all(
+      sorted.map(async (c) => ({
+        ...(await withPhoto(ctx, c)),
         _id: c._id,
         name: c.name,
         phone: c.phone,
+        extraPhones: c.extraPhones,
         whatsapp: c.whatsapp,
         facebookUrl: c.facebookUrl,
         address: c.address,
@@ -111,7 +127,8 @@ export const list = query({
         lastOrderedAt: c.lastOrderedAt,
         spent: balances.get(c.key)?.spent ?? 0,
         balance: balances.get(c.key)?.balance ?? 0,
-      }));
+      })),
+    );
   },
 });
 
@@ -150,9 +167,11 @@ export const detail = query({
 
     return {
       customer: {
+        ...(await withPhoto(ctx, customer)),
         _id: customer._id,
         name: customer.name,
         phone: customer.phone,
+        extraPhones: customer.extraPhones,
         whatsapp: customer.whatsapp,
         facebookUrl: customer.facebookUrl,
         address: customer.address,
@@ -177,6 +196,7 @@ export const create = mutation({
     token: v.string(),
     name: v.string(),
     phone: v.optional(v.string()),
+    extraPhones: v.optional(v.array(v.string())),
     whatsapp: v.optional(v.string()),
     facebookUrl: v.optional(v.string()),
     address: v.optional(v.string()),
@@ -203,6 +223,7 @@ export const create = mutation({
     return await ctx.db.insert("customers", {
       name,
       phone,
+      extraPhones: cleanPhones(args.extraPhones),
       whatsapp: args.whatsapp?.trim() || undefined,
       facebookUrl: args.facebookUrl?.trim() || undefined,
       address: args.address?.trim() || undefined,
@@ -225,6 +246,7 @@ export const update = mutation({
     id: v.id("customers"),
     name: v.string(),
     phone: v.optional(v.string()),
+    extraPhones: v.optional(v.array(v.string())),
     whatsapp: v.optional(v.string()),
     facebookUrl: v.optional(v.string()),
     address: v.optional(v.string()),
@@ -251,12 +273,47 @@ export const update = mutation({
     await ctx.db.patch(args.id, {
       name,
       phone,
+      extraPhones: cleanPhones(args.extraPhones),
       // Undefined clears each of these, which is what emptying a box means.
       whatsapp: args.whatsapp?.trim() || undefined,
       facebookUrl: args.facebookUrl?.trim() || undefined,
       address: args.address?.trim() || undefined,
       key,
     });
+  },
+});
+
+/** A one-time URL the browser can POST a photo to directly. */
+export const generateUploadUrl = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+/** Points a customer at a newly uploaded photo, replacing whichever one they had. */
+export const setPhoto = mutation({
+  args: { token: v.string(), id: v.id("customers"), storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const customer = await ctx.db.get(args.id);
+    if (!customer) throw new ConvexError("That customer is no longer saved.");
+    await ctx.db.patch(args.id, { photoId: args.storageId });
+    if (customer.photoId) await ctx.storage.delete(customer.photoId);
+  },
+});
+
+export const removePhoto = mutation({
+  args: { token: v.string(), id: v.id("customers") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const customer = await ctx.db.get(args.id);
+    if (!customer) throw new ConvexError("That customer is no longer saved.");
+    if (customer.photoId) {
+      await ctx.db.patch(args.id, { photoId: undefined });
+      await ctx.storage.delete(customer.photoId);
+    }
   },
 });
 

@@ -1,5 +1,5 @@
-import { Layers, Package, Pencil, Plus, Receipt, Trash2, TrendingUp, Wallet } from "lucide-react";
-import { useState } from "react";
+import { Camera, Layers, Package, Pencil, Plus, Receipt, Trash2, TrendingUp, Wallet } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Modal, cx } from "./ui";
@@ -11,8 +11,92 @@ import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor } from "../lib/avatar";
 import { plural } from "../lib/format";
-import { useToast } from "../lib/toast";
+import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
+import { uploadFile, useFileDrop } from "../lib/upload";
+import { variantAvailable } from "../../convex/shared";
+
+type ProductWithPhoto = Doc<"products"> & { photoUrl?: string | null };
+
+/**
+ * The product's photo, shown where the dialog header would otherwise put a
+ * plain icon — click or drop a file directly on it to set one. Living here
+ * instead of only in the edit form means a photo can be added the moment you
+ * notice it is missing, without a detour through "Edit product".
+ */
+function ProductPhotoAvatar({ product }: { product: ProductWithPhoto }) {
+  const t = useT();
+  const toast = useToast();
+  const generateUploadUrl = useAuthedMutation(api.products.generateUploadUrl);
+  const setPhoto = useAuthedMutation(api.products.setPhoto);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(product.photoUrl ?? null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setPreview(product.photoUrl ?? null);
+  }, [product._id, product.photoUrl]);
+
+  async function pickPhoto(file: File) {
+    setPreview(URL.createObjectURL(file));
+    setBusy(true);
+    try {
+      const uploadUrl = await generateUploadUrl({});
+      const storageId = await uploadFile(uploadUrl, file);
+      await setPhoto({ id: product._id, storageId });
+      toast.ok(t("products.photoUpdated"));
+    } catch (err) {
+      toast.error(errorMessage(err));
+      setPreview(product.photoUrl ?? null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const { dragOver, dropProps } = useFileDrop((file) => void pickPhoto(file));
+
+  return (
+    <div
+      {...dropProps}
+      role="button"
+      tabIndex={0}
+      aria-label={product.photoUrl ? t("products.changePhoto") : t("products.uploadPhoto")}
+      onClick={() => fileInputRef.current?.click()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          fileInputRef.current?.click();
+        }
+      }}
+      className={cx(
+        "relative flex size-11 cursor-pointer items-center justify-center",
+        dragOver && "ring-2 ring-white/70",
+      )}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void pickPhoto(file);
+        }}
+      />
+      {preview ? (
+        <img src={preview} alt="" className="size-11 object-cover" />
+      ) : (
+        <Camera size={19} aria-hidden />
+      )}
+      {busy && (
+        <div className="absolute inset-0 flex items-center justify-center bg-ink/40">
+          <div className="ac-skeleton size-4 rounded-full" aria-hidden />
+        </div>
+      )}
+    </div>
+  );
+}
 
 /*
   A stored lot, as the form wants it. The detail query hands back the raw
@@ -65,13 +149,8 @@ export function ProductDetailDialog({
     <Modal
       open={open}
       onClose={onClose}
-      icon={
-        data?.product.photoUrl ? (
-          <img src={data.product.photoUrl} alt="" className="size-11 rounded-2xl object-cover" />
-        ) : (
-          <Package size={19} />
-        )
-      }
+      icon={data?.product ? <ProductPhotoAvatar product={data.product} /> : <Package size={19} />}
+      iconInteractive={Boolean(data?.product)}
       gradient={name ? gradientFor(name) : undefined}
       title={name || t("detail.title")}
       subtitle={data?.product.category ?? undefined}
@@ -120,6 +199,33 @@ export function ProductDetailDialog({
               <p className="text-[13px] leading-6 whitespace-pre-wrap text-ink-2">
                 {data.product.details}
               </p>
+            </div>
+          )}
+
+          {data.product.variants && data.product.variants.length > 0 && (
+            <div>
+              <p className="mb-2.5 text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">
+                {t("products.multipleSizes")}
+              </p>
+              <ul className="flex flex-col gap-2">
+                {data.product.variants.map((v) => (
+                  <li
+                    key={v.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-[13px] font-semibold text-ink">{v.label}</p>
+                      <p className="mt-0.5 text-[12px] text-ink-3">
+                        {fmt(v.costPrice)}
+                        {v.sellPrice !== undefined ? ` → ${fmt(v.sellPrice)}` : ""}
+                      </p>
+                    </div>
+                    <Badge tone="accent">
+                      {fmtNum(variantAvailable(data.product, v.id))} {t("products.variantStock").toLowerCase()}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -231,6 +337,7 @@ export function ProductDetailDialog({
                       <p className="text-[13px] text-ink">{fmtDateTime(s.soldAt)}</p>
                       <p className="mt-0.5 text-[12px] text-ink-3">
                         {fmtNum(s.quantity)} × {fmt(s.unitPrice)}
+                        {s.variantLabel ? ` · ${s.variantLabel}` : ""}
                         {s.buyer ? ` · ${s.buyer}` : ""}
                       </p>
                     </div>

@@ -60,6 +60,14 @@ export default defineSchema({
           remaining stock be put back if the sale is cancelled.
         */
         batchId: v.optional(v.id("stockBatches")),
+        /*
+          Which size/package this line sold, when the product has variants.
+          The label is snapshotted alongside it — same reason `productName`
+          is: renaming or removing the variant later must not reword a
+          receipt that already went out.
+        */
+        variantId: v.optional(v.string()),
+        variantLabel: v.optional(v.string()),
       }),
     ),
     subtotal: v.number(),
@@ -227,6 +235,8 @@ export default defineSchema({
   */
   vendors: defineTable({
     name: v.string(),
+    /** The vendor's profile picture, stored in Convex file storage. */
+    photoId: v.optional(v.id("_storage")),
     category: v.union(
       v.literal("spawn"),
       v.literal("materials"),
@@ -235,7 +245,10 @@ export default defineSchema({
       v.literal("other"),
     ),
     phone: v.optional(v.string()),
+    /** Further numbers beyond the main one — a vendor is often reachable on more than one line. */
+    extraPhones: v.optional(v.array(v.string())),
     whatsapp: v.optional(v.string()),
+    facebookUrl: v.optional(v.string()),
     address: v.optional(v.string()),
     /** Tax Identification Number, typed in as text — the document photo (if any) lives in vendorMedia. */
     tin: v.optional(v.string()),
@@ -340,7 +353,11 @@ export default defineSchema({
   */
   customers: defineTable({
     name: v.string(),
+    /** The customer's profile picture, stored in Convex file storage. */
+    photoId: v.optional(v.id("_storage")),
     phone: v.optional(v.string()),
+    /** Further numbers beyond the main one — optional, as many as needed. */
+    extraPhones: v.optional(v.array(v.string())),
     /*
       How you actually reach them. Kept apart from `phone` because the number
       that identifies a customer and the number you message are not always the
@@ -382,6 +399,35 @@ export default defineSchema({
     quantity: v.number(),
     /** Per-product low-stock threshold; falls back to a global default. */
     reorderLevel: v.optional(v.number()),
+    /*
+      Size/package options for one product — "500 gram" at one price, "1 kg"
+      at another — each with its own buy and sell price. Absent for an
+      ordinary single-price product, which is most of them; `costPrice`,
+      `sellPrice` and `quantity` above keep meaning what they always have.
+      When present, those three fields mirror what the variants add up to
+      (see products.ts) so every other screen keeps reading from one place.
+    */
+    variants: v.optional(
+      v.array(
+        v.object({
+          /** Stable across edits — an order line points at this, not the array index. */
+          id: v.string(),
+          label: v.string(),
+          costPrice: v.number(),
+          sellPrice: v.optional(v.number()),
+          /** This variant's own stock count — only set in "separate" mode. */
+          quantity: v.optional(v.number()),
+          /** How many base units (the product's `unit`/`quantity`) one of this variant is — only set in "shared" mode. */
+          baseQuantity: v.optional(v.number()),
+        }),
+      ),
+    ),
+    /*
+      "separate": each variant is its own countable stock (pre-packed sizes).
+      "shared": one pooled `quantity` in the base unit, each variant just a
+      priced slice of it. Meaningless without `variants`.
+    */
+    stockMode: v.optional(v.union(v.literal("separate"), v.literal("shared"))),
     archived: v.boolean(),
     createdAt: v.number(),
   })
@@ -398,6 +444,9 @@ export default defineSchema({
     unitCost: v.number(),
     unitPrice: v.number(),
     quantity: v.number(),
+    /** Which size/package this sale was, when the product has variants. */
+    variantId: v.optional(v.string()),
+    variantLabel: v.optional(v.string()),
     buyer: v.optional(v.string()),
     note: v.optional(v.string()),
     soldAt: v.number(),

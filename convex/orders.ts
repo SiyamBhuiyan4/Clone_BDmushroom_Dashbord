@@ -3,6 +3,8 @@ import { v, ConvexError } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { requireSession, verifyPasscode } from "./auth";
 import { rememberCustomer } from "./customers";
+import { adjustStock } from "./products";
+import { variantAvailable } from "./shared";
 
 /*
   Orders.
@@ -29,6 +31,8 @@ const itemInput = v.object({
     product's own cost price.
   */
   batchId: v.optional(v.id("stockBatches")),
+  /** Which size, for a product sold in variants. */
+  variantId: v.optional(v.string()),
 });
 
 type Totals = { subtotal: number; total: number };
@@ -88,6 +92,7 @@ async function resolveItems(
     quantity: number;
     unitPrice: number;
     batchId?: Id<"stockBatches">;
+    variantId?: string;
   }[],
 ) {
   const resolved = [];
@@ -95,20 +100,34 @@ async function resolveItems(
   for (const line of items) {
     const product = await ctx.db.get(line.productId);
     if (!product) throw new ConvexError("A product on this sale no longer exists.");
-    if (line.quantity > product.quantity) {
+
+    const variant = line.variantId ? product.variants?.find((v) => v.id === line.variantId) : undefined;
+    if (line.variantId && !variant) {
+      throw new ConvexError(`That size of ${product.name} no longer exists.`);
+    }
+
+    if (variant) {
+      const available = variantAvailable(product, variant.id);
+      if (line.quantity > available) {
+        short.push(
+          `${product.name} (${variant.label}): ${line.quantity} requested, ${available} available`,
+        );
+      }
+    } else if (line.quantity > product.quantity) {
       short.push(
         `${product.name}: ${line.quantity} requested, ${product.quantity} ${product.unit ?? DEFAULT_UNIT} available`,
       );
     }
 
     /*
-      Cost comes from the chosen lot when there is one. The same product
-      bought twice at different prices makes two different profits, and
-      averaging them into a single cost price is how a shop convinces itself
-      a bad buy was fine. The figure is snapshotted here, so editing the lot
-      later cannot rewrite what this sale earned.
+      Cost comes from the chosen lot when there is one, else the chosen size,
+      else the product's own cost. The same product bought twice at different
+      prices makes two different profits, and averaging them into a single
+      cost price is how a shop convinces itself a bad buy was fine. The figure
+      is snapshotted here, so editing the lot or the size later cannot
+      rewrite what this sale earned.
     */
-    let unitCost = product.costPrice;
+    let unitCost = variant ? variant.costPrice : product.costPrice;
     if (line.batchId) {
       const batch = await ctx.db.get(line.batchId);
       if (!batch) throw new ConvexError("That stock lot no longer exists.");
@@ -128,13 +147,32 @@ async function resolveItems(
       productId: line.productId,
       productName: product.name,
       quantity: line.quantity,
-      unit: product.unit ?? DEFAULT_UNIT,
+      unit: variant ? variant.label : (product.unit ?? DEFAULT_UNIT),
       unitPrice: line.unitPrice,
       unitCost,
       batchId: line.batchId,
+      variantId: variant?.id,
+      variantLabel: variant?.label,
     });
   }
   return { resolved, short };
+}
+
+/** Which already-recorded lines, if confirmed/restored right now, would oversell. */
+async function shortageOf(
+  ctx: MutationCtx,
+  items: { productId: Id<"products">; productName: string; quantity: number; variantId?: string }[],
+) {
+  const short: string[] = [];
+  for (const line of items) {
+    const product = await ctx.db.get(line.productId);
+    if (!product) continue;
+    const available = line.variantId ? variantAvailable(product, line.variantId) : product.quantity;
+    if (line.quantity > available) {
+      short.push(`${line.productName}: only ${available} left`);
+    }
+  }
+  return short;
 }
 
 /* ------------------------------------------------------------------ read */
@@ -276,10 +314,7 @@ async function fulfil(ctx: MutationCtx, id: Id<"orders">) {
   const saleIds: Id<"sales">[] = [];
 
   for (const line of order.items) {
-    const product = await ctx.db.get(line.productId);
-    if (product) {
-      await ctx.db.patch(line.productId, { quantity: product.quantity - line.quantity });
-    }
+    await adjustStock(ctx, line.productId, line.variantId, -line.quantity);
     // The lot empties along with the shelf it sits on.
     if (line.batchId) {
       const batch = await ctx.db.get(line.batchId);
@@ -297,6 +332,8 @@ async function fulfil(ctx: MutationCtx, id: Id<"orders">) {
         unitCost: line.unitCost,
         unitPrice: effectivePrice,
         quantity: line.quantity,
+        variantId: line.variantId,
+        variantLabel: line.variantLabel,
         buyer: order.customerName,
         note: `${order.orderNo}${order.note ? ` · ${order.note}` : ""}`,
         soldAt: order.orderedAt,
@@ -333,13 +370,7 @@ export const confirm = mutation({
     }
     if (order.orderStatus === "cancelled") throw new ConvexError("This order was cancelled.");
 
-    const short: string[] = [];
-    for (const line of order.items) {
-      const product = await ctx.db.get(line.productId);
-      if (product && line.quantity > product.quantity) {
-        short.push(`${line.productName}: only ${product.quantity} left`);
-      }
-    }
+    const short: string[] = await shortageOf(ctx, order.items);
     if (short.length > 0) {
       if (!args.overridePasscode) {
         throw new ConvexError(
@@ -367,10 +398,7 @@ export const cancel = mutation({
     for (const saleId of order.saleIds ?? []) {
       const sale = await ctx.db.get(saleId);
       if (!sale) continue;
-      const product = await ctx.db.get(sale.productId);
-      if (product) {
-        await ctx.db.patch(sale.productId, { quantity: product.quantity + sale.quantity });
-      }
+      await adjustStock(ctx, sale.productId, sale.variantId, sale.quantity);
       // Back to the lot it was drawn from, not just to the shelf total.
       if (sale.batchId) {
         const batch = await ctx.db.get(sale.batchId);
@@ -429,13 +457,7 @@ export const restore = mutation({
       is checked exactly as confirming one is — and can be overridden the same
       way, since the goods may well have gone out regardless.
     */
-    const short: string[] = [];
-    for (const line of order.items) {
-      const product = await ctx.db.get(line.productId);
-      if (product && line.quantity > product.quantity) {
-        short.push(`${line.productName}: only ${product.quantity} left`);
-      }
-    }
+    const short: string[] = await shortageOf(ctx, order.items);
     if (short.length > 0) {
       if (!args.overridePasscode) {
         throw new ConvexError(
@@ -554,10 +576,7 @@ export const remove = mutation({
     for (const saleId of order.saleIds ?? []) {
       const sale = await ctx.db.get(saleId);
       if (!sale) continue;
-      const product = await ctx.db.get(sale.productId);
-      if (product) {
-        await ctx.db.patch(sale.productId, { quantity: product.quantity + sale.quantity });
-      }
+      await adjustStock(ctx, sale.productId, sale.variantId, sale.quantity);
       // Back to the lot it was drawn from, not just to the shelf total.
       if (sale.batchId) {
         const batch = await ctx.db.get(sale.batchId);

@@ -323,6 +323,7 @@ function ProductCard({
   const t = useT();
   // Ascending, so the footer can read the cheapest and dearest off the ends.
   const lotCosts = [...lots].map((l) => l.unitCost).sort((a, b) => a - b);
+  const hasVariants = Boolean(product.variants?.length);
   const out = product.quantity === 0;
   const low = product.quantity > 0 && product.quantity <= 3;
   const [showAll, setShowAll] = useState(false);
@@ -432,16 +433,27 @@ function ProductCard({
           <MoneyStat
             label="Cost price"
             value={
-              lotCosts.length > 0
-                ? lotCosts[0] === lotCosts[lotCosts.length - 1]
-                  ? fmt(lotCosts[0])
-                  : `${fmt(lotCosts[0])}–${fmt(lotCosts[lotCosts.length - 1])}`
-                : fmt(product.costPrice)
+              hasVariants
+                ? fmtRange(fmt, product.variants!.map((v) => v.costPrice))
+                : lotCosts.length > 0
+                  ? lotCosts[0] === lotCosts[lotCosts.length - 1]
+                    ? fmt(lotCosts[0])
+                    : `${fmt(lotCosts[0])}–${fmt(lotCosts[lotCosts.length - 1])}`
+                  : fmt(product.costPrice)
             }
           />
           <MoneyStat
             label={t("products.sellPrice")}
-            value={product.sellPrice !== undefined ? fmt(product.sellPrice) : "—"}
+            value={
+              hasVariants
+                ? fmtRange(
+                    fmt,
+                    product.variants!.map((v) => v.sellPrice).filter((p): p is number => p !== undefined),
+                  )
+                : product.sellPrice !== undefined
+                  ? fmt(product.sellPrice)
+                  : "—"
+            }
           />
           <MoneyStat
             label={t("sales.profit")}
@@ -461,33 +473,48 @@ function ProductCard({
         )}
 
         <div className="mt-3 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
-          <div className="flex h-10 items-center rounded-xl border border-line-strong bg-page">
-            <button
-              onClick={() => onAdjust(-1)}
-              disabled={product.quantity === 0}
-              aria-label={`Remove one unit of ${product.name}`}
-              className="flex size-9 items-center justify-center rounded-l-xl text-ink-3 transition-colors hover:text-ink disabled:opacity-30"
-            >
-              <Minus size={14} />
-            </button>
-            <span className="min-w-7 text-center text-[13.5px] font-bold tabular-nums text-ink">
-              {product.quantity}
-            </span>
-            <button
-              onClick={() => onAdjust(1)}
-              aria-label={`Add one unit of ${product.name}`}
-              className="flex size-9 items-center justify-center rounded-r-xl text-ink-3 transition-colors hover:text-ink"
-            >
-              <Plus size={14} />
-            </button>
-          </div>
-          <Button size="sm" variant="primary" onClick={onSell} disabled={out}>
+          {/*
+            Each size has its own stock, so one +/- here would have to guess
+            which size it meant — the sizes themselves, in Edit product, are
+            where that number actually lives.
+          */}
+          {!hasVariants && (
+            <div className="flex h-10 items-center rounded-xl border border-line-strong bg-page">
+              <button
+                onClick={() => onAdjust(-1)}
+                disabled={product.quantity === 0}
+                aria-label={`Remove one unit of ${product.name}`}
+                className="flex size-9 items-center justify-center rounded-l-xl text-ink-3 transition-colors hover:text-ink disabled:opacity-30"
+              >
+                <Minus size={14} />
+              </button>
+              <span className="min-w-7 text-center text-[13.5px] font-bold tabular-nums text-ink">
+                {product.quantity}
+              </span>
+              <button
+                onClick={() => onAdjust(1)}
+                aria-label={`Add one unit of ${product.name}`}
+                className="flex size-9 items-center justify-center rounded-r-xl text-ink-3 transition-colors hover:text-ink"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+          )}
+          <Button size="sm" variant="primary" onClick={onSell} disabled={out} className={cx(hasVariants && "w-full")}>
             Sell
           </Button>
         </div>
       </div>
     </Card>
   );
+}
+
+/** A single figure when every value agrees, the low–high span otherwise. */
+function fmtRange(fmt: (v: number) => string, values: number[]): string {
+  if (values.length === 0) return "—";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return min === max ? fmt(min) : `${fmt(min)}–${fmt(max)}`;
 }
 
 function MoneyStat({
