@@ -1,6 +1,7 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireSession } from "./auth";
+import { allRowsForDashboard } from "./fixedCosts";
 
 const LOW_STOCK_AT = 3;
 const WINDOW_DAYS = 365;
@@ -27,6 +28,15 @@ export const overview = query({
       is; adding them together would make both figures meaningless.
     */
     const costs = await ctx.db.query("costs").withIndex("by_spentAt").order("desc").collect();
+    /*
+      Fixed costs — rent, the wifi bill, salary — booked once a month rather
+      than logged as they happen. They still eat into net profit the same as
+      any other operating cost, so they are folded into the same dated rows
+      here (each dated to the 1st of the month it was booked for) rather than
+      kept as a second, separate total the rest of this query would have to
+      remember to add in.
+    */
+    const fixedCostRows = await allRowsForDashboard(ctx);
 
     let revenue = 0;
     let cost = 0;
@@ -37,8 +47,13 @@ export const overview = query({
       unitsSold += s.quantity;
     }
 
+    const allCosts = [
+      ...costs.map((c) => ({ id: c._id as string, name: c.name, spentAt: c.spentAt, amount: c.amount })),
+      ...fixedCostRows,
+    ].sort((a, b) => b.spentAt - a.spentAt);
+
     let operatingCost = 0;
-    for (const c of costs) operatingCost += c.amount;
+    for (const c of allCosts) operatingCost += c.amount;
 
     const active = products.filter((p) => !p.archived);
     let unitsInStock = 0;
@@ -68,7 +83,7 @@ export const overview = query({
         netMargin: revenue > 0 ? (revenue - cost - operatingCost) / revenue : 0,
         salesCount: sales.length,
         unitsSold,
-        costsCount: costs.length,
+        costsCount: allCosts.length,
       },
       inventory: {
         productCount: active.length,
@@ -100,14 +115,7 @@ export const overview = query({
         browser's timezone, and a total summed here could not be re-scoped
         without a second round trip.
       */
-      windowCosts: costs
-        .filter((c) => c.spentAt >= since)
-        .map((c) => ({
-          id: c._id as string,
-          name: c.name,
-          spentAt: c.spentAt,
-          amount: c.amount,
-        })),
+      windowCosts: allCosts.filter((c) => c.spentAt >= since),
       windowDays: WINDOW_DAYS,
     };
   },

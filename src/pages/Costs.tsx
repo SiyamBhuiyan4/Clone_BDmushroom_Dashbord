@@ -13,10 +13,11 @@ import {
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Button, Card, CardHeader, EmptyState, Input, Select } from "../components/ui";
+import { Button, Card, CardHeader, cx, EmptyState, Input, Select } from "../components/ui";
 import { StatTile } from "../components/StatTile";
 import { Pagination, SortSelect, usePagination } from "../components/Pagination";
 import { CostDialog } from "../components/CostDialog";
+import { FixedCostsSection } from "../components/FixedCostsSection";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -28,11 +29,13 @@ import { usePersistedState } from "../lib/persist";
 
 const DAY = 24 * 60 * 60 * 1000;
 type SortKey = "newest" | "oldest" | "highest" | "lowest";
+type Tab = "regular" | "fixed";
 
 export function CostsPage() {
   const { fmt, fmtNum, fmtDateTime } = useSettings();
   const t = useT();
   const toast = useToast();
+  const [tab, setTab] = usePersistedState<Tab>("ac.costs.tab", "regular");
   const costs = useAuthedQuery(api.costs.list, {});
   const names = useAuthedQuery(api.costs.names) ?? [];
   const remove = useAuthedMutation(api.costs.remove);
@@ -138,25 +141,49 @@ export function CostsPage() {
           <h1 className="text-[24px] leading-8 font-bold tracking-tight text-ink sm:text-[28px] sm:leading-9">
             {t("costs.title")}
           </h1>
-          <p className="mt-1 text-[13.5px] text-ink-3 sm:text-[14px]">{t("costs.subtitle")}</p>
+          <p className="mt-1 text-[13.5px] text-ink-3 sm:text-[14px]">
+            {tab === "regular" ? t("costs.subtitle") : t("fixedCosts.subtitle")}
+          </p>
         </div>
-        <div className="flex w-full items-center gap-2.5 sm:w-auto">
-          <Button
-            variant="secondary"
-            onClick={exportCsv}
-            disabled={rows.length === 0}
-            className="flex-1 sm:flex-none"
-          >
-            <Download size={17} />
-            {t("sales.export")}
-          </Button>
-          <Button variant="primary" onClick={() => setAddOpen(true)} className="flex-1 sm:flex-none">
-            <Plus size={17} />
-            {t("costs.add")}
-          </Button>
-        </div>
+        {tab === "regular" && (
+          <div className="flex w-full items-center gap-2.5 sm:w-auto">
+            <Button
+              variant="secondary"
+              onClick={exportCsv}
+              disabled={rows.length === 0}
+              className="flex-1 sm:flex-none"
+            >
+              <Download size={17} />
+              {t("sales.export")}
+            </Button>
+            <Button variant="primary" onClick={() => setAddOpen(true)} className="flex-1 sm:flex-none">
+              <Plus size={17} />
+              {t("costs.add")}
+            </Button>
+          </div>
+        )}
       </div>
 
+      <div className="flex w-full gap-2 rounded-xl bg-surface-2 p-1 sm:w-fit">
+        {(["regular", "fixed"] as const).map((key) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            aria-pressed={tab === key}
+            className={cx(
+              "flex-1 rounded-lg px-4 py-2 text-[13px] font-semibold transition-colors sm:flex-none",
+              tab === key ? "bg-surface text-ink shadow-[var(--shadow-sm)]" : "text-ink-3 hover:text-ink-2",
+            )}
+          >
+            {key === "regular" ? t("costs.tabRegular") : t("costs.tabFixed")}
+          </button>
+        ))}
+      </div>
+
+      {tab === "fixed" && <FixedCostsSection />}
+
+      {tab === "regular" && (
+      <>
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-full min-w-0 sm:min-w-60 sm:max-w-md sm:flex-1">
           <Search
@@ -460,6 +487,8 @@ export function CostsPage() {
           )}
         </div>
       </Card>
+      </>
+      )}
 
       <CostDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <CostDialog open={editing !== null} onClose={() => setEditing(null)} cost={editing} />

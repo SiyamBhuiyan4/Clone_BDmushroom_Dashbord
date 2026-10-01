@@ -342,6 +342,37 @@ export default defineSchema({
     .index("by_usage", ["usageCount"]),
 
   /*
+    A fixed-cost folder — "Office Rent", "Staff Salary" — the recurring bills
+    booked once a month rather than logged as they happen. Kept apart from
+    `costNames`: those are suggestions for a free-typed one-off cost, these
+    are the fixed set a month is actually filled in against.
+  */
+  fixedCostCategories: defineTable({
+    name: v.string(),
+    key: v.string(),
+    createdAt: v.number(),
+  }).index("by_key", ["key"]),
+
+  /*
+    One category's booked amount for one month — "Office Rent" for
+    2026-10 was ৳15,000. A month with nothing entered yet for a category
+    simply has no row, rather than a zero that looks like it was confirmed.
+  */
+  fixedCosts: defineTable({
+    /** Local calendar month, "YYYY-MM" — a fixed cost is booked once a month, not on a day. */
+    month: v.string(),
+    categoryId: v.id("fixedCostCategories"),
+    /** Snapshotted like a cost's name, so renaming or dropping the category later can't reword history. */
+    categoryName: v.string(),
+    amount: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_month", ["month"])
+    .index("by_month_category", ["month", "categoryId"])
+    .index("by_category", ["categoryId"]),
+
+  /*
     A customer the shop expects to see again. Saved from an order with the
     tick on, searched and picked the next time rather than retyped.
 

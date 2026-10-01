@@ -87,6 +87,39 @@ export function formatDateTime(ts: number, lang: Lang = "en") {
   });
 }
 
+/** Local calendar month, "YYYY-MM" — the unit a fixed cost is booked in. */
+export function monthKey(ts: number) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** The first instant of a "YYYY-MM" month, in local time. */
+export function monthStart(month: string) {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(y, m - 1, 1).getTime();
+}
+
+/** "YYYY-MM", `delta` months on — negative to go back. */
+export function shiftMonth(month: string, delta: number) {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return monthKey(d.getTime());
+}
+
+export function formatMonth(month: string, lang: Lang = "en") {
+  return new Date(monthStart(month)).toLocaleDateString(localeFor(lang), {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+export function formatMonthShort(month: string, lang: Lang = "en") {
+  return new Date(monthStart(month)).toLocaleDateString(localeFor(lang), {
+    month: "short",
+    year: "2-digit",
+  });
+}
+
 export function relativeTime(ts: number) {
   const diff = Date.now() - ts;
   if (diff < 60_000) return "just now";
