@@ -30,7 +30,7 @@ import { useAuthedQuery, useAuthedMutation } from "../lib/session";
 
 type ProductRow = Doc<"products"> & { photoUrl: string | null };
 
-type SortKey = "newest" | "name" | "stockLow" | "stockHigh" | "costHigh";
+type SortKey = "newest" | "name" | "stockLow" | "stockHigh" | "costHigh" | "profitHigh";
 
 export function ProductsPage() {
   const { fmt, fmtNum } = useSettings();
@@ -83,9 +83,14 @@ export function ProductsPage() {
       if (sort === "stockLow") return a.quantity - b.quantity;
       if (sort === "stockHigh") return b.quantity - a.quantity;
       if (sort === "costHigh") return b.costPrice - a.costPrice;
+      // Same figure the card shows: each sale's own snapshotted profit,
+      // summed for whichever range is currently picked — never today's price.
+      if (sort === "profitHigh") {
+        return (profitByProduct.get(b._id) ?? 0) - (profitByProduct.get(a._id) ?? 0);
+      }
       return b.createdAt - a.createdAt;
     });
-  }, [products, category, sort]);
+  }, [products, category, sort, profitByProduct]);
 
   const pager = usePagination(visible, `${search}|${category}|${sort}|${showArchived}`, 25);
 
@@ -156,6 +161,7 @@ export function ProductsPage() {
                 { value: "stockLow", label: t("products.sortStockLow") },
                 { value: "stockHigh", label: t("products.sortStockHigh") },
                 { value: "costHigh", label: t("products.sortCostHigh") },
+                { value: "profitHigh", label: t("products.sortProfitHigh") },
               ]}
             />
           </div>

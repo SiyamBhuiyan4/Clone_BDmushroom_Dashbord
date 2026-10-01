@@ -103,6 +103,7 @@ const EN = {
   "products.sortStockLow": "Stock: low to high",
   "products.sortStockHigh": "Stock: high to low",
   "products.sortCostHigh": "Cost: high to low",
+  "products.sortProfitHigh": "Profit: high to low",
 
   "sales.title": "Sales",
   "sales.subtitle": "Every sale, with its customer, its receipt and the profit it made.",
@@ -501,6 +502,7 @@ const BN: Partial<Record<MessageKey, string>> = {
   "products.sortStockLow": "স্টক: কম থেকে বেশি",
   "products.sortStockHigh": "স্টক: বেশি থেকে কম",
   "products.sortCostHigh": "ক্রয়মূল্য: বেশি থেকে কম",
+  "products.sortProfitHigh": "লাভ: বেশি থেকে কম",
 
   "sales.title": "বিক্রয়",
   "sales.subtitle": "প্রতিটি বিক্রয় — ক্রেতা, রসিদ ও প্রকৃত লাভসহ।",
