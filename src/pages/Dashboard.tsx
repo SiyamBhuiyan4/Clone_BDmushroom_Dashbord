@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { Badge, Button, Card, CardAction, CardHeader, EmptyState, Input, cx } from "../components/ui";
+import { Badge, Button, Card, CardAction, CardHeader, EmptyState, cx } from "../components/ui";
 import { StatTile, type Delta } from "../components/StatTile";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { TrendChart, type TrendPoint } from "../components/charts/TrendChart";
@@ -24,11 +24,12 @@ import { ProductDialog } from "../components/ProductDialog";
 import { SaleDialog } from "../components/SaleDialog";
 import { ProductDetailDialog } from "../components/ProductDetailDialog";
 import { ResetDialog } from "../components/ResetDialog";
+import { RangeCalendarDialog } from "../components/RangeCalendarDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { usePersistedState } from "../lib/persist";
 import { gradientFor, initialOf } from "../lib/avatar";
-import { dayKey, plural, relativeTime, startOfLocalDay } from "../lib/format";
+import { plural, relativeTime, startOfLocalDay } from "../lib/format";
 import { useAuthedQuery } from "../lib/session";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -55,7 +56,7 @@ function change(current: number, previous: number): number | null {
 }
 
 export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sales") => void }) {
-  const { fmt, fmtNum, fmtPercent, fmtDateFull } = useSettings();
+  const { fmt, fmtNum, fmtPercent, fmtDate, fmtDateFull } = useSettings();
   const t = useT();
   const data = useAuthedQuery(api.dashboard.overview);
   const [rangeDays, setRangeDays] = usePersistedState<number | typeof CUSTOM>(
@@ -68,19 +69,11 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
   const [productOpen, setProductOpen] = useState(false);
   const [viewing, setViewing] = useState<Id<"products"> | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   const isCustom = rangeDays === CUSTOM;
   const preset = isCustom ? undefined : RANGES.find((r) => r.days === rangeDays);
   const todayStart = startOfLocalDay(Date.now());
-
-  const openCustom = () => {
-    // Seed with the last 7 days the first time, so the panel never opens blank.
-    if (!customFrom || !customTo) {
-      setCustomFrom(dayKey(todayStart - 6 * DAY));
-      setCustomTo(dayKey(todayStart));
-    }
-    setRangeDays(CUSTOM);
-  };
 
   const scoped = useMemo(() => {
     if (!data) return null;
@@ -287,7 +280,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
                 );
               })}
               <button
-                onClick={openCustom}
+                onClick={() => setCalendarOpen(true)}
                 aria-pressed={isCustom}
                 style={isCustom ? { background: "var(--grad-violet)" } : undefined}
                 className={cx(
@@ -296,53 +289,24 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
                 )}
               >
                 <CalendarRange size={14} />
-                Custom
+                {isCustom ? `${fmtDate(scoped.since)} – ${fmtDate(scoped.until)}` : "Custom"}
               </button>
             </div>
           </div>
 
-          {isCustom && (
-            <div className="ac-fade-in -mt-2 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-3">
-              <label className="flex items-center gap-2">
-                <span className="shrink-0 text-[12.5px] font-semibold text-ink-3">
-                  {t("sales.from")}
-                </span>
-                <Input
-                  type="date"
-                  value={customFrom}
-                  onChange={(e) => setCustomFrom(e.target.value)}
-                  max={customTo || dayKey(todayStart)}
-                  min={customTo ? dayKey(parseDateInput(customTo)! - (MAX_CUSTOM_DAYS - 1) * DAY) : undefined}
-                  aria-label={t("sales.from")}
-                  className="w-auto"
-                />
-              </label>
-              <label className="flex items-center gap-2">
-                <span className="shrink-0 text-[12.5px] font-semibold text-ink-3">
-                  {t("sales.to")}
-                </span>
-                <Input
-                  type="date"
-                  value={customTo}
-                  onChange={(e) => setCustomTo(e.target.value)}
-                  min={customFrom || undefined}
-                  max={
-                    customFrom
-                      ? dayKey(
-                          Math.min(
-                            parseDateInput(customFrom)! + (MAX_CUSTOM_DAYS - 1) * DAY,
-                            todayStart,
-                          ),
-                        )
-                      : dayKey(todayStart)
-                  }
-                  aria-label={t("sales.to")}
-                  className="w-auto"
-                />
-              </label>
-              <p className="text-[12px] text-ink-3">Up to {MAX_CUSTOM_DAYS} days at a time.</p>
-            </div>
-          )}
+          <RangeCalendarDialog
+            open={calendarOpen}
+            onClose={() => setCalendarOpen(false)}
+            from={customFrom}
+            to={customTo}
+            maxDays={MAX_CUSTOM_DAYS}
+            maxDate={todayStart}
+            onApply={(nextFrom, nextTo) => {
+              setCustomFrom(nextFrom);
+              setCustomTo(nextTo);
+              setRangeDays(CUSTOM);
+            }}
+          />
 
           {/*
             Read left to right, the tiles are the income statement: revenue,

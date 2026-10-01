@@ -24,6 +24,7 @@ const EN = {
 
   "common.add": "Add",
   "common.cancel": "Cancel",
+  "common.apply": "Apply",
   "common.save": "Save changes",
   "common.delete": "Delete",
   "common.edit": "Edit",
@@ -76,6 +77,8 @@ const EN = {
   "dash.runningLow": "Running low",
   "dash.allStocked": "Every product has stock on hand. Nothing needs restocking.",
   "dash.atCost": "at cost",
+  "dash.atMost": "at most",
+  "dash.pickEndDate": "Pick an end date",
 
   "products.title": "Products",
   "products.subtitle": "What you have, what it cost you, and how many are left.",
@@ -404,6 +407,7 @@ const BN: Partial<Record<MessageKey, string>> = {
 
   "common.add": "যোগ করুন",
   "common.cancel": "বাতিল",
+  "common.apply": "প্রয়োগ করুন",
   "common.save": "পরিবর্তন সংরক্ষণ",
   "common.delete": "মুছুন",
   "common.edit": "সম্পাদনা",
@@ -455,6 +459,8 @@ const BN: Partial<Record<MessageKey, string>> = {
   "dash.outOfStock": "স্টক শেষ",
   "dash.runningLow": "কম পড়ছে",
   "dash.allStocked": "সব পণ্যের স্টক আছে। কিছু আনার দরকার নেই।",
+  "dash.atMost": "সর্বোচ্চ",
+  "dash.pickEndDate": "শেষের তারিখ বেছে নিন",
   "dash.atCost": "ক্রয়মূল্যে",
 
   "products.title": "পণ্য",
