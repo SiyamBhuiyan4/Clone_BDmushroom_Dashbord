@@ -14,6 +14,7 @@ import {
   Textarea,
   cx,
 } from "./ui";
+import { LotMediaManager } from "./LotMediaManager";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { CURRENCY_SYMBOL, percent, plural, toLocalInputValue } from "../lib/format";
@@ -336,6 +337,12 @@ export function BatchDialog({
               )}
             </div>
           </div>
+
+          {/*
+            Only a saved lot has an id to attach a receipt to — a lot being
+            created has nothing yet, so this waits for the first save.
+          */}
+          {batch && <LotMediaManager lotId={batch.id as Id<"stockBatches">} />}
 
           <Field label="Note" hint="Optional.">
             {(id) => (

@@ -18,7 +18,7 @@ import { CURRENCY_SYMBOL } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedQuery, useAuthedMutation } from "../lib/session";
-import { uploadFile } from "../lib/upload";
+import { uploadFile, useFileDrop } from "../lib/upload";
 
 type ProductWithPhoto = Doc<"products"> & { photoUrl?: string | null };
 
@@ -116,6 +116,8 @@ export function ProductDialog({
     }
   }
 
+  const { dragOver, dropProps } = useFileDrop((file) => void pickPhoto(file));
+
   async function clearPhoto() {
     if (!product || !savedPhotoUrl) {
       setPhotoPreview(null);
@@ -195,7 +197,13 @@ export function ProductDialog({
       <form onSubmit={submit}>
         <div className="flex flex-col gap-6 px-6 py-6">
           <div className="flex items-center gap-4">
-            <div className="relative flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-line-strong bg-page">
+            <div
+              {...dropProps}
+              className={cx(
+                "relative flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-page transition-colors",
+                dragOver ? "border-accent ring-2 ring-accent" : "border-line-strong",
+              )}
+            >
               {photoPreview ? (
                 <img src={photoPreview} alt="" className="size-full object-cover" />
               ) : (

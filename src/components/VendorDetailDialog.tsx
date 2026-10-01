@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Badge, Button, Input, Modal } from "./ui";
+import { Badge, Button, Input, Modal, cx } from "./ui";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useT } from "../lib/i18n";
 import { gradientFor } from "../lib/avatar";
@@ -22,7 +22,7 @@ import { plural } from "../lib/format";
 import { whatsappUrl } from "../../convex/shared";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
-import { mediaKindOf, uploadFile } from "../lib/upload";
+import { mediaKindOf, uploadFile, useFileDrop } from "../lib/upload";
 
 const CATEGORY_KEY = {
   spawn: "vendors.categorySpawn",
@@ -91,6 +91,8 @@ export function VendorDetailDialog({
       setUploading(false);
     }
   }
+
+  const { dragOver, dropProps } = useFileDrop((file) => void handleUpload(file));
 
   async function submitNewFolder(e: React.FormEvent) {
     e.preventDefault();
@@ -274,14 +276,21 @@ export function VendorDetailDialog({
                     if (file) void handleUpload(file);
                   }}
                 />
-                {folderMedia.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-line px-4 py-10 text-center">
-                    <p className="text-[13px] font-semibold text-ink-2">{t("vendors.empty")}</p>
-                    <p className="mt-1 text-[12px] text-ink-3">{t("vendors.emptyBody")}</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                    {folderMedia.map((m) => (
+                <div
+                  {...dropProps}
+                  className={cx(
+                    "rounded-xl transition-colors",
+                    dragOver && "bg-accent-soft ring-2 ring-accent",
+                  )}
+                >
+                  {folderMedia.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-line px-4 py-10 text-center">
+                      <p className="text-[13px] font-semibold text-ink-2">{t("vendors.empty")}</p>
+                      <p className="mt-1 text-[12px] text-ink-3">{t("vendors.emptyBody")}</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2.5 p-1 sm:grid-cols-3">
+                      {folderMedia.map((m) => (
                       <div key={m._id} className="group relative overflow-hidden rounded-xl border border-line bg-page">
                         {m.url && m.kind === "image" ? (
                           <img src={m.url} alt="" className="aspect-square w-full object-cover" />
@@ -300,9 +309,10 @@ export function VendorDetailDialog({
                           <Trash2 size={13} />
                         </button>
                       </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>
