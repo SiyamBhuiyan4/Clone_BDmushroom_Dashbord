@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Globe, MessageCircle, Pencil, Phone, Plus, Search, Trash2, UserRound, Users } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { Button, Card, EmptyState, Input } from "../components/ui";
+import { Badge, Button, Card, EmptyState, Input, Select } from "../components/ui";
 import { Pagination, usePagination } from "../components/Pagination";
 import { CustomerDialog, type EditableCustomer } from "../components/CustomerDialog";
 import { CustomerDetailDialog } from "../components/CustomerDetailDialog";
@@ -15,13 +15,14 @@ import { useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 
 export function CustomersPage() {
-  const { fmtNum, fmtDateFull } = useSettings();
+  const { fmt, fmtNum, fmtDateFull } = useSettings();
   const t = useT();
   const toast = useToast();
   const customers = useAuthedQuery(api.customers.list);
   const removeCustomer = useAuthedMutation(api.customers.remove);
 
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"orders" | "owedToYou" | "name" | "recent">("orders");
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<EditableCustomer | null>(null);
   const [deleting, setDeleting] = useState<{ id: Id<"customers">; name: string } | null>(null);
@@ -29,19 +30,38 @@ export function CustomersPage() {
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return customers ?? [];
-    // Searching by number has to survive how the number was written, so the
-    // digits are compared the same way the address book matches them.
-    const digits = normalisePhone(term);
-    return (customers ?? []).filter(
-      (c) =>
-        c.name.toLowerCase().includes(term) ||
-        (c.address ?? "").toLowerCase().includes(term) ||
-        (digits.length > 2 &&
-          (normalisePhone(c.phone).includes(digits) ||
-            normalisePhone(c.whatsapp).includes(digits))),
-    );
-  }, [customers, search]);
+    const matched = !term
+      ? (customers ?? [])
+      : // Searching by number has to survive how the number was written, so the
+        // digits are compared the same way the address book matches them.
+        (customers ?? []).filter((c) => {
+          const digits = normalisePhone(term);
+          return (
+            c.name.toLowerCase().includes(term) ||
+            (c.address ?? "").toLowerCase().includes(term) ||
+            (digits.length > 2 &&
+              (normalisePhone(c.phone).includes(digits) ||
+                normalisePhone(c.whatsapp).includes(digits)))
+          );
+        });
+
+    const sorted = [...matched];
+    switch (sortBy) {
+      case "owedToYou":
+        // Most negative balance (they owe the most) first.
+        sorted.sort((a, b) => a.balance - b.balance || a.name.localeCompare(b.name));
+        break;
+      case "name":
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case "recent":
+        sorted.sort((a, b) => (b.lastOrderedAt ?? 0) - (a.lastOrderedAt ?? 0) || a.name.localeCompare(b.name));
+        break;
+      default:
+        sorted.sort((a, b) => b.orderCount - a.orderCount || a.name.localeCompare(b.name));
+    }
+    return sorted;
+  }, [customers, search, sortBy]);
 
   const pager = usePagination(rows, search, 25);
   const withOrders = rows.filter((c) => c.orderCount > 0).length;
@@ -75,6 +95,18 @@ export function CustomersPage() {
             className="pl-10.5"
             aria-label={t("common.search")}
           />
+        </div>
+        <div className="w-full sm:w-auto sm:min-w-52">
+          <Select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            aria-label={t("customers.sortBy")}
+          >
+            <option value="orders">{t("customers.sortMostOrders")}</option>
+            <option value="owedToYou">{t("customers.sortOwedToYou")}</option>
+            <option value="recent">{t("customers.sortRecent")}</option>
+            <option value="name">{t("customers.sortName")}</option>
+          </Select>
         </div>
         {rows.length > 0 && (
           <p className="text-[13px] text-ink-3">
@@ -135,12 +167,21 @@ export function CustomersPage() {
                       {c.address && <span className="truncate">{c.address}</span>}
                       {!c.phone && !c.address && <span>{t("orders.noDetails")}</span>}
                     </p>
-                    <p className="mt-1 text-[11.5px] text-ink-3">
-                      {c.orderCount > 0
-                        ? `${fmtNum(c.orderCount)} ${t("customers.orders")}${
-                            c.lastOrderedAt ? ` · ${t("customers.last")} ${fmtDateFull(c.lastOrderedAt)}` : ""
-                          }`
-                        : t("customers.noOrdersYet")}
+                    <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-3">
+                      <span>
+                        {c.orderCount > 0
+                          ? `${fmtNum(c.orderCount)} ${t("customers.orders")}${
+                              c.lastOrderedAt ? ` · ${t("customers.last")} ${fmtDateFull(c.lastOrderedAt)}` : ""
+                            }`
+                          : t("customers.noOrdersYet")}
+                      </span>
+                      {c.balance !== 0 && (
+                        <Badge tone={c.balance < 0 ? "critical" : "warning"}>
+                          {c.balance < 0
+                            ? `${t("customers.theyOweYou")} ${fmt(Math.abs(c.balance))}`
+                            : `${t("customers.youOweThem")} ${fmt(c.balance)}`}
+                        </Badge>
+                      )}
                     </p>
                   </div>
                   </button>

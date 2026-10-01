@@ -1,4 +1,4 @@
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import { requireSession, verifyPasscode } from "./auth";
 import { customerKey } from "./shared";
@@ -70,12 +70,34 @@ export async function rememberCustomer(
   });
 }
 
+/**
+ * Every customer's running balance, keyed the same way a sale is matched to
+ * them. Positive means the shop owes them (they have paid more than their
+ * orders came to); negative means they owe the shop. A cancelled order was
+ * never really a sale, so it carries no balance either way.
+ */
+async function customerBalances(ctx: QueryCtx) {
+  const orders = await ctx.db.query("orders").collect();
+  const byKey = new Map<string, { spent: number; balance: number }>();
+  for (const o of orders) {
+    if (o.orderStatus === "cancelled") continue;
+    const key = customerKey(o.customerName, o.customerPhone);
+    const paid = o.paidAmount ?? (o.paymentStatus === "paid" ? o.total : 0);
+    const entry = byKey.get(key) ?? { spent: 0, balance: 0 };
+    entry.spent += o.total;
+    entry.balance += paid - o.total;
+    byKey.set(key, entry);
+  }
+  return byKey;
+}
+
 /** The address book, most frequent first. */
 export const list = query({
   args: { token: v.string() },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
     const rows = await ctx.db.query("customers").collect();
+    const balances = await customerBalances(ctx);
     return rows
       .sort((a, b) => b.orderCount - a.orderCount || a.name.localeCompare(b.name))
       .map((c) => ({
@@ -87,6 +109,8 @@ export const list = query({
         address: c.address,
         orderCount: c.orderCount,
         lastOrderedAt: c.lastOrderedAt,
+        spent: balances.get(c.key)?.spent ?? 0,
+        balance: balances.get(c.key)?.balance ?? 0,
       }));
   },
 });
@@ -113,13 +137,14 @@ export const detail = query({
     );
 
     let spent = 0;
-    let due = 0;
+    let balance = 0;
     let items = 0;
     for (const o of mine) {
       // A cancelled sale is not money the customer spent with you.
       if (o.orderStatus === "cancelled") continue;
       spent += o.total;
-      due += o.total - (o.paidAmount ?? (o.paymentStatus === "paid" ? o.total : 0));
+      // Positive: the shop owes them. Negative: they owe the shop.
+      balance += (o.paidAmount ?? (o.paymentStatus === "paid" ? o.total : 0)) - o.total;
       items += o.items.reduce((sum, i) => sum + i.quantity, 0);
     }
 
@@ -135,7 +160,7 @@ export const detail = query({
         lastOrderedAt: customer.lastOrderedAt,
       },
       sales: mine,
-      totals: { spent, due, items, count: mine.length },
+      totals: { spent, balance, items, count: mine.length },
     };
   },
 });

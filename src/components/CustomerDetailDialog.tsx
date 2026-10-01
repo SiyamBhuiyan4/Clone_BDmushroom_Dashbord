@@ -171,10 +171,23 @@ export function CustomerDetailDialog({
               icon={<Package size={14} />}
             />
             <Stat
-              label={t("orders.remainingDue")}
-              value={fmt(data.totals.due)}
+              label={t("customers.balance")}
+              value={
+                data.totals.balance < 0
+                  ? `−${fmt(Math.abs(data.totals.balance))}`
+                  : fmt(data.totals.balance)
+              }
+              hint={
+                data.totals.balance < 0
+                  ? t("customers.theyOweYou")
+                  : data.totals.balance > 0
+                    ? t("customers.youOweThem")
+                    : t("customers.settled")
+              }
               icon={<Wallet size={14} />}
-              tone={data.totals.due > 0 ? "critical" : undefined}
+              tone={
+                data.totals.balance < 0 ? "critical" : data.totals.balance > 0 ? "warning" : undefined
+              }
             />
           </div>
 
@@ -253,11 +266,14 @@ function Stat({
   value,
   icon,
   tone,
+  hint,
 }: {
   label: string;
   value: string;
   icon: React.ReactNode;
-  tone?: "critical";
+  tone?: "critical" | "warning";
+  /** A short line under the value — used to say which way a signed figure runs. */
+  hint?: string;
 }) {
   return (
     <div className="rounded-xl border border-line bg-page px-3.5 py-3">
@@ -268,11 +284,12 @@ function Stat({
       <p
         className={cx(
           "mt-1 truncate text-[17px] font-bold tabular-nums",
-          tone === "critical" ? "text-critical-ink" : "text-ink",
+          tone === "critical" ? "text-critical-ink" : tone === "warning" ? "text-warning-ink" : "text-ink",
         )}
       >
         {value}
       </p>
+      {hint && <p className="mt-0.5 truncate text-[11px] text-ink-3">{hint}</p>}
     </div>
   );
 }
