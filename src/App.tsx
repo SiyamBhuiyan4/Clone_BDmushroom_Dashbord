@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useSettings, type ThemeChoice } from "./lib/settings";
 import { useSession } from "./lib/session";
+import { prefetchReceiptAssets } from "./lib/pdf";
 import { ConnectionBanner, SessionWarning, useIsOffline } from "./components/StatusBar";
 import { useT, type MessageKey } from "./lib/i18n";
 import { cx } from "./components/ui";
@@ -70,6 +71,12 @@ export default function App() {
     const sync = () => setRoute(routeFromHash());
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  // So the first "Receipt PDF" tap of the day doesn't race a fresh fetch
+  // against a slow connection — see the comment in lib/pdf.ts.
+  useEffect(() => {
+    prefetchReceiptAssets();
   }, []);
 
   const go = (next: Route) => {
