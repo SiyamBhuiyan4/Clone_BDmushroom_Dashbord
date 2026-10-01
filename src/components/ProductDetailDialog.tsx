@@ -4,6 +4,8 @@ import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Modal, cx } from "./ui";
 import { BatchDialog, type BatchInput } from "./BatchDialog";
+import { LotDetailDialog } from "./LotDetailDialog";
+import { VendorDetailDialog } from "./VendorDetailDialog";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -54,6 +56,8 @@ export function ProductDetailDialog({
   const [addingLot, setAddingLot] = useState(false);
   const [editingLot, setEditingLot] = useState<BatchInput | null>(null);
   const [deletingLot, setDeletingLot] = useState<BatchInput | null>(null);
+  const [viewingLot, setViewingLot] = useState<Id<"stockBatches"> | null>(null);
+  const [viewingVendor, setViewingVendor] = useState<Id<"vendors"> | null>(null);
 
   const name = data?.product.name ?? "";
 
@@ -146,7 +150,13 @@ export function ProductDetailDialog({
                   return (
                     <li
                       key={l._id}
-                      className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5"
+                      onClick={() => setViewingLot(l._id)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") setViewingLot(l._id);
+                      }}
+                      className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5 transition-colors hover:bg-surface-2"
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
@@ -178,7 +188,10 @@ export function ProductDetailDialog({
                           </span>
                         )}
                         <button
-                          onClick={() => setEditingLot(lot)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingLot(lot);
+                          }}
                           aria-label={`${t("detail.editLot")} — ${l.label}`}
                           title={t("detail.editLot")}
                           className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
@@ -186,7 +199,10 @@ export function ProductDetailDialog({
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => setDeletingLot(lot)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingLot(lot);
+                          }}
                           aria-label={`${t("detail.deleteLot")} — ${l.label}`}
                           title={t("detail.deleteLot")}
                           className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-critical"
@@ -242,6 +258,17 @@ export function ProductDetailDialog({
         open={editingLot !== null}
         onClose={() => setEditingLot(null)}
         batch={editingLot}
+      />
+      <LotDetailDialog
+        open={viewingLot !== null}
+        onClose={() => setViewingLot(null)}
+        lotId={viewingLot}
+        onViewVendor={(id) => setViewingVendor(id)}
+      />
+      <VendorDetailDialog
+        open={viewingVendor !== null}
+        onClose={() => setViewingVendor(null)}
+        vendorId={viewingVendor}
       />
       <PasscodeConfirmDialog
         open={deletingLot !== null}

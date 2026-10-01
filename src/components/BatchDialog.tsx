@@ -15,6 +15,7 @@ import {
   cx,
 } from "./ui";
 import { useSettings } from "../lib/settings";
+import { useT } from "../lib/i18n";
 import { CURRENCY_SYMBOL, percent, plural, toLocalInputValue } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
@@ -42,6 +43,8 @@ export type BatchInput = {
   */
   remaining?: number;
   note?: string;
+  /** Who this lot was bought from. */
+  vendorId?: string;
 };
 
 /** A lot with the profit the Profit page works out from it. */
@@ -64,8 +67,10 @@ export function BatchDialog({
   presetProductId?: string;
 }) {
   const { fmt } = useSettings();
+  const t = useT();
   const toast = useToast();
   const products = useAuthedQuery(api.products.list, { includeArchived: true });
+  const vendors = useAuthedQuery(api.vendors.list, {});
   const add = useAuthedMutation(api.profit.addBatch);
   const update = useAuthedMutation(api.profit.updateBatch);
 
@@ -76,6 +81,7 @@ export function BatchDialog({
   const [unitCost, setUnitCost] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [note, setNote] = useState("");
+  const [vendorId, setVendorId] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -88,6 +94,7 @@ export function BatchDialog({
       setUnitCost(String(batch.unitCost));
       setUnitPrice(batch.unitPrice !== undefined ? String(batch.unitPrice) : "");
       setNote(batch.note ?? "");
+      setVendorId(batch.vendorId ?? "");
     } else {
       setProductId(presetProductId ?? "");
       setLabel("");
@@ -96,6 +103,7 @@ export function BatchDialog({
       setUnitCost("");
       setUnitPrice("");
       setNote("");
+      setVendorId("");
     }
   }, [open, batch, presetProductId]);
 
@@ -140,11 +148,16 @@ export function BatchDialog({
         unitPrice: unitPrice.trim() === "" ? undefined : price,
         note,
       };
+      const vendorArg = vendorId ? (vendorId as Id<"vendors">) : null;
       if (batch) {
-        await update({ id: batch.id as Id<"stockBatches">, ...payload });
+        await update({ id: batch.id as Id<"stockBatches">, ...payload, vendorId: vendorArg });
         toast.ok("Stock lot updated.");
       } else {
-        await add({ productId: productId as Id<"products">, ...payload });
+        await add({
+          productId: productId as Id<"products">,
+          ...payload,
+          vendorId: vendorArg ?? undefined,
+        });
         toast.ok(
           priced
             ? `Added ${label.trim() || "stock lot"} — ${fmt(totalProfit)} profit.`
@@ -190,6 +203,25 @@ export function BatchDialog({
                 ))}
               </Select>
             )}
+          </div>
+
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <SectionLabel>{t("lot.vendor")}</SectionLabel>
+              <span className="text-[11.5px] text-ink-3">{t("common.optional")}</span>
+            </div>
+            <Select
+              value={vendorId}
+              onChange={(e) => setVendorId(e.target.value)}
+              aria-label={t("lot.vendor")}
+            >
+              <option value="">{t("lot.noVendor")}</option>
+              {(vendors ?? []).map((v) => (
+                <option key={v._id} value={v._id}>
+                  {v.name}
+                </option>
+              ))}
+            </Select>
           </div>
 
           <div className="grid gap-5 sm:grid-cols-2">

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, PackagePlus, Pencil, Trash2, Upload } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Doc, Id } from "../../convex/_generated/dataModel";
+import type { Doc } from "../../convex/_generated/dataModel";
 import {
   AmountInput,
   Button,
@@ -18,6 +18,7 @@ import { CURRENCY_SYMBOL } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedQuery, useAuthedMutation } from "../lib/session";
+import { uploadFile } from "../lib/upload";
 
 type ProductWithPhoto = Doc<"products"> & { photoUrl?: string | null };
 
@@ -41,18 +42,6 @@ function toDraft(product: Doc<"products">): Draft {
     quantity: product.quantity,
     details: product.details,
   };
-}
-
-/** POSTs a file to a Convex upload URL and returns the resulting storage id. */
-async function uploadFile(uploadUrl: string, file: File): Promise<Id<"_storage">> {
-  const res = await fetch(uploadUrl, {
-    method: "POST",
-    headers: { "Content-Type": file.type },
-    body: file,
-  });
-  if (!res.ok) throw new Error("The photo failed to upload. Try again.");
-  const { storageId } = (await res.json()) as { storageId: Id<"_storage"> };
-  return storageId;
 }
 
 export function ProductDialog({

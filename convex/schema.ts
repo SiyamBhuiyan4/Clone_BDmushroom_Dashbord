@@ -204,9 +204,75 @@ export default defineSchema({
     */
     unitPrice: v.optional(v.number()),
     note: v.optional(v.string()),
+    /** Who this lot was bought from. */
+    vendorId: v.optional(v.id("vendors")),
+    /*
+      Receipts and other photos/videos for this specific purchase. These are
+      references into `vendorMedia`, never a second copy of the file — the
+      same upload can sit in the vendor's gallery and be linked from however
+      many lots it is actually proof of.
+    */
+    mediaIds: v.optional(v.array(v.id("vendorMedia"))),
   })
     .index("by_purchasedAt", ["purchasedAt"])
-    .index("by_product", ["productId"]),
+    .index("by_product", ["productId"])
+    .index("by_vendor", ["vendorId"]),
+
+  /*
+    A supplier — who the shop buys stock from, as distinct from `customers`,
+    who buy from the shop. `category` is a fixed set rather than free text
+    like a product's category: there are only a handful of real supplier
+    roles in this business, and a fixed set is what makes the Vendors page
+    worth filtering by.
+  */
+  vendors: defineTable({
+    name: v.string(),
+    category: v.union(
+      v.literal("spawn"),
+      v.literal("materials"),
+      v.literal("equipment"),
+      v.literal("packaging"),
+      v.literal("other"),
+    ),
+    phone: v.optional(v.string()),
+    whatsapp: v.optional(v.string()),
+    address: v.optional(v.string()),
+    /** Tax Identification Number, typed in as text — the document photo (if any) lives in vendorMedia. */
+    tin: v.optional(v.string()),
+    tradeLicenseNo: v.optional(v.string()),
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_category", ["category"])
+    .index("by_createdAt", ["createdAt"]),
+
+  /*
+    A named folder inside one vendor's gallery — "TIN & Trade License",
+    "Receipts", "Video", or anything the shop wants to call it. A few are
+    created automatically with every new vendor; nothing stops adding more.
+  */
+  vendorFolders: defineTable({
+    vendorId: v.id("vendors"),
+    name: v.string(),
+    createdAt: v.number(),
+  }).index("by_vendor", ["vendorId"]),
+
+  /*
+    One uploaded file, filed under a vendor and (optionally) one of their
+    folders. This is the single copy a lot's receipt photo and the vendor's
+    own gallery both point at — a lot never gets its own copy of a file that
+    already lives here, it only ever stores this row's id.
+  */
+  vendorMedia: defineTable({
+    vendorId: v.id("vendors"),
+    folderId: v.optional(v.id("vendorFolders")),
+    storageId: v.id("_storage"),
+    kind: v.union(v.literal("image"), v.literal("video")),
+    fileName: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_vendor", ["vendorId"])
+    .index("by_folder", ["folderId"]),
 
   /*
     How each taka of profit is divided. Percentages are validated to total

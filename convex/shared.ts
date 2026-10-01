@@ -58,3 +58,11 @@ export function externalUrl(raw?: string) {
   if (!value) return null;
   return /^https?:\/\//i.test(value) ? value : `https://${value}`;
 }
+
+/**
+ * A vendor's fixed category — fixed, unlike a product's free-text category,
+ * because there are only a handful of real supplier roles in this business,
+ * and a fixed set is what makes the Vendors page worth filtering by.
+ */
+export const VENDOR_CATEGORIES = ["spawn", "materials", "equipment", "packaging", "other"] as const;
+export type VendorCategory = (typeof VENDOR_CATEGORIES)[number];
