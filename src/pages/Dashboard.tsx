@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   Boxes,
+  CalendarRange,
   CircleDollarSign,
   Package,
   PackagePlus,
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { Badge, Button, Card, CardAction, CardHeader, EmptyState, cx } from "../components/ui";
+import { Badge, Button, Card, CardAction, CardHeader, EmptyState, Input, cx } from "../components/ui";
 import { StatTile, type Delta } from "../components/StatTile";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { TrendChart, type TrendPoint } from "../components/charts/TrendChart";
@@ -27,16 +28,25 @@ import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { usePersistedState } from "../lib/persist";
 import { gradientFor, initialOf } from "../lib/avatar";
-import { plural, relativeTime, startOfLocalDay } from "../lib/format";
+import { dayKey, plural, relativeTime, startOfLocalDay } from "../lib/format";
 import { useAuthedQuery } from "../lib/session";
 
 const DAY = 24 * 60 * 60 * 1000;
+const CUSTOM = "custom" as const;
+/** The dashboard's backend window is 365 days — a custom range can't ask for more than that. */
+const MAX_CUSTOM_DAYS = 365;
 const RANGES = [
   { days: 7, label: "7D", full: "last 7 days", prev: "previous 7 days" },
   { days: 30, label: "30D", full: "last 30 days", prev: "previous 30 days" },
   { days: 90, label: "90D", full: "last 90 days", prev: "previous 90 days" },
   { days: 365, label: "12M", full: "last 12 months", prev: "previous 12 months" },
 ];
+
+function parseDateInput(value: string): number | null {
+  if (!value) return null;
+  const ts = new Date(`${value}T00:00:00`).getTime();
+  return Number.isNaN(ts) ? null : startOfLocalDay(ts);
+}
 
 /** Change as a fraction. Null when the baseline is zero — there is no "% of nothing". */
 function change(current: number, previous: number): number | null {
@@ -45,23 +55,57 @@ function change(current: number, previous: number): number | null {
 }
 
 export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sales") => void }) {
-  const { fmt, fmtNum, fmtPercent } = useSettings();
+  const { fmt, fmtNum, fmtPercent, fmtDateFull } = useSettings();
   const t = useT();
   const data = useAuthedQuery(api.dashboard.overview);
-  const [rangeDays, setRangeDays] = usePersistedState("ac.range.dashboard", 30);
+  const [rangeDays, setRangeDays] = usePersistedState<number | typeof CUSTOM>(
+    "ac.range.dashboard",
+    30,
+  );
+  const [customFrom, setCustomFrom] = usePersistedState("ac.range.dashboard.from", "");
+  const [customTo, setCustomTo] = usePersistedState("ac.range.dashboard.to", "");
   const [sellOpen, setSellOpen] = useState(false);
   const [productOpen, setProductOpen] = useState(false);
   const [viewing, setViewing] = useState<Id<"products"> | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
 
-  const range = RANGES.find((r) => r.days === rangeDays)!;
+  const isCustom = rangeDays === CUSTOM;
+  const preset = isCustom ? undefined : RANGES.find((r) => r.days === rangeDays);
+  const todayStart = startOfLocalDay(Date.now());
+
+  const openCustom = () => {
+    // Seed with the last 7 days the first time, so the panel never opens blank.
+    if (!customFrom || !customTo) {
+      setCustomFrom(dayKey(todayStart - 6 * DAY));
+      setCustomTo(dayKey(todayStart));
+    }
+    setRangeDays(CUSTOM);
+  };
 
   const scoped = useMemo(() => {
     if (!data) return null;
-    const since = startOfLocalDay(Date.now() - (rangeDays - 1) * DAY);
-    const prevSince = since - rangeDays * DAY;
 
-    const rows = data.windowSales.filter((s) => s.soldAt >= since);
+    let since: number;
+    let until: number;
+    if (isCustom) {
+      const from = parseDateInput(customFrom);
+      const to = parseDateInput(customTo);
+      until = Math.min(to ?? todayStart, todayStart);
+      since = from ?? until;
+      if (since > until) since = until;
+      // Hard cap at a year, no matter what the inputs allowed.
+      const minSince = until - (MAX_CUSTOM_DAYS - 1) * DAY;
+      if (since < minSince) since = minSince;
+    } else {
+      const days = preset?.days ?? 30;
+      until = todayStart;
+      since = todayStart - (days - 1) * DAY;
+    }
+    const untilExclusive = until + DAY;
+    const spanDays = Math.round((until - since) / DAY) + 1;
+    const prevSince = since - spanDays * DAY;
+
+    const rows = data.windowSales.filter((s) => s.soldAt >= since && s.soldAt < untilExclusive);
     // The immediately preceding window of the same length, for the deltas.
     const prevRows = data.windowSales.filter((s) => s.soldAt >= prevSince && s.soldAt < since);
     /*
@@ -69,7 +113,9 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
       revenue from one range and its costs from another would be wrong in a
       way nothing on the page could reveal.
     */
-    const costRows = data.windowCosts.filter((c) => c.spentAt >= since);
+    const costRows = data.windowCosts.filter(
+      (c) => c.spentAt >= since && c.spentAt < untilExclusive,
+    );
     const prevCostRows = data.windowCosts.filter(
       (c) => c.spentAt >= prevSince && c.spentAt < since,
     );
@@ -115,8 +161,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
     // Fill every day in the range so the line stays continuous through days
     // with no sales instead of skipping over them.
     const points: TrendPoint[] = [];
-    for (let i = rangeDays - 1; i >= 0; i--) {
-      const ts = startOfLocalDay(Date.now() - i * DAY);
+    for (let ts = since; ts <= until; ts += DAY) {
       const bucket = byDay.get(ts);
       points.push({ ts, revenue: bucket?.revenue ?? 0, profit: bucket?.profit ?? 0 });
     }
@@ -149,14 +194,23 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
       deltaNet: change(net, prevNet),
       points,
       topProducts: [...byProduct.values()].sort((a, b) => b.profit - a.profit).slice(0, 6),
+      since,
+      until,
+      spanDays,
     };
-  }, [data, rangeDays]);
+  }, [data, rangeDays, preset, isCustom, customFrom, customTo, todayStart]);
 
   if (!data || !scoped) return <DashboardSkeleton />;
 
   const { inventory, allTime, recentSales } = data;
   const blank = allTime.salesCount === 0 && inventory.productCount === 0;
-  const vs = (fraction: number | null): Delta => ({ fraction, label: `vs ${range.prev}` });
+  const activeLabel = preset
+    ? { full: preset.full, prev: preset.prev }
+    : {
+        full: `${fmtDateFull(scoped.since)} – ${fmtDateFull(scoped.until)}`,
+        prev: "the previous period",
+      };
+  const vs = (fraction: number | null): Delta => ({ fraction, label: `vs ${activeLabel.prev}` });
 
   return (
     <div className="flex flex-col gap-6">
@@ -208,7 +262,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
           {/* One filter row, above everything it scopes. */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-[13.5px] text-ink-3">
-              {t("dash.showing")} <span className="font-semibold text-ink-2">{range.full}</span>
+              {t("dash.showing")} <span className="font-semibold text-ink-2">{activeLabel.full}</span>
             </p>
             <div
               className="flex items-center gap-1 rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow-sm)]"
@@ -216,7 +270,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
               aria-label="Date range"
             >
               {RANGES.map((r) => {
-                const active = rangeDays === r.days;
+                const active = !isCustom && rangeDays === r.days;
                 return (
                   <button
                     key={r.days}
@@ -232,8 +286,63 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
                   </button>
                 );
               })}
+              <button
+                onClick={openCustom}
+                aria-pressed={isCustom}
+                style={isCustom ? { background: "var(--grad-violet)" } : undefined}
+                className={cx(
+                  "flex h-8 items-center gap-1.5 rounded-lg px-3.5 text-[12.5px] font-bold tracking-wide transition-all",
+                  isCustom ? "text-white" : "text-ink-3 hover:text-ink",
+                )}
+              >
+                <CalendarRange size={14} />
+                Custom
+              </button>
             </div>
           </div>
+
+          {isCustom && (
+            <div className="ac-fade-in -mt-2 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-3">
+              <label className="flex items-center gap-2">
+                <span className="shrink-0 text-[12.5px] font-semibold text-ink-3">
+                  {t("sales.from")}
+                </span>
+                <Input
+                  type="date"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  max={customTo || dayKey(todayStart)}
+                  min={customTo ? dayKey(parseDateInput(customTo)! - (MAX_CUSTOM_DAYS - 1) * DAY) : undefined}
+                  aria-label={t("sales.from")}
+                  className="w-auto"
+                />
+              </label>
+              <label className="flex items-center gap-2">
+                <span className="shrink-0 text-[12.5px] font-semibold text-ink-3">
+                  {t("sales.to")}
+                </span>
+                <Input
+                  type="date"
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  min={customFrom || undefined}
+                  max={
+                    customFrom
+                      ? dayKey(
+                          Math.min(
+                            parseDateInput(customFrom)! + (MAX_CUSTOM_DAYS - 1) * DAY,
+                            todayStart,
+                          ),
+                        )
+                      : dayKey(todayStart)
+                  }
+                  aria-label={t("sales.to")}
+                  className="w-auto"
+                />
+              </label>
+              <p className="text-[12px] text-ink-3">Up to {MAX_CUSTOM_DAYS} days at a time.</p>
+            </div>
+          )}
 
           {/*
             Read left to right, the tiles are the income statement: revenue,
@@ -335,7 +444,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
             <Card className="lg:col-span-2">
               <CardHeader
                 title={t("dash.revenueAndProfit")}
-                subtitle={`${t("dash.perDay")}, ${range.full}`}
+                subtitle={`${t("dash.perDay")}, ${activeLabel.full}`}
               />
               <TrendChart points={scoped.points} />
             </Card>
@@ -343,7 +452,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
             <Card>
               <CardHeader
                 title={t("dash.topProducts")}
-                subtitle={`${t("dash.byProfit")}, ${range.full}`}
+                subtitle={`${t("dash.byProfit")}, ${activeLabel.full}`}
               />
               {scoped.topProducts.length === 0 ? (
                 <EmptyState
