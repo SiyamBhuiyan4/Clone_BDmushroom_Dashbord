@@ -435,10 +435,15 @@ export function drawReceipt(
   doc.font(REGULAR).fontSize(10);
 
   for (const item of order.items) {
-    // Measure first: the row is as tall as its tallest cell, which is what
-    // stops long product names from colliding with the row beneath.
+    /*
+      Measure first: the row is as tall as its tallest cell, which is what
+      stops long product names from colliding with the row beneath. A sold
+      size ("500 gram") sits in the same narrow column a short word like
+      "pcs" always did, so it needs the same check — not just the name.
+    */
     const nameHeight = doc.heightOfString(item.productName, { width: wName });
-    const rowHeight = Math.max(nameHeight, 12) + 12;
+    const unitHeight = doc.heightOfString(item.unit, { width: wUnit - 8 });
+    const rowHeight = Math.max(nameHeight, unitHeight, 12) + 12;
 
     if (y + rowHeight > rowLimit) {
       closeTable(y);

@@ -308,6 +308,17 @@ export const restock = mutation({
     const product = await ctx.db.get(args.id);
     if (!product) throw new ConvexError("That product no longer exists.");
     if (!Number.isInteger(args.delta)) throw new ConvexError("Use whole units.");
+    /*
+      A product with sizes has no stock of its own to nudge — `quantity` is
+      computed from the sizes (their sum in "separate" mode, the admin's own
+      pool in "shared" mode), and bumping it directly here would disagree
+      with that the moment the page next recomputed it. The UI never offers
+      this for such a product; this is the same rule enforced server-side,
+      since the mutation itself has no other way to know which size moved.
+    */
+    if (product.variants?.length) {
+      throw new ConvexError("This product sells in sizes — edit the size's own stock instead.");
+    }
     const next = product.quantity + args.delta;
     if (next < 0) throw new ConvexError("Stock cannot go below zero.");
     await ctx.db.patch(args.id, { quantity: next });
@@ -483,7 +494,16 @@ export const bulkImport = mutation({
           skipped++;
           continue;
         }
-        await ctx.db.patch(match._id, fields);
+        /*
+          A product with sizes has no single cost, sell price or quantity of
+          its own any more — those three are computed from the sizes (see
+          `effectiveFromVariants`). Overwriting them from a CSV row would
+          silently disagree with the sizes until the product was next saved
+          by hand, so a matched row leaves them alone and only touches what
+          a CSV import is actually for: the name, category, details.
+        */
+        const { costPrice, sellPrice, quantity, ...rest } = fields;
+        await ctx.db.patch(match._id, match.variants?.length ? rest : fields);
         updated++;
       } else {
         const id = await ctx.db.insert("products", {
