@@ -332,6 +332,7 @@ function ProductCard({
 
   return (
     <Card
+      onClick={onView}
       className={cx(
         "group relative flex flex-col transition-all duration-300 ease-[var(--ease-out)]",
         "hover:-translate-y-1 hover:shadow-[var(--shadow-pop)]",
@@ -342,7 +343,10 @@ function ProductCard({
         The action cluster is taken out of flow — while hidden it would still
         reserve its width and force the product name to truncate early.
       */}
-      <div className="absolute top-3.5 right-3.5 z-10 flex items-center gap-0.5 rounded-xl bg-surface/90 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="absolute top-3.5 right-3.5 z-10 flex items-center gap-0.5 rounded-xl bg-surface/90 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+      >
         <IconButton label="Add lot" onClick={onAddLot}>
           <Layers size={15} />
         </IconButton>
@@ -405,7 +409,10 @@ function ProductCard({
         </p>
         {clampable && (
           <button
-            onClick={() => setShowAll((v) => !v)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowAll((v) => !v);
+            }}
             className="mt-1 text-[12px] font-semibold text-accent hover:underline"
           >
             {showAll ? t("detail.showLess") : t("detail.showMore")}
@@ -453,7 +460,7 @@ function ProductCard({
           </button>
         )}
 
-        <div className="mt-3 flex items-center justify-between gap-2">
+        <div className="mt-3 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
           <div className="flex h-10 items-center rounded-xl border border-line-strong bg-page">
             <button
               onClick={() => onAdjust(-1)}

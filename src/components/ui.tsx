@@ -60,11 +60,31 @@ export function Button({
 
 /* ------------------------------------------------------------------ Card */
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
+export function Card({
+  className,
+  children,
+  onClick,
+}: {
+  className?: string;
+  children: ReactNode;
+  /** Makes the whole card a single click target — its own buttons still need `stopPropagation`. */
+  onClick?: () => void;
+}) {
   return (
     <div
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") onClick();
+            }
+          : undefined
+      }
       className={cx(
         "rounded-card border border-line bg-surface shadow-[var(--shadow-card)]",
+        onClick && "cursor-pointer",
         className,
       )}
     >

@@ -2,7 +2,7 @@ import { internalMutation, internalQuery, type MutationCtx } from "./_generated/
 import type { Id } from "./_generated/dataModel";
 import { CATALOGUE } from "./catalogue";
 import { ensureBuckets } from "./profit";
-import { customerKey } from "./shared";
+import { customerKey, type VendorCategory } from "./shared";
 
 /**
  * Development helpers. These are internal functions — not reachable from the
@@ -637,5 +637,117 @@ export const demoEverything = internalMutation({
       `Seeded ${products.length} products, ${salesCreated} sales, ${customers.length} customers, ` +
       `${ordersCreated} orders, ${costsCreated} costs, ${lotsCreated} stock lots.`
     );
+  },
+});
+
+const DEMO_VENDORS: {
+  name: string;
+  category: VendorCategory;
+  phone: string;
+  address: string;
+  tin: string;
+  tradeLicenseNo: string;
+}[] = [
+  {
+    name: "Rifat Mushroom Spawn",
+    category: "spawn",
+    phone: "01710100001",
+    address: "Savar, Dhaka",
+    tin: "123456789001",
+    tradeLicenseNo: "TRAD/DNCC/100001/2026",
+  },
+  {
+    name: "Green Valley Culture Lab",
+    category: "spawn",
+    phone: "01710100002",
+    address: "Gazipur",
+    tin: "123456789002",
+    tradeLicenseNo: "TRAD/GCC/100002/2026",
+  },
+  {
+    name: "Dhaka Substrate Supply",
+    category: "materials",
+    phone: "01710100003",
+    address: "Mirpur, Dhaka",
+    tin: "123456789003",
+    tradeLicenseNo: "TRAD/DNCC/100003/2026",
+  },
+  {
+    name: "Bismillah Agro Chemicals",
+    category: "materials",
+    phone: "01710100004",
+    address: "Tongi, Gazipur",
+    tin: "123456789004",
+    tradeLicenseNo: "TRAD/GCC/100004/2026",
+  },
+  {
+    name: "Union Engineering Works",
+    category: "equipment",
+    phone: "01710100005",
+    address: "Bogura",
+    tin: "123456789005",
+    tradeLicenseNo: "TRAD/BOG/100005/2026",
+  },
+  {
+    name: "Packway Packaging",
+    category: "packaging",
+    phone: "01710100006",
+    address: "Narayanganj",
+    tin: "123456789006",
+    tradeLicenseNo: "TRAD/NCC/100006/2026",
+  },
+  {
+    name: "City Traders",
+    category: "other",
+    phone: "01710100007",
+    address: "Mohammadpur, Dhaka",
+    tin: "123456789007",
+    tradeLicenseNo: "TRAD/DSCC/100007/2026",
+  },
+];
+
+/** Folders every new vendor starts with — mirrors `vendors.create`. */
+const STARTER_FOLDERS = ["TIN & Trade License", "Receipts", "Video"];
+
+/**
+ * A handful of demo vendors across every category, each with its starter
+ * folders — so the Vendors page has something to look at.
+ *
+ *   npx convex run seed:demoVendors
+ *   npx convex run --prod seed:demoVendors
+ *
+ * Clears existing vendors (and their folders/files) first, so it is safe to
+ * re-run. Stock lots are untouched — this only ever clears their vendor link
+ * via a cascading delete, never the lots themselves.
+ */
+export const demoVendors = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const media = await ctx.db.query("vendorMedia").collect();
+    for (const m of media) {
+      await ctx.storage.delete(m.storageId);
+      await ctx.db.delete(m._id);
+    }
+    const folders = await ctx.db.query("vendorFolders").collect();
+    for (const f of folders) await ctx.db.delete(f._id);
+    const existing = await ctx.db.query("vendors").collect();
+    for (const v of existing) {
+      const lots = await ctx.db
+        .query("stockBatches")
+        .withIndex("by_vendor", (q) => q.eq("vendorId", v._id))
+        .collect();
+      for (const l of lots) await ctx.db.patch(l._id, { vendorId: undefined, mediaIds: undefined });
+      await ctx.db.delete(v._id);
+    }
+
+    const now = Date.now();
+    for (const v of DEMO_VENDORS) {
+      const id = await ctx.db.insert("vendors", { ...v, createdAt: now });
+      for (const name of STARTER_FOLDERS) {
+        await ctx.db.insert("vendorFolders", { vendorId: id, name, createdAt: now });
+      }
+    }
+
+    return `Cleared ${existing.length} vendor(s). Seeded ${DEMO_VENDORS.length} vendors across every category.`;
   },
 });
