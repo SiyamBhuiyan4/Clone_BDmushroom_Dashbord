@@ -1,15 +1,26 @@
-import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Coins, Plus, Trash2, Wallet } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { CalendarDays, ChevronLeft, ChevronRight, Coins, Plus, Trash2, Wallet } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { AmountInput, Button, Card, CardHeader, EmptyState, Field, Input, Modal, ModalFooter } from "./ui";
+import { AmountInput, Button, Card, cx, EmptyState, Field, Input, Modal, ModalFooter } from "./ui";
 import { StatTile } from "./StatTile";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
+import { MonthPickerDialog } from "./MonthPickerDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
-import { CURRENCY_SYMBOL, formatMonth, formatMonthShort, monthKey, shiftMonth } from "../lib/format";
+import {
+  CURRENCY_SYMBOL,
+  formatMonth,
+  formatMonthShort,
+  monthKey,
+  monthsBetween,
+  shiftMonth,
+} from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
+
+const MONTH_RANGE_PRESETS = [3, 6, 12] as const;
+type MonthRangeChoice = (typeof MONTH_RANGE_PRESETS)[number] | "custom";
 
 /**
  * Rent, bills, salary — the handful of things a shop pays every month no
@@ -24,12 +35,34 @@ export function FixedCostsSection() {
   const toast = useToast();
 
   const [month, setMonth] = useState(() => monthKey(Date.now()));
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   // Kept apart from a `?? []` fallback: that would hand the effect below a
   // new array on every render — still undefined vs. loaded-but-empty is the
   // distinction that keeps the one-time seed from firing on every render.
   const categoriesQuery = useAuthedQuery(api.fixedCosts.listCategories);
   const detail = useAuthedQuery(api.fixedCosts.monthDetail, { month });
-  const trend = useAuthedQuery(api.fixedCosts.monthlyTotals, { endMonth: month, count: 6 });
+
+  /*
+    A second, independent window from the single month being edited above —
+    "how much went to rent and bills over the last 6 months" is a different
+    question from "what was October's rent", and answering it by paging
+    through one month at a time would be the same complaint this replaced.
+  */
+  const [rangeChoice, setRangeChoice] = useState<MonthRangeChoice>(3);
+  const thisMonth = monthKey(Date.now());
+  const [customFrom, setCustomFrom] = useState(() => shiftMonth(thisMonth, -2));
+  const [customTo, setCustomTo] = useState(thisMonth);
+  const { rangeEndMonth, rangeCount } = useMemo(() => {
+    if (rangeChoice !== "custom") return { rangeEndMonth: thisMonth, rangeCount: rangeChoice };
+    const [start, end] = customFrom <= customTo ? [customFrom, customTo] : [customTo, customFrom];
+    return { rangeEndMonth: end, rangeCount: Math.max(1, Math.min(36, monthsBetween(start, end) + 1)) };
+  }, [rangeChoice, customFrom, customTo, thisMonth]);
+  const trend = useAuthedQuery(api.fixedCosts.monthlyTotals, {
+    endMonth: rangeEndMonth,
+    count: rangeCount,
+  });
+  const rangeTotal = useMemo(() => (trend ?? []).reduce((sum, m) => sum + m.total, 0), [trend]);
+
   const seedCategories = useAuthedMutation(api.fixedCosts.seedCategories);
   const setAmount = useAuthedMutation(api.fixedCosts.setAmount);
   const addCategory = useAuthedMutation(api.fixedCosts.addCategory);
@@ -102,7 +135,15 @@ export function FixedCostsSection() {
             >
               <ChevronLeft size={16} />
             </Button>
-            <div className="min-w-36 text-center text-[15px] font-bold text-ink">{monthLabel}</div>
+            <button
+              type="button"
+              onClick={() => setMonthPickerOpen(true)}
+              className="flex min-w-36 items-center justify-center gap-1.5 rounded-lg px-2 py-1 text-[15px] font-bold text-ink transition-colors hover:bg-surface-2"
+              aria-label={t("fixedCosts.pickMonth")}
+            >
+              <CalendarDays size={15} className="text-ink-3" />
+              {monthLabel}
+            </button>
             <Button
               variant="secondary"
               size="sm"
@@ -177,7 +218,7 @@ export function FixedCostsSection() {
       </Card>
 
       {detail && detail.rows.length > 0 && (
-        <div className="ac-stagger grid gap-4 sm:grid-cols-2">
+        <>
           <StatTile
             hero
             accent="amber"
@@ -186,10 +227,82 @@ export function FixedCostsSection() {
             icon={<Wallet size={17} />}
             sub={monthLabel}
           />
-          {trend && trend.length > 1 && (
-            <Card>
-              <CardHeader title={t("fixedCosts.recentMonths")} />
-              <ul className="flex flex-col gap-2.5 px-5 pb-5 sm:px-6 sm:pb-6">
+
+          {/*
+            A second, independent window: "how much over the last several
+            months" is a different question from "what was this one month",
+            and answering it by paging through one month at a time was the
+            exact complaint this replaced.
+          */}
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-5 sm:px-6 sm:pt-6">
+              <h2 className="text-[16px] font-bold tracking-tight text-ink">
+                {t("fixedCosts.rangeTotal")}
+              </h2>
+              <div className="flex items-center gap-1 rounded-xl border border-line bg-surface-2 p-1">
+                {MONTH_RANGE_PRESETS.map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setRangeChoice(n)}
+                    aria-pressed={rangeChoice === n}
+                    style={rangeChoice === n ? { background: "var(--grad-violet)" } : undefined}
+                    className={cx(
+                      "h-8 rounded-lg px-3 text-[12.5px] font-bold transition-all",
+                      rangeChoice === n ? "text-white" : "text-ink-3 hover:text-ink",
+                    )}
+                  >
+                    {n}
+                    {t("fixedCosts.monthAbbr")}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setRangeChoice("custom")}
+                  aria-pressed={rangeChoice === "custom"}
+                  style={rangeChoice === "custom" ? { background: "var(--grad-violet)" } : undefined}
+                  className={cx(
+                    "h-8 rounded-lg px-3 text-[12.5px] font-bold transition-all",
+                    rangeChoice === "custom" ? "text-white" : "text-ink-3 hover:text-ink",
+                  )}
+                >
+                  {t("fixedCosts.customRange")}
+                </button>
+              </div>
+            </div>
+
+            {rangeChoice === "custom" && (
+              <div className="flex flex-wrap items-center gap-3 px-5 pt-4 sm:px-6">
+                <Input
+                  type="month"
+                  value={customFrom}
+                  onChange={(e) => e.target.value && setCustomFrom(e.target.value)}
+                  max={thisMonth}
+                  aria-label={t("fixedCosts.prevMonth")}
+                  className="w-auto"
+                />
+                <span className="text-ink-3">–</span>
+                <Input
+                  type="month"
+                  value={customTo}
+                  onChange={(e) => e.target.value && setCustomTo(e.target.value)}
+                  max={thisMonth}
+                  aria-label={t("fixedCosts.nextMonth")}
+                  className="w-auto"
+                />
+              </div>
+            )}
+
+            <div className="px-5 pt-4 sm:px-6">
+              <p className="text-[28px] leading-9 font-bold tracking-tight tabular-nums text-ink">
+                {fmt(rangeTotal)}
+              </p>
+              <p className="mt-0.5 text-[12.5px] text-ink-3">
+                {formatMonthShort(trend?.[0]?.month ?? rangeEndMonth, lang)} –{" "}
+                {formatMonthShort(rangeEndMonth, lang)}
+              </p>
+            </div>
+
+            {trend && trend.length > 0 && (
+              <ul className="mt-4 flex flex-col gap-2.5 px-5 pb-5 sm:px-6 sm:pb-6">
                 {trend.map((m) => {
                   const max = Math.max(...trend.map((r) => r.total), 1);
                   const share = m.total / max;
@@ -221,9 +334,9 @@ export function FixedCostsSection() {
                   );
                 })}
               </ul>
-            </Card>
-          )}
-        </div>
+            )}
+          </Card>
+        </>
       )}
 
       <Modal
@@ -257,6 +370,13 @@ export function FixedCostsSection() {
           </ModalFooter>
         </form>
       </Modal>
+
+      <MonthPickerDialog
+        open={monthPickerOpen}
+        onClose={() => setMonthPickerOpen(false)}
+        value={month}
+        onSelect={setMonth}
+      />
 
       <PasscodeConfirmDialog
         open={deleting !== null}

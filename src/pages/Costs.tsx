@@ -15,6 +15,7 @@ import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Button, Card, CardHeader, cx, EmptyState, Input, Select } from "../components/ui";
 import { StatTile } from "../components/StatTile";
+import { RangePills } from "../components/RangePills";
 import { Pagination, SortSelect, usePagination } from "../components/Pagination";
 import { CostDialog } from "../components/CostDialog";
 import { FixedCostsSection } from "../components/FixedCostsSection";
@@ -22,12 +23,12 @@ import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
-import { CURRENCY_CODE, plural, startOfLocalDay } from "../lib/format";
+import { CURRENCY_CODE, plural } from "../lib/format";
+import { useRangeFilter } from "../lib/dateRange";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { usePersistedState } from "../lib/persist";
 
-const DAY = 24 * 60 * 60 * 1000;
 type SortKey = "newest" | "oldest" | "highest" | "lowest";
 type Tab = "regular" | "fixed";
 
@@ -43,7 +44,7 @@ export function CostsPage() {
   const removeName = useAuthedMutation(api.costs.removeName);
 
   const [search, setSearch] = useState("");
-  const [rangeDays, setRangeDays] = useState(0);
+  const range = useRangeFilter("ac.range.costs");
   const [nameFilter, setNameFilter] = useState("");
   const [sort, setSort] = usePersistedState<SortKey>("ac.sort.costs", "newest");
   const [addOpen, setAddOpen] = useState(false);
@@ -53,23 +54,10 @@ export function CostsPage() {
     null,
   );
 
-  const RANGES = [
-    { days: 0, label: t("dash.allTime") },
-    { days: 7, label: "7d" },
-    { days: 30, label: "30d" },
-    { days: 90, label: "90d" },
-    { days: 365, label: "12m" },
-  ];
-
-  const from = useMemo(
-    () => (rangeDays > 0 ? startOfLocalDay(Date.now() - (rangeDays - 1) * DAY) : 0),
-    [rangeDays],
-  );
-
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
     const filtered = (costs ?? []).filter((c) => {
-      if (c.spentAt < from) return false;
+      if (c.spentAt < range.since || c.spentAt >= range.untilExclusive) return false;
       if (nameFilter && c.name !== nameFilter) return false;
       if (!term) return true;
       return c.name.toLowerCase().includes(term) || (c.note ?? "").toLowerCase().includes(term);
@@ -81,7 +69,7 @@ export function CostsPage() {
       if (sort === "lowest") return a.amount - b.amount;
       return b.spentAt - a.spentAt;
     });
-  }, [costs, search, from, nameFilter, sort]);
+  }, [costs, search, range.since, range.untilExclusive, nameFilter, sort]);
 
   const total = useMemo(() => rows.reduce((sum, c) => sum + c.amount, 0), [rows]);
 
@@ -110,7 +98,7 @@ export function CostsPage() {
   }, [costs]);
 
   const saved = names.filter((n) => !n.suggestion);
-  const pager = usePagination(rows, `${search}|${rangeDays}|${sort}|${nameFilter}`);
+  const pager = usePagination(rows, `${search}|${range.since}|${range.until}|${sort}|${nameFilter}`);
   const biggest = byName[0];
 
   function exportCsv() {
@@ -200,19 +188,6 @@ export function CostsPage() {
           />
         </div>
         <div className="flex w-full gap-3 sm:w-auto">
-          <div className="flex-1 sm:w-36 sm:flex-none">
-            <Select
-              value={rangeDays}
-              onChange={(e) => setRangeDays(Number(e.target.value))}
-              aria-label={t("common.date")}
-            >
-              {RANGES.map((r) => (
-                <option key={r.days} value={r.days}>
-                  {r.label}
-                </option>
-              ))}
-            </Select>
-          </div>
           <div className="flex-1 sm:w-56 sm:flex-none">
             <Select
               value={nameFilter}
@@ -242,6 +217,13 @@ export function CostsPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[13.5px] text-ink-3">
+          {t("costs.totalSpent")} <span className="font-semibold text-ink-2">{range.activeLabel.full}</span>
+        </p>
+        <RangePills range={range} />
+      </div>
+
       <div className="ac-stagger grid gap-4 sm:grid-cols-3">
         <StatTile
           hero
@@ -249,7 +231,7 @@ export function CostsPage() {
           label={t("costs.totalSpent")}
           value={fmt(total)}
           icon={<Wallet size={17} />}
-          sub={RANGES.find((r) => r.days === rangeDays)?.label}
+          sub={range.activeLabel.full}
         />
         <StatTile
           accent="violet"
@@ -308,14 +290,14 @@ export function CostsPage() {
         ) : rows.length === 0 ? (
           <EmptyState
             icon={<Coins size={24} />}
-            title={search || rangeDays || nameFilter ? t("costs.noMatches") : t("costs.none")}
+            title={(costs?.length ?? 0) > 0 ? t("costs.noMatches") : t("costs.none")}
             body={
-              search || rangeDays || nameFilter
+              (costs?.length ?? 0) > 0
                 ? "Try a wider date range or a different search."
                 : "Office snacks, fuel, a bill — anything the business paid for that was not stock."
             }
             action={
-              !search && !rangeDays && !nameFilter ? (
+              (costs?.length ?? 0) === 0 ? (
                 <Button variant="primary" onClick={() => setAddOpen(true)}>
                   <Plus size={17} />
                   {t("costs.add")}

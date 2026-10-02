@@ -106,6 +106,13 @@ export function shiftMonth(month: string, delta: number) {
   return monthKey(d.getTime());
 }
 
+/** How many calendar months apart two "YYYY-MM" months are — same month is 0. */
+export function monthsBetween(a: string, b: string) {
+  const [ay, am] = a.split("-").map(Number);
+  const [by, bm] = b.split("-").map(Number);
+  return (by - ay) * 12 + (bm - am);
+}
+
 export function formatMonth(month: string, lang: Lang = "en") {
   return new Date(monthStart(month)).toLocaleDateString(localeFor(lang), {
     month: "long",
