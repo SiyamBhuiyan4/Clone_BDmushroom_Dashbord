@@ -1,7 +1,19 @@
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v, ConvexError } from "convex/values";
 import { requireSession, verifyPasscode } from "./auth";
 import { customerKey } from "./shared";
+
+/** Attaches a signed, short-lived photo URL — the stored `photoId` is never useful to the browser on its own. */
+async function withPhoto<T extends { photoId?: Id<"_storage"> }>(ctx: QueryCtx, p: T) {
+  const photoUrl = p.photoId ? await ctx.storage.getUrl(p.photoId) : null;
+  return { ...p, photoUrl };
+}
+
+/** Trims a list of extra numbers down to the ones actually typed in. */
+function cleanPhones(phones: string[] | undefined) {
+  return (phones ?? []).map((p) => p.trim()).filter(Boolean);
+}
 
 /*
   The shop's address book.
@@ -70,24 +82,53 @@ export async function rememberCustomer(
   });
 }
 
+/**
+ * Every customer's running balance, keyed the same way a sale is matched to
+ * them. Positive means the shop owes them (they have paid more than their
+ * orders came to); negative means they owe the shop. A cancelled order was
+ * never really a sale, so it carries no balance either way.
+ */
+async function customerBalances(ctx: QueryCtx) {
+  const orders = await ctx.db.query("orders").collect();
+  const byKey = new Map<string, { spent: number; balance: number }>();
+  for (const o of orders) {
+    if (o.orderStatus === "cancelled") continue;
+    const key = customerKey(o.customerName, o.customerPhone);
+    const paid = o.paidAmount ?? (o.paymentStatus === "paid" ? o.total : 0);
+    const entry = byKey.get(key) ?? { spent: 0, balance: 0 };
+    entry.spent += o.total;
+    entry.balance += paid - o.total;
+    byKey.set(key, entry);
+  }
+  return byKey;
+}
+
 /** The address book, most frequent first. */
 export const list = query({
   args: { token: v.string() },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
     const rows = await ctx.db.query("customers").collect();
-    return rows
-      .sort((a, b) => b.orderCount - a.orderCount || a.name.localeCompare(b.name))
-      .map((c) => ({
+    const balances = await customerBalances(ctx);
+    const sorted = rows.sort(
+      (a, b) => b.orderCount - a.orderCount || a.name.localeCompare(b.name),
+    );
+    return await Promise.all(
+      sorted.map(async (c) => ({
+        ...(await withPhoto(ctx, c)),
         _id: c._id,
         name: c.name,
         phone: c.phone,
+        extraPhones: c.extraPhones,
         whatsapp: c.whatsapp,
         facebookUrl: c.facebookUrl,
         address: c.address,
         orderCount: c.orderCount,
         lastOrderedAt: c.lastOrderedAt,
-      }));
+        spent: balances.get(c.key)?.spent ?? 0,
+        balance: balances.get(c.key)?.balance ?? 0,
+      })),
+    );
   },
 });
 
@@ -113,21 +154,24 @@ export const detail = query({
     );
 
     let spent = 0;
-    let due = 0;
+    let balance = 0;
     let items = 0;
     for (const o of mine) {
       // A cancelled sale is not money the customer spent with you.
       if (o.orderStatus === "cancelled") continue;
       spent += o.total;
-      due += o.total - (o.paidAmount ?? (o.paymentStatus === "paid" ? o.total : 0));
+      // Positive: the shop owes them. Negative: they owe the shop.
+      balance += (o.paidAmount ?? (o.paymentStatus === "paid" ? o.total : 0)) - o.total;
       items += o.items.reduce((sum, i) => sum + i.quantity, 0);
     }
 
     return {
       customer: {
+        ...(await withPhoto(ctx, customer)),
         _id: customer._id,
         name: customer.name,
         phone: customer.phone,
+        extraPhones: customer.extraPhones,
         whatsapp: customer.whatsapp,
         facebookUrl: customer.facebookUrl,
         address: customer.address,
@@ -135,7 +179,7 @@ export const detail = query({
         lastOrderedAt: customer.lastOrderedAt,
       },
       sales: mine,
-      totals: { spent, due, items, count: mine.length },
+      totals: { spent, balance, items, count: mine.length },
     };
   },
 });
@@ -152,6 +196,7 @@ export const create = mutation({
     token: v.string(),
     name: v.string(),
     phone: v.optional(v.string()),
+    extraPhones: v.optional(v.array(v.string())),
     whatsapp: v.optional(v.string()),
     facebookUrl: v.optional(v.string()),
     address: v.optional(v.string()),
@@ -178,6 +223,7 @@ export const create = mutation({
     return await ctx.db.insert("customers", {
       name,
       phone,
+      extraPhones: cleanPhones(args.extraPhones),
       whatsapp: args.whatsapp?.trim() || undefined,
       facebookUrl: args.facebookUrl?.trim() || undefined,
       address: args.address?.trim() || undefined,
@@ -200,6 +246,7 @@ export const update = mutation({
     id: v.id("customers"),
     name: v.string(),
     phone: v.optional(v.string()),
+    extraPhones: v.optional(v.array(v.string())),
     whatsapp: v.optional(v.string()),
     facebookUrl: v.optional(v.string()),
     address: v.optional(v.string()),
@@ -226,12 +273,47 @@ export const update = mutation({
     await ctx.db.patch(args.id, {
       name,
       phone,
+      extraPhones: cleanPhones(args.extraPhones),
       // Undefined clears each of these, which is what emptying a box means.
       whatsapp: args.whatsapp?.trim() || undefined,
       facebookUrl: args.facebookUrl?.trim() || undefined,
       address: args.address?.trim() || undefined,
       key,
     });
+  },
+});
+
+/** A one-time URL the browser can POST a photo to directly. */
+export const generateUploadUrl = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+/** Points a customer at a newly uploaded photo, replacing whichever one they had. */
+export const setPhoto = mutation({
+  args: { token: v.string(), id: v.id("customers"), storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const customer = await ctx.db.get(args.id);
+    if (!customer) throw new ConvexError("That customer is no longer saved.");
+    await ctx.db.patch(args.id, { photoId: args.storageId });
+    if (customer.photoId) await ctx.storage.delete(customer.photoId);
+  },
+});
+
+export const removePhoto = mutation({
+  args: { token: v.string(), id: v.id("customers") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const customer = await ctx.db.get(args.id);
+    if (!customer) throw new ConvexError("That customer is no longer saved.");
+    if (customer.photoId) {
+      await ctx.db.patch(args.id, { photoId: undefined });
+      await ctx.storage.delete(customer.photoId);
+    }
   },
 });
 

@@ -1,16 +1,102 @@
-import { Layers, Package, Pencil, Plus, Receipt, Trash2, TrendingUp, Wallet } from "lucide-react";
-import { useState } from "react";
+import { Camera, Layers, Package, Pencil, Plus, Receipt, Trash2, TrendingUp, Wallet } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Modal, cx } from "./ui";
 import { BatchDialog, type BatchInput } from "./BatchDialog";
+import { LotDetailDialog } from "./LotDetailDialog";
+import { VendorDetailDialog } from "./VendorDetailDialog";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor } from "../lib/avatar";
 import { plural } from "../lib/format";
-import { useToast } from "../lib/toast";
+import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
+import { uploadFile, useFileDrop } from "../lib/upload";
+import { variantAvailable } from "../../convex/shared";
+
+type ProductWithPhoto = Doc<"products"> & { photoUrl?: string | null };
+
+/**
+ * The product's photo, shown where the dialog header would otherwise put a
+ * plain icon — click or drop a file directly on it to set one. Living here
+ * instead of only in the edit form means a photo can be added the moment you
+ * notice it is missing, without a detour through "Edit product".
+ */
+function ProductPhotoAvatar({ product }: { product: ProductWithPhoto }) {
+  const t = useT();
+  const toast = useToast();
+  const generateUploadUrl = useAuthedMutation(api.products.generateUploadUrl);
+  const setPhoto = useAuthedMutation(api.products.setPhoto);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(product.photoUrl ?? null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setPreview(product.photoUrl ?? null);
+  }, [product._id, product.photoUrl]);
+
+  async function pickPhoto(file: File) {
+    setPreview(URL.createObjectURL(file));
+    setBusy(true);
+    try {
+      const uploadUrl = await generateUploadUrl({});
+      const storageId = await uploadFile(uploadUrl, file);
+      await setPhoto({ id: product._id, storageId });
+      toast.ok(t("products.photoUpdated"));
+    } catch (err) {
+      toast.error(errorMessage(err));
+      setPreview(product.photoUrl ?? null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const { dragOver, dropProps } = useFileDrop((file) => void pickPhoto(file));
+
+  return (
+    <div
+      {...dropProps}
+      role="button"
+      tabIndex={0}
+      aria-label={product.photoUrl ? t("products.changePhoto") : t("products.uploadPhoto")}
+      onClick={() => fileInputRef.current?.click()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          fileInputRef.current?.click();
+        }
+      }}
+      className={cx(
+        "relative flex size-11 cursor-pointer items-center justify-center",
+        dragOver && "ring-2 ring-white/70",
+      )}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void pickPhoto(file);
+        }}
+      />
+      {preview ? (
+        <img src={preview} alt="" className="size-11 object-cover" />
+      ) : (
+        <Camera size={19} aria-hidden />
+      )}
+      {busy && (
+        <div className="absolute inset-0 flex items-center justify-center bg-ink/40">
+          <div className="ac-skeleton size-4 rounded-full" aria-hidden />
+        </div>
+      )}
+    </div>
+  );
+}
 
 /*
   A stored lot, as the form wants it. The detail query hands back the raw
@@ -54,6 +140,8 @@ export function ProductDetailDialog({
   const [addingLot, setAddingLot] = useState(false);
   const [editingLot, setEditingLot] = useState<BatchInput | null>(null);
   const [deletingLot, setDeletingLot] = useState<BatchInput | null>(null);
+  const [viewingLot, setViewingLot] = useState<Id<"stockBatches"> | null>(null);
+  const [viewingVendor, setViewingVendor] = useState<Id<"vendors"> | null>(null);
 
   const name = data?.product.name ?? "";
 
@@ -61,7 +149,8 @@ export function ProductDetailDialog({
     <Modal
       open={open}
       onClose={onClose}
-      icon={<Package size={19} />}
+      icon={data?.product ? <ProductPhotoAvatar product={data.product} /> : <Package size={19} />}
+      iconInteractive={Boolean(data?.product)}
       gradient={name ? gradientFor(name) : undefined}
       title={name || t("detail.title")}
       subtitle={data?.product.category ?? undefined}
@@ -113,6 +202,33 @@ export function ProductDetailDialog({
             </div>
           )}
 
+          {data.product.variants && data.product.variants.length > 0 && (
+            <div>
+              <p className="mb-2.5 text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">
+                {t("products.multipleSizes")}
+              </p>
+              <ul className="flex flex-col gap-2">
+                {data.product.variants.map((v) => (
+                  <li
+                    key={v.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-[13px] font-semibold text-ink">{v.label}</p>
+                      <p className="mt-0.5 text-[12px] text-ink-3">
+                        {fmt(v.costPrice)}
+                        {v.sellPrice !== undefined ? ` → ${fmt(v.sellPrice)}` : ""}
+                      </p>
+                    </div>
+                    <Badge tone="accent">
+                      {fmtNum(variantAvailable(data.product, v.id))} {t("products.variantStock").toLowerCase()}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/*
             Lots are bought against a product, so the place to keep them is
             the product — adding, correcting and dropping one alike. Sending
@@ -140,7 +256,13 @@ export function ProductDetailDialog({
                   return (
                     <li
                       key={l._id}
-                      className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5"
+                      onClick={() => setViewingLot(l._id)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") setViewingLot(l._id);
+                      }}
+                      className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5 transition-colors hover:bg-surface-2"
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
@@ -172,7 +294,10 @@ export function ProductDetailDialog({
                           </span>
                         )}
                         <button
-                          onClick={() => setEditingLot(lot)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingLot(lot);
+                          }}
                           aria-label={`${t("detail.editLot")} — ${l.label}`}
                           title={t("detail.editLot")}
                           className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
@@ -180,7 +305,10 @@ export function ProductDetailDialog({
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => setDeletingLot(lot)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingLot(lot);
+                          }}
                           aria-label={`${t("detail.deleteLot")} — ${l.label}`}
                           title={t("detail.deleteLot")}
                           className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-critical"
@@ -209,6 +337,7 @@ export function ProductDetailDialog({
                       <p className="text-[13px] text-ink">{fmtDateTime(s.soldAt)}</p>
                       <p className="mt-0.5 text-[12px] text-ink-3">
                         {fmtNum(s.quantity)} × {fmt(s.unitPrice)}
+                        {s.variantLabel ? ` · ${s.variantLabel}` : ""}
                         {s.buyer ? ` · ${s.buyer}` : ""}
                       </p>
                     </div>
@@ -236,6 +365,17 @@ export function ProductDetailDialog({
         open={editingLot !== null}
         onClose={() => setEditingLot(null)}
         batch={editingLot}
+      />
+      <LotDetailDialog
+        open={viewingLot !== null}
+        onClose={() => setViewingLot(null)}
+        lotId={viewingLot}
+        onViewVendor={(id) => setViewingVendor(id)}
+      />
+      <VendorDetailDialog
+        open={viewingVendor !== null}
+        onClose={() => setViewingVendor(null)}
+        vendorId={viewingVendor}
       />
       <PasscodeConfirmDialog
         open={deletingLot !== null}

@@ -23,20 +23,13 @@ import { ProductDialog } from "../components/ProductDialog";
 import { SaleDialog } from "../components/SaleDialog";
 import { ProductDetailDialog } from "../components/ProductDetailDialog";
 import { ResetDialog } from "../components/ResetDialog";
+import { RangePills } from "../components/RangePills";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
-import { usePersistedState } from "../lib/persist";
+import { useRangeFilter, DAY } from "../lib/dateRange";
 import { gradientFor, initialOf } from "../lib/avatar";
 import { plural, relativeTime, startOfLocalDay } from "../lib/format";
 import { useAuthedQuery } from "../lib/session";
-
-const DAY = 24 * 60 * 60 * 1000;
-const RANGES = [
-  { days: 7, label: "7D", full: "last 7 days", prev: "previous 7 days" },
-  { days: 30, label: "30D", full: "last 30 days", prev: "previous 30 days" },
-  { days: 90, label: "90D", full: "last 90 days", prev: "previous 90 days" },
-  { days: 365, label: "12M", full: "last 12 months", prev: "previous 12 months" },
-];
 
 /** Change as a fraction. Null when the baseline is zero — there is no "% of nothing". */
 function change(current: number, previous: number): number | null {
@@ -48,20 +41,18 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
   const { fmt, fmtNum, fmtPercent } = useSettings();
   const t = useT();
   const data = useAuthedQuery(api.dashboard.overview);
-  const [rangeDays, setRangeDays] = usePersistedState("ac.range.dashboard", 30);
+  const range = useRangeFilter("ac.range.dashboard");
   const [sellOpen, setSellOpen] = useState(false);
   const [productOpen, setProductOpen] = useState(false);
   const [viewing, setViewing] = useState<Id<"products"> | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
 
-  const range = RANGES.find((r) => r.days === rangeDays)!;
-
   const scoped = useMemo(() => {
     if (!data) return null;
-    const since = startOfLocalDay(Date.now() - (rangeDays - 1) * DAY);
-    const prevSince = since - rangeDays * DAY;
 
-    const rows = data.windowSales.filter((s) => s.soldAt >= since);
+    const { since, until, untilExclusive, prevSince } = range;
+
+    const rows = data.windowSales.filter((s) => s.soldAt >= since && s.soldAt < untilExclusive);
     // The immediately preceding window of the same length, for the deltas.
     const prevRows = data.windowSales.filter((s) => s.soldAt >= prevSince && s.soldAt < since);
     /*
@@ -69,7 +60,9 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
       revenue from one range and its costs from another would be wrong in a
       way nothing on the page could reveal.
     */
-    const costRows = data.windowCosts.filter((c) => c.spentAt >= since);
+    const costRows = data.windowCosts.filter(
+      (c) => c.spentAt >= since && c.spentAt < untilExclusive,
+    );
     const prevCostRows = data.windowCosts.filter(
       (c) => c.spentAt >= prevSince && c.spentAt < since,
     );
@@ -115,8 +108,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
     // Fill every day in the range so the line stays continuous through days
     // with no sales instead of skipping over them.
     const points: TrendPoint[] = [];
-    for (let i = rangeDays - 1; i >= 0; i--) {
-      const ts = startOfLocalDay(Date.now() - i * DAY);
+    for (let ts = since; ts <= until; ts += DAY) {
       const bucket = byDay.get(ts);
       points.push({ ts, revenue: bucket?.revenue ?? 0, profit: bucket?.profit ?? 0 });
     }
@@ -150,13 +142,13 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
       points,
       topProducts: [...byProduct.values()].sort((a, b) => b.profit - a.profit).slice(0, 6),
     };
-  }, [data, rangeDays]);
+  }, [data, range]);
 
   if (!data || !scoped) return <DashboardSkeleton />;
 
   const { inventory, allTime, recentSales } = data;
   const blank = allTime.salesCount === 0 && inventory.productCount === 0;
-  const vs = (fraction: number | null): Delta => ({ fraction, label: `vs ${range.prev}` });
+  const vs = (fraction: number | null): Delta => ({ fraction, label: `vs ${range.activeLabel.prev}` });
 
   return (
     <div className="flex flex-col gap-6">
@@ -208,31 +200,10 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
           {/* One filter row, above everything it scopes. */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-[13.5px] text-ink-3">
-              {t("dash.showing")} <span className="font-semibold text-ink-2">{range.full}</span>
+              {t("dash.showing")}{" "}
+              <span className="font-semibold text-ink-2">{range.activeLabel.full}</span>
             </p>
-            <div
-              className="flex items-center gap-1 rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow-sm)]"
-              role="group"
-              aria-label="Date range"
-            >
-              {RANGES.map((r) => {
-                const active = rangeDays === r.days;
-                return (
-                  <button
-                    key={r.days}
-                    onClick={() => setRangeDays(r.days)}
-                    aria-pressed={active}
-                    style={active ? { background: "var(--grad-violet)" } : undefined}
-                    className={cx(
-                      "h-8 rounded-lg px-3.5 text-[12.5px] font-bold tracking-wide transition-all",
-                      active ? "text-white" : "text-ink-3 hover:text-ink",
-                    )}
-                  >
-                    {r.label}
-                  </button>
-                );
-              })}
-            </div>
+            <RangePills range={range} />
           </div>
 
           {/*
@@ -335,7 +306,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
             <Card className="lg:col-span-2">
               <CardHeader
                 title={t("dash.revenueAndProfit")}
-                subtitle={`${t("dash.perDay")}, ${range.full}`}
+                subtitle={`${t("dash.perDay")}, ${range.activeLabel.full}`}
               />
               <TrendChart points={scoped.points} />
             </Card>
@@ -343,7 +314,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
             <Card>
               <CardHeader
                 title={t("dash.topProducts")}
-                subtitle={`${t("dash.byProfit")}, ${range.full}`}
+                subtitle={`${t("dash.byProfit")}, ${range.activeLabel.full}`}
               />
               {scoped.topProducts.length === 0 ? (
                 <EmptyState

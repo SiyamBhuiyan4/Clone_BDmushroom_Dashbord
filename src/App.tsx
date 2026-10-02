@@ -6,6 +6,7 @@ import {
   PieChart,
   Coins,
   Users,
+  Truck,
   Menu,
   X,
   Monitor,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import { useSettings, type ThemeChoice } from "./lib/settings";
 import { useSession } from "./lib/session";
+import { prefetchReceiptAssets } from "./lib/pdf";
 import { ConnectionBanner, SessionWarning, useIsOffline } from "./components/StatusBar";
 import { useT, type MessageKey } from "./lib/i18n";
 import { cx } from "./components/ui";
@@ -27,14 +29,16 @@ import { SalesPage } from "./pages/Sales";
 import { ProfitPage } from "./pages/Profit";
 import { CostsPage } from "./pages/Costs";
 import { CustomersPage } from "./pages/Customers";
+import { VendorsPage } from "./pages/Vendors";
 
-type Route = "dashboard" | "products" | "sales" | "customers" | "costs" | "profit";
+type Route = "dashboard" | "products" | "sales" | "customers" | "vendors" | "costs" | "profit";
 
 const NAV: { route: Route; key: MessageKey; icon: typeof LayoutDashboard }[] = [
   { route: "dashboard", key: "nav.dashboard", icon: LayoutDashboard },
   { route: "products", key: "nav.products", icon: Package },
   { route: "sales", key: "nav.sales", icon: ShoppingCart },
   { route: "customers", key: "nav.customers", icon: Users },
+  { route: "vendors", key: "nav.vendors", icon: Truck },
   { route: "costs", key: "nav.costs", icon: Coins },
   { route: "profit", key: "nav.profit", icon: PieChart },
 ];
@@ -67,6 +71,12 @@ export default function App() {
     const sync = () => setRoute(routeFromHash());
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  // So the first "Receipt PDF" tap of the day doesn't race a fresh fetch
+  // against a slow connection — see the comment in lib/pdf.ts.
+  useEffect(() => {
+    prefetchReceiptAssets();
   }, []);
 
   const go = (next: Route) => {
@@ -125,6 +135,7 @@ export default function App() {
             {route === "products" && <ProductsPage />}
             {route === "sales" && <SalesPage />}
             {route === "customers" && <CustomersPage />}
+            {route === "vendors" && <VendorsPage />}
             {route === "costs" && <CostsPage />}
             {route === "profit" && <ProfitPage />}
           </div>

@@ -60,11 +60,31 @@ export function Button({
 
 /* ------------------------------------------------------------------ Card */
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
+export function Card({
+  className,
+  children,
+  onClick,
+}: {
+  className?: string;
+  children: ReactNode;
+  /** Makes the whole card a single click target — its own buttons still need `stopPropagation`. */
+  onClick?: () => void;
+}) {
   return (
     <div
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") onClick();
+            }
+          : undefined
+      }
       className={cx(
         "rounded-card border border-line bg-surface shadow-[var(--shadow-card)]",
+        onClick && "cursor-pointer",
         className,
       )}
     >
@@ -293,6 +313,7 @@ export function Modal({
   title,
   subtitle,
   icon,
+  iconInteractive = false,
   gradient = "var(--grad-violet)",
   children,
   width = "sm:max-w-xl",
@@ -303,6 +324,8 @@ export function Modal({
   subtitle?: string;
   /** Anchors the header — a dialog with no visual subject reads as a form dump. */
   icon?: ReactNode;
+  /** True when `icon` is its own control (e.g. a photo upload button) rather than decoration — keeps it out of the accessibility tree otherwise, same as a background image. */
+  iconInteractive?: boolean;
   gradient?: string;
   children: ReactNode;
   width?: string;
@@ -408,9 +431,12 @@ export function Modal({
           <div className="relative flex items-start gap-3.5 px-6 py-5">
             {icon && (
               <span
-                className="flex size-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-[var(--shadow-hero)]"
+                className={cx(
+                  "flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-white shadow-[var(--shadow-hero)]",
+                  iconInteractive && "ring-2 ring-transparent transition-shadow hover:ring-white/40",
+                )}
                 style={{ background: gradient }}
-                aria-hidden
+                aria-hidden={!iconInteractive}
               >
                 {icon}
               </span>

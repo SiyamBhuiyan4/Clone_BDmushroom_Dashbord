@@ -13,26 +13,30 @@ import {
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Button, Card, CardHeader, EmptyState, Input, Select } from "../components/ui";
+import { Button, Card, CardHeader, cx, EmptyState, Input, Select } from "../components/ui";
 import { StatTile } from "../components/StatTile";
+import { RangePills } from "../components/RangePills";
 import { Pagination, SortSelect, usePagination } from "../components/Pagination";
 import { CostDialog } from "../components/CostDialog";
+import { FixedCostsSection } from "../components/FixedCostsSection";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
-import { CURRENCY_CODE, plural, startOfLocalDay } from "../lib/format";
+import { CURRENCY_CODE, plural } from "../lib/format";
+import { useRangeFilter } from "../lib/dateRange";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { usePersistedState } from "../lib/persist";
 
-const DAY = 24 * 60 * 60 * 1000;
 type SortKey = "newest" | "oldest" | "highest" | "lowest";
+type Tab = "regular" | "fixed";
 
 export function CostsPage() {
   const { fmt, fmtNum, fmtDateTime } = useSettings();
   const t = useT();
   const toast = useToast();
+  const [tab, setTab] = usePersistedState<Tab>("ac.costs.tab", "regular");
   const costs = useAuthedQuery(api.costs.list, {});
   const names = useAuthedQuery(api.costs.names) ?? [];
   const remove = useAuthedMutation(api.costs.remove);
@@ -40,7 +44,7 @@ export function CostsPage() {
   const removeName = useAuthedMutation(api.costs.removeName);
 
   const [search, setSearch] = useState("");
-  const [rangeDays, setRangeDays] = useState(0);
+  const range = useRangeFilter("ac.range.costs");
   const [nameFilter, setNameFilter] = useState("");
   const [sort, setSort] = usePersistedState<SortKey>("ac.sort.costs", "newest");
   const [addOpen, setAddOpen] = useState(false);
@@ -50,23 +54,10 @@ export function CostsPage() {
     null,
   );
 
-  const RANGES = [
-    { days: 0, label: t("dash.allTime") },
-    { days: 7, label: "7d" },
-    { days: 30, label: "30d" },
-    { days: 90, label: "90d" },
-    { days: 365, label: "12m" },
-  ];
-
-  const from = useMemo(
-    () => (rangeDays > 0 ? startOfLocalDay(Date.now() - (rangeDays - 1) * DAY) : 0),
-    [rangeDays],
-  );
-
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
     const filtered = (costs ?? []).filter((c) => {
-      if (c.spentAt < from) return false;
+      if (c.spentAt < range.since || c.spentAt >= range.untilExclusive) return false;
       if (nameFilter && c.name !== nameFilter) return false;
       if (!term) return true;
       return c.name.toLowerCase().includes(term) || (c.note ?? "").toLowerCase().includes(term);
@@ -78,7 +69,7 @@ export function CostsPage() {
       if (sort === "lowest") return a.amount - b.amount;
       return b.spentAt - a.spentAt;
     });
-  }, [costs, search, from, nameFilter, sort]);
+  }, [costs, search, range.since, range.untilExclusive, nameFilter, sort]);
 
   const total = useMemo(() => rows.reduce((sum, c) => sum + c.amount, 0), [rows]);
 
@@ -107,7 +98,7 @@ export function CostsPage() {
   }, [costs]);
 
   const saved = names.filter((n) => !n.suggestion);
-  const pager = usePagination(rows, `${search}|${rangeDays}|${sort}|${nameFilter}`);
+  const pager = usePagination(rows, `${search}|${range.since}|${range.until}|${sort}|${nameFilter}`);
   const biggest = byName[0];
 
   function exportCsv() {
@@ -138,25 +129,49 @@ export function CostsPage() {
           <h1 className="text-[24px] leading-8 font-bold tracking-tight text-ink sm:text-[28px] sm:leading-9">
             {t("costs.title")}
           </h1>
-          <p className="mt-1 text-[13.5px] text-ink-3 sm:text-[14px]">{t("costs.subtitle")}</p>
+          <p className="mt-1 text-[13.5px] text-ink-3 sm:text-[14px]">
+            {tab === "regular" ? t("costs.subtitle") : t("fixedCosts.subtitle")}
+          </p>
         </div>
-        <div className="flex w-full items-center gap-2.5 sm:w-auto">
-          <Button
-            variant="secondary"
-            onClick={exportCsv}
-            disabled={rows.length === 0}
-            className="flex-1 sm:flex-none"
-          >
-            <Download size={17} />
-            {t("sales.export")}
-          </Button>
-          <Button variant="primary" onClick={() => setAddOpen(true)} className="flex-1 sm:flex-none">
-            <Plus size={17} />
-            {t("costs.add")}
-          </Button>
-        </div>
+        {tab === "regular" && (
+          <div className="flex w-full items-center gap-2.5 sm:w-auto">
+            <Button
+              variant="secondary"
+              onClick={exportCsv}
+              disabled={rows.length === 0}
+              className="flex-1 sm:flex-none"
+            >
+              <Download size={17} />
+              {t("sales.export")}
+            </Button>
+            <Button variant="primary" onClick={() => setAddOpen(true)} className="flex-1 sm:flex-none">
+              <Plus size={17} />
+              {t("costs.add")}
+            </Button>
+          </div>
+        )}
       </div>
 
+      <div className="flex w-full gap-2 rounded-xl bg-surface-2 p-1 sm:w-fit">
+        {(["regular", "fixed"] as const).map((key) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            aria-pressed={tab === key}
+            className={cx(
+              "flex-1 rounded-lg px-4 py-2 text-[13px] font-semibold transition-colors sm:flex-none",
+              tab === key ? "bg-surface text-ink shadow-[var(--shadow-sm)]" : "text-ink-3 hover:text-ink-2",
+            )}
+          >
+            {key === "regular" ? t("costs.tabRegular") : t("costs.tabFixed")}
+          </button>
+        ))}
+      </div>
+
+      {tab === "fixed" && <FixedCostsSection />}
+
+      {tab === "regular" && (
+      <>
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-full min-w-0 sm:min-w-60 sm:max-w-md sm:flex-1">
           <Search
@@ -173,19 +188,6 @@ export function CostsPage() {
           />
         </div>
         <div className="flex w-full gap-3 sm:w-auto">
-          <div className="flex-1 sm:w-36 sm:flex-none">
-            <Select
-              value={rangeDays}
-              onChange={(e) => setRangeDays(Number(e.target.value))}
-              aria-label={t("common.date")}
-            >
-              {RANGES.map((r) => (
-                <option key={r.days} value={r.days}>
-                  {r.label}
-                </option>
-              ))}
-            </Select>
-          </div>
           <div className="flex-1 sm:w-56 sm:flex-none">
             <Select
               value={nameFilter}
@@ -215,6 +217,13 @@ export function CostsPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[13.5px] text-ink-3">
+          {t("costs.totalSpent")} <span className="font-semibold text-ink-2">{range.activeLabel.full}</span>
+        </p>
+        <RangePills range={range} />
+      </div>
+
       <div className="ac-stagger grid gap-4 sm:grid-cols-3">
         <StatTile
           hero
@@ -222,7 +231,7 @@ export function CostsPage() {
           label={t("costs.totalSpent")}
           value={fmt(total)}
           icon={<Wallet size={17} />}
-          sub={RANGES.find((r) => r.days === rangeDays)?.label}
+          sub={range.activeLabel.full}
         />
         <StatTile
           accent="violet"
@@ -281,14 +290,14 @@ export function CostsPage() {
         ) : rows.length === 0 ? (
           <EmptyState
             icon={<Coins size={24} />}
-            title={search || rangeDays || nameFilter ? t("costs.noMatches") : t("costs.none")}
+            title={(costs?.length ?? 0) > 0 ? t("costs.noMatches") : t("costs.none")}
             body={
-              search || rangeDays || nameFilter
+              (costs?.length ?? 0) > 0
                 ? "Try a wider date range or a different search."
                 : "Office snacks, fuel, a bill — anything the business paid for that was not stock."
             }
             action={
-              !search && !rangeDays && !nameFilter ? (
+              (costs?.length ?? 0) === 0 ? (
                 <Button variant="primary" onClick={() => setAddOpen(true)}>
                   <Plus size={17} />
                   {t("costs.add")}
@@ -460,6 +469,8 @@ export function CostsPage() {
           )}
         </div>
       </Card>
+      </>
+      )}
 
       <CostDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <CostDialog open={editing !== null} onClose={() => setEditing(null)} cost={editing} />

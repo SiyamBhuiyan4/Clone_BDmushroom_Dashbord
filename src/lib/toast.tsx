@@ -106,16 +106,44 @@ export function useToast() {
   return ctx;
 }
 
-/** Pulls the readable message out of a ConvexError, falling back to a generic one. */
+/**
+ * Pulls the readable message out of a ConvexError, falling back to a generic
+ * one.
+ *
+ * Everything that is not a ConvexError used to collapse to the same generic
+ * string — so a flaky connection, a cancelled request and a genuine bug all
+ * read identically, and a shopkeeper reporting "something went wrong" told
+ * us nothing. The common browser-level failures are named here instead;
+ * anything else still shows its own short message rather than being hidden.
+ */
 export function errorMessage(err: unknown): string {
   if (err && typeof err === "object" && "data" in err) {
     const data = (err as { data: unknown }).data;
     if (typeof data === "string" && data) return data;
   }
+  if (err instanceof Error && err.name === "AbortError") {
+    return "That took too long and was cancelled — check your connection and try again.";
+  }
   if (err instanceof Error && err.message) {
     // Convex wraps server messages; keep the useful tail if present.
     const match = err.message.match(/Uncaught ConvexError:\s*(.+)/);
     if (match) return match[1].split("\n")[0];
+
+    const message = err.message.toLowerCase();
+    if (
+      message.includes("failed to fetch") ||
+      message.includes("networkerror") ||
+      message.includes("load failed") ||
+      message.includes("internet connection appears to be offline")
+    ) {
+      return "Network problem — check your internet connection and try again.";
+    }
+    if (message.includes("dynamically imported module") || message.includes("importing a module script failed")) {
+      return "Couldn't load that — try again, or reload the page.";
+    }
+
+    const trimmed = err.message.trim();
+    if (trimmed && trimmed.length < 120) return trimmed;
   }
   return "Something went wrong. Please try again.";
 }

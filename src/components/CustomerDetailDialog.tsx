@@ -14,13 +14,15 @@ import {
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Badge, Modal, cx } from "./ui";
+import { ContactPhotoAvatar } from "./ContactPhotoAvatar";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor } from "../lib/avatar";
 import { errorMessage, useToast } from "../lib/toast";
-import { useAuthedQuery } from "../lib/session";
+import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { downloadReceipt, previewReceipt } from "../lib/pdf";
 import type { ReceiptOrder } from "../lib/receipt";
+import { uploadFile } from "../lib/upload";
 import { externalUrl, whatsappUrl } from "../../convex/shared";
 
 /** The receipt shape, from a stored sale. */
@@ -81,6 +83,8 @@ export function CustomerDetailDialog({
   const t = useT();
   const toast = useToast();
   const data = useAuthedQuery(api.customers.detail, customerId ? { id: customerId } : "skip");
+  const generateUploadUrl = useAuthedMutation(api.customers.generateUploadUrl);
+  const setPhoto = useAuthedMutation(api.customers.setPhoto);
   const [busy, setBusy] = useState<string | null>(null);
 
   const bengali = lang === "bn";
@@ -106,7 +110,21 @@ export function CustomerDetailDialog({
     <Modal
       open={open}
       onClose={onClose}
-      icon={<UserRound size={19} />}
+      icon={
+        data?.customer ? (
+          <ContactPhotoAvatar
+            photoUrl={data.customer.photoUrl}
+            onUpload={async (file) => {
+              const uploadUrl = await generateUploadUrl({});
+              const storageId = await uploadFile(uploadUrl, file);
+              await setPhoto({ id: data.customer._id, storageId });
+            }}
+          />
+        ) : (
+          <UserRound size={19} />
+        )
+      }
+      iconInteractive={Boolean(data?.customer)}
       gradient={name ? gradientFor(name) : undefined}
       title={name || t("customers.title")}
       subtitle={data?.customer.phone ?? data?.customer.address ?? undefined}
@@ -124,6 +142,12 @@ export function CustomerDetailDialog({
                   {data.customer.phone}
                 </span>
               )}
+              {data.customer.extraPhones?.map((p, i) => (
+                <span key={i} className="inline-flex items-center gap-1.5">
+                  <Phone size={14} className="text-ink-3" aria-hidden />
+                  {p}
+                </span>
+              ))}
               {/* The two that are worth a click get one. */}
               {whatsappUrl(data.customer.whatsapp ?? data.customer.phone) && (
                 <a
@@ -171,10 +195,23 @@ export function CustomerDetailDialog({
               icon={<Package size={14} />}
             />
             <Stat
-              label={t("orders.remainingDue")}
-              value={fmt(data.totals.due)}
+              label={t("customers.balance")}
+              value={
+                data.totals.balance < 0
+                  ? `−${fmt(Math.abs(data.totals.balance))}`
+                  : fmt(data.totals.balance)
+              }
+              hint={
+                data.totals.balance < 0
+                  ? t("customers.theyOweYou")
+                  : data.totals.balance > 0
+                    ? t("customers.youOweThem")
+                    : t("customers.settled")
+              }
               icon={<Wallet size={14} />}
-              tone={data.totals.due > 0 ? "critical" : undefined}
+              tone={
+                data.totals.balance < 0 ? "critical" : data.totals.balance > 0 ? "warning" : undefined
+              }
             />
           </div>
 
@@ -253,11 +290,14 @@ function Stat({
   value,
   icon,
   tone,
+  hint,
 }: {
   label: string;
   value: string;
   icon: React.ReactNode;
-  tone?: "critical";
+  tone?: "critical" | "warning";
+  /** A short line under the value — used to say which way a signed figure runs. */
+  hint?: string;
 }) {
   return (
     <div className="rounded-xl border border-line bg-page px-3.5 py-3">
@@ -268,11 +308,12 @@ function Stat({
       <p
         className={cx(
           "mt-1 truncate text-[17px] font-bold tabular-nums",
-          tone === "critical" ? "text-critical-ink" : "text-ink",
+          tone === "critical" ? "text-critical-ink" : tone === "warning" ? "text-warning-ink" : "text-ink",
         )}
       >
         {value}
       </p>
+      {hint && <p className="mt-0.5 truncate text-[11px] text-ink-3">{hint}</p>}
     </div>
   );
 }

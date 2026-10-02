@@ -60,6 +60,14 @@ export default defineSchema({
           remaining stock be put back if the sale is cancelled.
         */
         batchId: v.optional(v.id("stockBatches")),
+        /*
+          Which size/package this line sold, when the product has variants.
+          The label is snapshotted alongside it — same reason `productName`
+          is: renaming or removing the variant later must not reword a
+          receipt that already went out.
+        */
+        variantId: v.optional(v.string()),
+        variantLabel: v.optional(v.string()),
       }),
     ),
     subtotal: v.number(),
@@ -204,9 +212,80 @@ export default defineSchema({
     */
     unitPrice: v.optional(v.number()),
     note: v.optional(v.string()),
+    /** Who this lot was bought from. */
+    vendorId: v.optional(v.id("vendors")),
+    /*
+      Receipts and other photos/videos for this specific purchase. These are
+      references into `vendorMedia`, never a second copy of the file — the
+      same upload can sit in the vendor's gallery and be linked from however
+      many lots it is actually proof of.
+    */
+    mediaIds: v.optional(v.array(v.id("vendorMedia"))),
   })
     .index("by_purchasedAt", ["purchasedAt"])
-    .index("by_product", ["productId"]),
+    .index("by_product", ["productId"])
+    .index("by_vendor", ["vendorId"]),
+
+  /*
+    A supplier — who the shop buys stock from, as distinct from `customers`,
+    who buy from the shop. `category` is a fixed set rather than free text
+    like a product's category: there are only a handful of real supplier
+    roles in this business, and a fixed set is what makes the Vendors page
+    worth filtering by.
+  */
+  vendors: defineTable({
+    name: v.string(),
+    /** The vendor's profile picture, stored in Convex file storage. */
+    photoId: v.optional(v.id("_storage")),
+    category: v.union(
+      v.literal("spawn"),
+      v.literal("materials"),
+      v.literal("equipment"),
+      v.literal("packaging"),
+      v.literal("other"),
+    ),
+    phone: v.optional(v.string()),
+    /** Further numbers beyond the main one — a vendor is often reachable on more than one line. */
+    extraPhones: v.optional(v.array(v.string())),
+    whatsapp: v.optional(v.string()),
+    facebookUrl: v.optional(v.string()),
+    address: v.optional(v.string()),
+    /** Tax Identification Number, typed in as text — the document photo (if any) lives in vendorMedia. */
+    tin: v.optional(v.string()),
+    tradeLicenseNo: v.optional(v.string()),
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_category", ["category"])
+    .index("by_createdAt", ["createdAt"]),
+
+  /*
+    A named folder inside one vendor's gallery — "TIN & Trade License",
+    "Receipts", "Video", or anything the shop wants to call it. A few are
+    created automatically with every new vendor; nothing stops adding more.
+  */
+  vendorFolders: defineTable({
+    vendorId: v.id("vendors"),
+    name: v.string(),
+    createdAt: v.number(),
+  }).index("by_vendor", ["vendorId"]),
+
+  /*
+    One uploaded file, filed under a vendor and (optionally) one of their
+    folders. This is the single copy a lot's receipt photo and the vendor's
+    own gallery both point at — a lot never gets its own copy of a file that
+    already lives here, it only ever stores this row's id.
+  */
+  vendorMedia: defineTable({
+    vendorId: v.id("vendors"),
+    folderId: v.optional(v.id("vendorFolders")),
+    storageId: v.id("_storage"),
+    kind: v.union(v.literal("image"), v.literal("video")),
+    fileName: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_vendor", ["vendorId"])
+    .index("by_folder", ["folderId"]),
 
   /*
     How each taka of profit is divided. Percentages are validated to total
@@ -263,6 +342,37 @@ export default defineSchema({
     .index("by_usage", ["usageCount"]),
 
   /*
+    A fixed-cost folder — "Office Rent", "Staff Salary" — the recurring bills
+    booked once a month rather than logged as they happen. Kept apart from
+    `costNames`: those are suggestions for a free-typed one-off cost, these
+    are the fixed set a month is actually filled in against.
+  */
+  fixedCostCategories: defineTable({
+    name: v.string(),
+    key: v.string(),
+    createdAt: v.number(),
+  }).index("by_key", ["key"]),
+
+  /*
+    One category's booked amount for one month — "Office Rent" for
+    2026-10 was ৳15,000. A month with nothing entered yet for a category
+    simply has no row, rather than a zero that looks like it was confirmed.
+  */
+  fixedCosts: defineTable({
+    /** Local calendar month, "YYYY-MM" — a fixed cost is booked once a month, not on a day. */
+    month: v.string(),
+    categoryId: v.id("fixedCostCategories"),
+    /** Snapshotted like a cost's name, so renaming or dropping the category later can't reword history. */
+    categoryName: v.string(),
+    amount: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_month", ["month"])
+    .index("by_month_category", ["month", "categoryId"])
+    .index("by_category", ["categoryId"]),
+
+  /*
     A customer the shop expects to see again. Saved from an order with the
     tick on, searched and picked the next time rather than retyped.
 
@@ -274,7 +384,11 @@ export default defineSchema({
   */
   customers: defineTable({
     name: v.string(),
+    /** The customer's profile picture, stored in Convex file storage. */
+    photoId: v.optional(v.id("_storage")),
     phone: v.optional(v.string()),
+    /** Further numbers beyond the main one — optional, as many as needed. */
+    extraPhones: v.optional(v.array(v.string())),
     /*
       How you actually reach them. Kept apart from `phone` because the number
       that identifies a customer and the number you message are not always the
@@ -295,6 +409,8 @@ export default defineSchema({
 
   products: defineTable({
     name: v.string(),
+    /** The product's photo, stored in Convex file storage. */
+    photoId: v.optional(v.id("_storage")),
     // What it costs you to acquire one unit.
     costPrice: v.number(),
     /*
@@ -314,6 +430,35 @@ export default defineSchema({
     quantity: v.number(),
     /** Per-product low-stock threshold; falls back to a global default. */
     reorderLevel: v.optional(v.number()),
+    /*
+      Size/package options for one product — "500 gram" at one price, "1 kg"
+      at another — each with its own buy and sell price. Absent for an
+      ordinary single-price product, which is most of them; `costPrice`,
+      `sellPrice` and `quantity` above keep meaning what they always have.
+      When present, those three fields mirror what the variants add up to
+      (see products.ts) so every other screen keeps reading from one place.
+    */
+    variants: v.optional(
+      v.array(
+        v.object({
+          /** Stable across edits — an order line points at this, not the array index. */
+          id: v.string(),
+          label: v.string(),
+          costPrice: v.number(),
+          sellPrice: v.optional(v.number()),
+          /** This variant's own stock count — only set in "separate" mode. */
+          quantity: v.optional(v.number()),
+          /** How many base units (the product's `unit`/`quantity`) one of this variant is — only set in "shared" mode. */
+          baseQuantity: v.optional(v.number()),
+        }),
+      ),
+    ),
+    /*
+      "separate": each variant is its own countable stock (pre-packed sizes).
+      "shared": one pooled `quantity` in the base unit, each variant just a
+      priced slice of it. Meaningless without `variants`.
+    */
+    stockMode: v.optional(v.union(v.literal("separate"), v.literal("shared"))),
     archived: v.boolean(),
     createdAt: v.number(),
   })
@@ -330,6 +475,9 @@ export default defineSchema({
     unitCost: v.number(),
     unitPrice: v.number(),
     quantity: v.number(),
+    /** Which size/package this sale was, when the product has variants. */
+    variantId: v.optional(v.string()),
+    variantLabel: v.optional(v.string()),
     buyer: v.optional(v.string()),
     note: v.optional(v.string()),
     soldAt: v.number(),

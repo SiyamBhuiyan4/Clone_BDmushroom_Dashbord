@@ -2,6 +2,7 @@ import { internalMutation, internalQuery, type MutationCtx } from "./_generated/
 import type { Id } from "./_generated/dataModel";
 import { CATALOGUE } from "./catalogue";
 import { ensureBuckets } from "./profit";
+import { customerKey, type VendorCategory } from "./shared";
 
 /**
  * Development helpers. These are internal functions — not reachable from the
@@ -385,5 +386,368 @@ export const clear = internalMutation({
   handler: async (ctx) => {
     const removed = await wipe(ctx);
     return `Deleted ${removed.products} products and ${removed.sales} sales.`;
+  },
+});
+
+const DEMO_COUNT = 13;
+const DEMO_CUSTOMER_NAMES = [
+  "Rifat",
+  "Nusrat",
+  "Tanvir",
+  "Sadia",
+  "Arif",
+  "Mehedi",
+  "Priya",
+  "Sabbir",
+  "Jannat",
+  "Hasan",
+  "Farhana",
+  "Mahin",
+  "Raju",
+];
+const DEMO_AREAS = ["Mirpur, Dhaka", "Uttara, Dhaka", "Dhanmondi, Dhaka", "Mohammadpur, Dhaka", "Savar, Dhaka"];
+const DEMO_COST_NAMES = [
+  "Office snacks",
+  "Staff lunch",
+  "Delivery fuel",
+  "Electricity bill",
+  "Internet bill",
+  "Packaging materials",
+  "Farm labour",
+];
+const DEMO_ORDER_STATUSES = ["pending", "confirmed", "delivered", "cancelled"] as const;
+const DEMO_PAYMENT_STATUSES = ["paid", "due", "partial"] as const;
+
+async function wipeEverything(ctx: MutationCtx) {
+  const removed: Record<string, number> = {};
+
+  const sales = await ctx.db.query("sales").collect();
+  for (const r of sales) await ctx.db.delete(r._id);
+  removed.sales = sales.length;
+
+  const products = await ctx.db.query("products").collect();
+  for (const r of products) await ctx.db.delete(r._id);
+  removed.products = products.length;
+
+  const customers = await ctx.db.query("customers").collect();
+  for (const r of customers) await ctx.db.delete(r._id);
+  removed.customers = customers.length;
+
+  const costs = await ctx.db.query("costs").collect();
+  for (const r of costs) await ctx.db.delete(r._id);
+  removed.costs = costs.length;
+
+  const costNames = await ctx.db.query("costNames").collect();
+  for (const r of costNames) await ctx.db.delete(r._id);
+  removed.costNames = costNames.length;
+
+  const orders = await ctx.db.query("orders").collect();
+  for (const r of orders) await ctx.db.delete(r._id);
+  removed.orders = orders.length;
+
+  const lots = await ctx.db.query("stockBatches").collect();
+  for (const r of lots) await ctx.db.delete(r._id);
+  removed.stockBatches = lots.length;
+
+  const orderCounter = await ctx.db
+    .query("counters")
+    .withIndex("by_name", (q) => q.eq("name", "order"))
+    .unique();
+  if (orderCounter) await ctx.db.delete(orderCounter._id);
+
+  return removed;
+}
+
+/**
+ * A fixed-size (13 rows each) demo pass across every table the app shows on
+ * screen — products, sales, customers, orders, costs and stock lots — so
+ * every page has something on it instead of only the ones `demo` touches.
+ *
+ *   npx convex run seed:demoEverything
+ *   npx convex run --prod seed:demoEverything
+ *
+ * Clears those tables first, so it is safe to re-run and always lands on the
+ * same 13-of-each result. `allocationBuckets` (the profit split) and
+ * everything auth-related are left alone — they are configuration, not
+ * content.
+ */
+export const demoEverything = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const removed = await wipeEverything(ctx);
+    await ensureBuckets(ctx);
+
+    const random = makeRandom(20261001);
+    const now = Date.now();
+
+    const products: { id: Id<"products">; name: string; cost: number; sell: number }[] = [];
+    for (let i = 0; i < DEMO_COUNT; i++) {
+      const item = CATALOGUE[i % CATALOGUE.length];
+      const id = await ctx.db.insert("products", {
+        name: item.name,
+        costPrice: item.cost,
+        sellPrice: item.retailLow,
+        details: item.details,
+        category: item.category,
+        quantity: item.stock + 15,
+        archived: false,
+        createdAt: now - Math.floor(random() * 120) * DAY,
+      });
+      products.push({ id, name: item.name, cost: item.cost, sell: item.retailLow });
+    }
+
+    const customers = DEMO_CUSTOMER_NAMES.slice(0, DEMO_COUNT).map((name, i) => ({
+      name,
+      phone: `017${String(10000000 + i * 137).slice(-8)}`,
+      address: DEMO_AREAS[i % DEMO_AREAS.length],
+    }));
+
+    // One order per customer, so Orders and Customers agree with each other.
+    let ordersCreated = 0;
+    for (let i = 0; i < DEMO_COUNT; i++) {
+      const customer = customers[i];
+      const orderedAt = now - Math.floor(random() * 45) * DAY - Math.floor(random() * DAY);
+      const lineCount = 1 + Math.floor(random() * 2);
+      const items = [];
+      for (let j = 0; j < lineCount; j++) {
+        const product = products[Math.floor(random() * products.length)];
+        items.push({
+          productId: product.id,
+          productName: product.name,
+          quantity: 1 + Math.floor(random() * 3),
+          unit: "পিস",
+          unitPrice: product.sell,
+          unitCost: product.cost,
+        });
+      }
+      const subtotal = items.reduce((sum, it) => sum + it.quantity * it.unitPrice, 0);
+      const discount = random() < 0.2 ? Math.round(subtotal * 0.05) : 0;
+      const deliveryCharge = random() < 0.5 ? 60 : 0;
+      const total = subtotal - discount + deliveryCharge;
+      const orderStatus = DEMO_ORDER_STATUSES[i % DEMO_ORDER_STATUSES.length];
+      const paymentStatus = DEMO_PAYMENT_STATUSES[Math.floor(random() * DEMO_PAYMENT_STATUSES.length)];
+
+      await ctx.db.insert("orders", {
+        orderNo: `ORD-${String(i + 1).padStart(6, "0")}`,
+        customerName: customer.name,
+        customerPhone: customer.phone,
+        customerAddress: customer.address,
+        orderedAt,
+        items,
+        subtotal,
+        discount,
+        deliveryCharge,
+        total,
+        paymentStatus,
+        paidAmount: paymentStatus === "partial" ? Math.round(total * 0.5) : undefined,
+        orderStatus,
+        note: random() < 0.3 ? "Demo order." : undefined,
+        source: "demo",
+        createdAt: orderedAt,
+      });
+      ordersCreated++;
+
+      await ctx.db.insert("customers", {
+        name: customer.name,
+        phone: customer.phone,
+        whatsapp: customer.phone,
+        address: customer.address,
+        key: customerKey(customer.name, customer.phone),
+        orderCount: 1,
+        lastOrderedAt: orderedAt,
+        createdAt: orderedAt,
+      });
+    }
+    // Keeps numbering gap-free if a real order is placed after this seed runs.
+    await ctx.db.insert("counters", { name: "order", value: DEMO_COUNT });
+
+    let salesCreated = 0;
+    for (let i = 0; i < DEMO_COUNT; i++) {
+      const product = products[Math.floor(random() * products.length)];
+      const quantity = random() < 0.75 ? 1 : 1 + Math.floor(random() * 3);
+      const current = await ctx.db.get(product.id);
+      if (!current || current.quantity < quantity) continue;
+      await ctx.db.patch(product.id, { quantity: current.quantity - quantity });
+
+      await ctx.db.insert("sales", {
+        productId: product.id,
+        productName: product.name,
+        unitCost: product.cost,
+        unitPrice: product.sell,
+        quantity,
+        buyer: random() < 0.65 ? DEMO_CUSTOMER_NAMES[Math.floor(random() * DEMO_CUSTOMER_NAMES.length)] : undefined,
+        note: random() < 0.3 ? NOTES[Math.floor(random() * NOTES.length)] : undefined,
+        soldAt: now - Math.floor(random() ** 1.7 * 30) * DAY - Math.floor(random() * DAY),
+      });
+      salesCreated++;
+    }
+
+    const costNameIds = new Map<string, Id<"costNames">>();
+    let costsCreated = 0;
+    for (let i = 0; i < DEMO_COUNT; i++) {
+      const name = DEMO_COST_NAMES[i % DEMO_COST_NAMES.length];
+      const key = name.toLowerCase().trim();
+      const spentAt = now - Math.floor(random() * 30) * DAY - Math.floor(random() * DAY);
+
+      let costNameId = costNameIds.get(key);
+      if (!costNameId) {
+        costNameId = await ctx.db.insert("costNames", {
+          name,
+          key,
+          usageCount: 0,
+          createdAt: spentAt,
+        });
+        costNameIds.set(key, costNameId);
+      }
+      const row = (await ctx.db.get(costNameId))!;
+      await ctx.db.patch(costNameId, { usageCount: row.usageCount + 1, lastUsedAt: spentAt });
+
+      await ctx.db.insert("costs", {
+        name,
+        costNameId,
+        amount: 200 + Math.floor(random() * 2000),
+        spentAt,
+        note: random() < 0.3 ? "Paid via bKash." : undefined,
+        createdAt: spentAt,
+      });
+      costsCreated++;
+    }
+
+    let lotsCreated = 0;
+    for (let i = 0; i < DEMO_COUNT; i++) {
+      const product = products[i % products.length];
+      const quantity = 5 + Math.floor(random() * 30);
+      await ctx.db.insert("stockBatches", {
+        productId: product.id,
+        productName: product.name,
+        label: `Lot ${i + 1}`,
+        purchasedAt: now - Math.floor(random() * 60) * DAY,
+        quantity,
+        remaining: quantity,
+        unitCost: product.cost,
+        unitPrice: product.sell,
+      });
+      lotsCreated++;
+    }
+
+    return (
+      `Cleared ${Object.entries(removed)
+        .map(([table, n]) => `${n} ${table}`)
+        .join(", ")}. ` +
+      `Seeded ${products.length} products, ${salesCreated} sales, ${customers.length} customers, ` +
+      `${ordersCreated} orders, ${costsCreated} costs, ${lotsCreated} stock lots.`
+    );
+  },
+});
+
+const DEMO_VENDORS: {
+  name: string;
+  category: VendorCategory;
+  phone: string;
+  address: string;
+  tin: string;
+  tradeLicenseNo: string;
+}[] = [
+  {
+    name: "Rifat Mushroom Spawn",
+    category: "spawn",
+    phone: "01710100001",
+    address: "Savar, Dhaka",
+    tin: "123456789001",
+    tradeLicenseNo: "TRAD/DNCC/100001/2026",
+  },
+  {
+    name: "Green Valley Culture Lab",
+    category: "spawn",
+    phone: "01710100002",
+    address: "Gazipur",
+    tin: "123456789002",
+    tradeLicenseNo: "TRAD/GCC/100002/2026",
+  },
+  {
+    name: "Dhaka Substrate Supply",
+    category: "materials",
+    phone: "01710100003",
+    address: "Mirpur, Dhaka",
+    tin: "123456789003",
+    tradeLicenseNo: "TRAD/DNCC/100003/2026",
+  },
+  {
+    name: "Bismillah Agro Chemicals",
+    category: "materials",
+    phone: "01710100004",
+    address: "Tongi, Gazipur",
+    tin: "123456789004",
+    tradeLicenseNo: "TRAD/GCC/100004/2026",
+  },
+  {
+    name: "Union Engineering Works",
+    category: "equipment",
+    phone: "01710100005",
+    address: "Bogura",
+    tin: "123456789005",
+    tradeLicenseNo: "TRAD/BOG/100005/2026",
+  },
+  {
+    name: "Packway Packaging",
+    category: "packaging",
+    phone: "01710100006",
+    address: "Narayanganj",
+    tin: "123456789006",
+    tradeLicenseNo: "TRAD/NCC/100006/2026",
+  },
+  {
+    name: "City Traders",
+    category: "other",
+    phone: "01710100007",
+    address: "Mohammadpur, Dhaka",
+    tin: "123456789007",
+    tradeLicenseNo: "TRAD/DSCC/100007/2026",
+  },
+];
+
+/** Folders every new vendor starts with — mirrors `vendors.create`. */
+const STARTER_FOLDERS = ["TIN & Trade License", "Receipts", "Video"];
+
+/**
+ * A handful of demo vendors across every category, each with its starter
+ * folders — so the Vendors page has something to look at.
+ *
+ *   npx convex run seed:demoVendors
+ *   npx convex run --prod seed:demoVendors
+ *
+ * Clears existing vendors (and their folders/files) first, so it is safe to
+ * re-run. Stock lots are untouched — this only ever clears their vendor link
+ * via a cascading delete, never the lots themselves.
+ */
+export const demoVendors = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const media = await ctx.db.query("vendorMedia").collect();
+    for (const m of media) {
+      await ctx.storage.delete(m.storageId);
+      await ctx.db.delete(m._id);
+    }
+    const folders = await ctx.db.query("vendorFolders").collect();
+    for (const f of folders) await ctx.db.delete(f._id);
+    const existing = await ctx.db.query("vendors").collect();
+    for (const v of existing) {
+      const lots = await ctx.db
+        .query("stockBatches")
+        .withIndex("by_vendor", (q) => q.eq("vendorId", v._id))
+        .collect();
+      for (const l of lots) await ctx.db.patch(l._id, { vendorId: undefined, mediaIds: undefined });
+      await ctx.db.delete(v._id);
+    }
+
+    const now = Date.now();
+    for (const v of DEMO_VENDORS) {
+      const id = await ctx.db.insert("vendors", { ...v, createdAt: now });
+      for (const name of STARTER_FOLDERS) {
+        await ctx.db.insert("vendorFolders", { vendorId: id, name, createdAt: now });
+      }
+    }
+
+    return `Cleared ${existing.length} vendor(s). Seeded ${DEMO_VENDORS.length} vendors across every category.`;
   },
 });

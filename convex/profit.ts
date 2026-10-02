@@ -111,12 +111,16 @@ export const addBatch = mutation({
     unitCost: v.number(),
     unitPrice: v.optional(v.number()),
     note: v.optional(v.string()),
+    vendorId: v.optional(v.id("vendors")),
   },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
     const product = await ctx.db.get(args.productId);
     if (!product) throw new ConvexError("That product no longer exists.");
     validateBatch(args.quantity, args.unitCost, args.unitPrice);
+    if (args.vendorId && !(await ctx.db.get(args.vendorId))) {
+      throw new ConvexError("That vendor no longer exists.");
+    }
 
     // A lot is stock arriving, so it moves the product's stock with it.
     // Without this the app holds two independent answers to "how many do I
@@ -135,6 +139,7 @@ export const addBatch = mutation({
       unitCost: args.unitCost,
       unitPrice: args.unitPrice,
       note: note ? note : undefined,
+      vendorId: args.vendorId,
     });
   },
 });
@@ -149,12 +154,17 @@ export const updateBatch = mutation({
     unitCost: v.number(),
     unitPrice: v.optional(v.number()),
     note: v.optional(v.string()),
+    /** Omit the field to leave the vendor as-is; pass null to clear it. */
+    vendorId: v.optional(v.union(v.id("vendors"), v.null())),
   },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
     const batch = await ctx.db.get(args.id);
     if (!batch) throw new ConvexError("That stock lot no longer exists.");
     validateBatch(args.quantity, args.unitCost, args.unitPrice);
+    if (args.vendorId && !(await ctx.db.get(args.vendorId))) {
+      throw new ConvexError("That vendor no longer exists.");
+    }
 
     // Move stock by the difference only. A deleted product has no stock left
     // to adjust; the lot still edits so history stays intact.
@@ -186,6 +196,8 @@ export const updateBatch = mutation({
       unitCost: args.unitCost,
       unitPrice: args.unitPrice,
       note: note ? note : undefined,
+      // undefined (field omitted) leaves it alone; null clears it.
+      ...(args.vendorId !== undefined ? { vendorId: args.vendorId ?? undefined } : {}),
     });
   },
 });
@@ -219,6 +231,75 @@ export const removeBatch = mutation({
       });
     }
     await ctx.db.delete(args.id);
+  },
+});
+
+/**
+ * One lot in full: its own numbers, the vendor it was bought from (if any),
+ * and the receipts/photos/videos attached to this specific purchase.
+ */
+export const lotDetail = query({
+  args: { token: v.string(), id: v.id("stockBatches") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const lot = await ctx.db.get(args.id);
+    if (!lot) return null;
+
+    const vendor = lot.vendorId ? await ctx.db.get(lot.vendorId) : null;
+    const mediaRows = lot.mediaIds?.length
+      ? await Promise.all(lot.mediaIds.map((id) => ctx.db.get(id)))
+      : [];
+    const media = await Promise.all(
+      mediaRows
+        .filter((m): m is NonNullable<typeof m> => m !== null)
+        .map(async (m) => ({
+          _id: m._id,
+          kind: m.kind,
+          fileName: m.fileName,
+          url: await ctx.storage.getUrl(m.storageId),
+        })),
+    );
+
+    return { lot, vendor, media };
+  },
+});
+
+/**
+ * Links a file already in the vendor's gallery to this lot — attaching a
+ * receipt that was uploaded for a different purchase, say. Never uploads
+ * anything; that's `vendors.attachMedia`, called first when the file is new.
+ */
+export const attachLotMedia = mutation({
+  args: { token: v.string(), lotId: v.id("stockBatches"), mediaId: v.id("vendorMedia") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const lot = await ctx.db.get(args.lotId);
+    if (!lot) throw new ConvexError("That stock lot no longer exists.");
+    const media = await ctx.db.get(args.mediaId);
+    if (!media) throw new ConvexError("That file no longer exists.");
+    if (lot.vendorId && media.vendorId !== lot.vendorId) {
+      throw new ConvexError("That file belongs to a different vendor.");
+    }
+    const existing = lot.mediaIds ?? [];
+    if (existing.includes(args.mediaId)) return;
+    await ctx.db.patch(args.lotId, { mediaIds: [...existing, args.mediaId] });
+  },
+});
+
+/**
+ * Unlinks a file from this lot. The file itself — and its place in the
+ * vendor's gallery — is untouched; delete it from there if it should be gone
+ * for good.
+ */
+export const removeLotMedia = mutation({
+  args: { token: v.string(), lotId: v.id("stockBatches"), mediaId: v.id("vendorMedia") },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const lot = await ctx.db.get(args.lotId);
+    if (!lot?.mediaIds) return;
+    await ctx.db.patch(args.lotId, {
+      mediaIds: lot.mediaIds.filter((m) => m !== args.mediaId),
+    });
   },
 });
 

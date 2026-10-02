@@ -15,12 +15,13 @@ import {
   XCircle,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Doc } from "../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Card, EmptyState, Input, Select, cx } from "../components/ui";
 import { Pagination, usePagination } from "../components/Pagination";
 import { StatTile } from "../components/StatTile";
 import { SaleDialog } from "../components/SaleDialog";
 import { PaymentDialog } from "../components/PaymentDialog";
+import { CustomerDetailDialog } from "../components/CustomerDetailDialog";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -30,6 +31,7 @@ import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { CURRENCY_CODE, plural, startOfLocalDay } from "../lib/format";
 import { downloadReceipt, downloadReceipts, previewReceipt } from "../lib/pdf";
 import type { ReceiptOrder } from "../lib/receipt";
+import { customerKey } from "../../convex/shared";
 
 /** The order shape the receipt module wants, from a stored order. */
 function toReceipt(order: Doc<"orders">): ReceiptOrder {
@@ -94,10 +96,25 @@ export function SalesPage() {
   const t = useT();
   const toast = useToast();
   const orders = useAuthedQuery(api.orders.list, {});
+  const customers = useAuthedQuery(api.customers.list) ?? [];
   const confirmOrder = useAuthedMutation(api.orders.confirm);
   const cancelOrder = useAuthedMutation(api.orders.cancel);
   const removeOrder = useAuthedMutation(api.orders.remove);
   const restoreOrder = useAuthedMutation(api.orders.restore);
+
+  /*
+    An order keeps its own snapshot of the name and phone rather than a link
+    to the customer row — the same reason a sale snapshots its product name:
+    the receipt has to keep saying what it said. Matching back to a saved
+    customer is done the same way the server itself decides "is this the
+    same person" (see `customerKey`), not by a second, looser guess.
+  */
+  const customerIdByKey = useMemo(() => {
+    const map = new Map<string, Id<"customers">>();
+    for (const c of customers) map.set(customerKey(c.name, c.phone), c._id);
+    return map;
+  }, [customers]);
+  const [viewingCustomer, setViewingCustomer] = useState<Id<"customers"> | null>(null);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -396,24 +413,39 @@ export function SalesPage() {
             {pager.pageRows.map((order) => (
               <Card key={order._id} className="p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <span
-                      className="flex size-10 shrink-0 items-center justify-center rounded-2xl text-[14px] font-bold text-white"
-                      style={{ background: gradientFor(order.customerName) }}
-                      aria-hidden
-                    >
-                      {initialOf(order.customerName)}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-[15px] font-bold tracking-tight text-ink">
-                        {order.customerName}
-                      </p>
-                      <p className="mt-0.5 text-[12px] text-ink-3">
-                        {order.orderNo} · {fmtDateFull(order.orderedAt)}
-                        {order.customerPhone ? ` · ${order.customerPhone}` : ""}
-                      </p>
-                    </div>
-                  </div>
+                  {(() => {
+                    const customerId = customerIdByKey.get(
+                      customerKey(order.customerName, order.customerPhone),
+                    );
+                    const Wrapper = customerId ? "button" : "div";
+                    return (
+                      <Wrapper
+                        type={customerId ? "button" : undefined}
+                        onClick={customerId ? () => setViewingCustomer(customerId) : undefined}
+                        className={cx(
+                          "flex min-w-0 items-start gap-3 rounded-xl text-left",
+                          customerId && "-m-1 p-1 transition-colors hover:bg-surface-2",
+                        )}
+                      >
+                        <span
+                          className="flex size-10 shrink-0 items-center justify-center rounded-2xl text-[14px] font-bold text-white"
+                          style={{ background: gradientFor(order.customerName) }}
+                          aria-hidden
+                        >
+                          {initialOf(order.customerName)}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-[15px] font-bold tracking-tight text-ink">
+                            {order.customerName}
+                          </p>
+                          <p className="mt-0.5 text-[12px] text-ink-3">
+                            {order.orderNo} · {fmtDateFull(order.orderedAt)}
+                            {order.customerPhone ? ` · ${order.customerPhone}` : ""}
+                          </p>
+                        </div>
+                      </Wrapper>
+                    );
+                  })()}
                   <div className="text-right">
                     <p className="text-[18px] font-bold tabular-nums text-ink">{fmt(order.total)}</p>
                     {isBooked(order) && (
@@ -560,6 +592,11 @@ export function SalesPage() {
 
       <SaleDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <PaymentDialog open={paying !== null} onClose={() => setPaying(null)} order={paying} />
+      <CustomerDetailDialog
+        open={viewingCustomer !== null}
+        onClose={() => setViewingCustomer(null)}
+        customerId={viewingCustomer}
+      />
       <PasscodeConfirmDialog
         open={pending !== null}
         onClose={() => setPending(null)}

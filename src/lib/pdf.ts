@@ -24,17 +24,48 @@ export const SHOP: ShopInfo = {
 let fontCache: { regular: ArrayBuffer; bold: ArrayBuffer } | null = null;
 let brandCache: { logo?: Uint8Array; seal?: Uint8Array } | null = null;
 
+/*
+  A receipt needs ~1.5MB of font and code fetched on first use — the exact
+  moment a shaky mobile connection is most likely to drop one request. Most
+  of what shows up as "something went wrong" here is that, not a real bug,
+  so a failed fetch gets a few seconds to recover before it is allowed to
+  fail the whole receipt.
+*/
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+/** A fetch that gives up after a while instead of hanging on a dead connection. */
+function fetchWithTimeout(url: string, ms = 12_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 async function loadFonts() {
   if (fontCache) return fontCache;
   const [regular, bold] = await Promise.all([
-    fetch("/fonts/HindSiliguri-Regular.ttf").then((r) => {
-      if (!r.ok) throw new Error("Could not load the receipt font.");
-      return r.arrayBuffer();
-    }),
-    fetch("/fonts/HindSiliguri-Bold.ttf").then((r) => {
-      if (!r.ok) throw new Error("Could not load the receipt font.");
-      return r.arrayBuffer();
-    }),
+    withRetry(() =>
+      fetchWithTimeout("/fonts/HindSiliguri-Regular.ttf").then((r) => {
+        if (!r.ok) throw new Error("Could not load the receipt font.");
+        return r.arrayBuffer();
+      }),
+    ),
+    withRetry(() =>
+      fetchWithTimeout("/fonts/HindSiliguri-Bold.ttf").then((r) => {
+        if (!r.ok) throw new Error("Could not load the receipt font.");
+        return r.arrayBuffer();
+      }),
+    ),
   ]);
   fontCache = { regular, bold };
   return fontCache;
@@ -48,9 +79,11 @@ async function loadFonts() {
 */
 async function loadArtwork(path: string) {
   try {
-    const res = await fetch(path);
-    if (!res.ok) throw new Error(String(res.status));
-    return new Uint8Array(await res.arrayBuffer());
+    return await withRetry(async () => {
+      const res = await fetchWithTimeout(path);
+      if (!res.ok) throw new Error(String(res.status));
+      return new Uint8Array(await res.arrayBuffer());
+    });
   } catch {
     return undefined;
   }
@@ -67,7 +100,11 @@ async function loadBrand() {
 }
 
 async function buildDoc(orders: ReceiptOrder[], shop: ShopInfo, bengali: boolean) {
-  const [pdfkit, fonts, brand] = await Promise.all([import("pdfkit"), loadFonts(), loadBrand()]);
+  const [pdfkit, fonts, brand] = await Promise.all([
+    withRetry(() => import("pdfkit")),
+    loadFonts(),
+    loadBrand(),
+  ]);
   const PDFDocument = pdfkit.default;
 
   /*
@@ -174,4 +211,22 @@ export async function previewReceipt(
   const url = URL.createObjectURL(blob);
   window.open(url, "_blank");
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/*
+  Warms the font/code cache in the background once the app is idle, so the
+  first real "Receipt PDF" tap of the day finds everything already in memory
+  instead of racing a fetch against whatever the connection is doing right
+  then. Best-effort: a failure here is silent and changes nothing — the
+  retry logic above still runs for real when the shopkeeper actually asks.
+*/
+export function prefetchReceiptAssets() {
+  const run = () => {
+    void Promise.all([import("pdfkit"), loadFonts(), loadBrand()]).catch(() => {});
+  };
+  if ("requestIdleCallback" in window) {
+    (window as typeof window & { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback(run);
+  } else {
+    setTimeout(run, 2000);
+  }
 }
