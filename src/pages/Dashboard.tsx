@@ -7,7 +7,6 @@ import {
   Plus,
   PiggyBank,
   Receipt,
-  RotateCcw,
   TrendingUp,
   Wallet,
   AlertTriangle,
@@ -22,7 +21,6 @@ import { TopProductsChart, type TopProduct } from "../components/charts/TopProdu
 import { ProductDialog } from "../components/ProductDialog";
 import { SaleDialog } from "../components/SaleDialog";
 import { ProductDetailDialog } from "../components/ProductDetailDialog";
-import { ResetDialog } from "../components/ResetDialog";
 import { RangePills } from "../components/RangePills";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -45,7 +43,6 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
   const [sellOpen, setSellOpen] = useState(false);
   const [productOpen, setProductOpen] = useState(false);
   const [viewing, setViewing] = useState<Id<"products"> | null>(null);
-  const [resetOpen, setResetOpen] = useState(false);
 
   const scoped = useMemo(() => {
     if (!data) return null;
@@ -444,31 +441,6 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
         </>
       )}
 
-      {/*
-        At the bottom, in its own card, behind a passcode and a typed word.
-        A control that zeroes the page belongs nowhere near the buttons that
-        fill it — putting it in the header beside "Record sale" is how it gets
-        pressed by reflex.
-      */}
-      {!blank && (
-        <Card className="border-[color-mix(in_srgb,var(--critical)_30%,var(--line))]">
-          <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-5 sm:px-6">
-            <div className="min-w-0">
-              <h2 className="text-[15px] font-bold tracking-tight text-critical-ink">
-                {t("sales.dangerZone")}
-              </h2>
-              <p className="mt-1 max-w-lg text-[12.5px] leading-5 text-ink-3">
-                {t("reset.subtitle")}
-              </p>
-            </div>
-            <Button variant="danger" onClick={() => setResetOpen(true)} className="shrink-0">
-              <RotateCcw size={16} />
-              {t("reset.open")}
-            </Button>
-          </div>
-        </Card>
-      )}
-
       <ProductDetailDialog
         open={viewing !== null}
         onClose={() => setViewing(null)}
@@ -476,7 +448,6 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
       />
       <ProductDialog open={productOpen} onClose={() => setProductOpen(false)} />
       <SaleDialog open={sellOpen} onClose={() => setSellOpen(false)} />
-      <ResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />
     </div>
   );
 }
