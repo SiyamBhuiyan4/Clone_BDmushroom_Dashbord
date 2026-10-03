@@ -201,10 +201,22 @@
   white text on top of them.
 */
 :root {
-  --grad-violet: linear-gradient(135deg, #27b95d 0%, #224f38 100%);
+  /*
+    Both stops stay dark enough to clear 4.5:1 against the white text sitting
+    on them — the bright half of bdmushroom's green (#27b95d) alone did not.
+  */
+  --grad-violet: linear-gradient(135deg, #15803d 0%, #224f38 100%);
   --grad-emerald: linear-gradient(135deg, #047857 0%, #0f766e 100%);
   --grad-amber: linear-gradient(135deg, #d97706 0%, #ea580c 100%);
   --grad-sky: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
+  /*
+    bdmushroom's second brand colour, the crimson under the wordmark — stands
+    in for the "violet" stat-tile category specifically, so that category no
+    longer renders as a second, slightly different green sitting next to the
+    "emerald" category on the same grid (Dashboard, Profit) with nothing to
+    tell them apart by colour.
+  */
+  --grad-crimson: linear-gradient(135deg, #db143c 0%, #a10f2e 100%);
 }
 
 @theme inline {
