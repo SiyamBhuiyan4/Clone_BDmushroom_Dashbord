@@ -254,6 +254,25 @@ export const create = mutation({
 
     const { subtotal, total } = computeTotals(resolved, discount, deliveryCharge);
     const paymentStatus = (args.paymentStatus ?? "due") as "paid" | "due" | "partial";
+    /*
+      Same invariant `setPayment` keeps: "paid" always means the full total,
+      "due" always means nothing, and "partial" is the only one of the three
+      that needs a figure from the caller — and has to sit strictly between
+      the other two, or it is really one of them under the wrong label.
+      Trusting the status alone here is how an order used to save as
+      "Partial" with no amount recorded at all.
+    */
+    let paidAmount: number | undefined;
+    if (paymentStatus === "partial") {
+      const amount = args.paidAmount ?? 0;
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new ConvexError("Enter how much has been paid.");
+      }
+      if (amount >= total) {
+        throw new ConvexError("A partial payment has to be less than the total.");
+      }
+      paidAmount = amount;
+    }
     const orderedAt = args.orderedAt ?? Date.now();
 
     /*
@@ -284,7 +303,7 @@ export const create = mutation({
       deliveryCharge,
       total,
       paymentStatus,
-      paidAmount: args.paidAmount,
+      paidAmount,
       orderStatus: "pending",
       note: args.note?.trim() || undefined,
       source: args.source,
