@@ -442,6 +442,8 @@ const EN = {
   "trainees.certificateHint": "Available once every lesson above is checked off.",
   "trainees.gallery": "Gallery",
   "trainees.noPhotos": "No class photos yet — drop one here, or upload.",
+  "trainees.deleteLesson": "Delete this lesson?",
+  "trainees.deleteLessonBody": "Deleting needs your passcode, not just an unlocked browser.",
 
   "lot.title": "Stock lot",
   "lot.vendor": "Vendor",
@@ -1023,6 +1025,8 @@ const BN: Partial<Record<MessageKey, string>> = {
   "trainees.certificateHint": "উপরের সব লেসন সম্পন্ন হলে এটি চালু হবে।",
   "trainees.gallery": "গ্যালারি",
   "trainees.noPhotos": "এখনো কোনো ক্লাসের ছবি নেই — এখানে ফেলুন বা আপলোড করুন।",
+  "trainees.deleteLesson": "এই লেসনটি মুছবেন?",
+  "trainees.deleteLessonBody": "মুছতে হলে পাসকোড লাগবে — শুধু ব্রাউজার খোলা থাকলেই হবে না।",
 
   "lot.title": "স্টক লট",
   "lot.vendor": "ভেন্ডর",

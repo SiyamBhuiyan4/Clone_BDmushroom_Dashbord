@@ -207,9 +207,10 @@ export const setLessonCompleted = mutation({
 });
 
 export const removeLesson = mutation({
-  args: { token: v.string(), id: v.id("traineeLessons") },
+  args: { token: v.string(), id: v.id("traineeLessons"), passcode: v.string() },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
     const row = await ctx.db.get(args.id);
     if (!row) return;
     await ctx.db.delete(args.id);

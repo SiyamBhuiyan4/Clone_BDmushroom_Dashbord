@@ -65,6 +65,9 @@ export function TraineeDetailDialog({
   const [deletingMedia, setDeletingMedia] = useState<{ id: Id<"traineeMedia">; fileName: string } | null>(
     null,
   );
+  const [deletingLesson, setDeletingLesson] = useState<{ id: Id<"traineeLessons">; name: string } | null>(
+    null,
+  );
   const [generating, setGenerating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -308,7 +311,7 @@ export function TraineeDetailDialog({
                     {l.name}
                   </span>
                   <button
-                    onClick={() => void removeLesson({ id: l._id })}
+                    onClick={() => setDeletingLesson({ id: l._id, name: l.name })}
                     aria-label={`${t("common.delete")} ${l.name}`}
                     className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical"
                   >
@@ -426,6 +429,17 @@ export function TraineeDetailDialog({
         onConfirm={async (passcode) => {
           if (!deletingMedia) return;
           await removeMedia({ id: deletingMedia.id, passcode });
+        }}
+      />
+      <PasscodeConfirmDialog
+        open={deletingLesson !== null}
+        onClose={() => setDeletingLesson(null)}
+        title={t("trainees.deleteLesson")}
+        confirmLabel={t("common.delete")}
+        body={deletingLesson ? `${deletingLesson.name}\n${t("trainees.deleteLessonBody")}` : ""}
+        onConfirm={async (passcode) => {
+          if (!deletingLesson) return;
+          await removeLesson({ id: deletingLesson.id, passcode });
         }}
       />
     </Modal>
