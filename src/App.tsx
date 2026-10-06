@@ -12,7 +12,6 @@ import {
   Monitor,
   Sun,
   Moon,
-  Wallet,
   PanelLeftClose,
   PanelLeftOpen,
   LogOut,
@@ -189,11 +188,8 @@ function Sidebar({
       )}
     >
       <div className="flex h-20 shrink-0 items-center px-3.5">
-        <span
-          className="flex size-10 shrink-0 items-center justify-center rounded-2xl text-white shadow-[var(--shadow-hero)]"
-          style={{ background: "var(--grad-violet)" }}
-        >
-          <Wallet size={19} />
+        <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-[var(--shadow-hero)]">
+          <img src="/brand/bdmushroom-seal.png" alt="" className="size-full object-cover" />
         </span>
         <div
           className={cx(

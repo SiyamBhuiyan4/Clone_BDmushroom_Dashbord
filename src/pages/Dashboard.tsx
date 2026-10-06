@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   Boxes,
   CircleDollarSign,
+  Landmark,
   Package,
   PackagePlus,
   Plus,
@@ -251,6 +252,9 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
                   : t("dash.noCosts")
               }
             />
+          </div>
+
+          <div className="ac-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatTile
               accent="emerald"
               label={t("dash.netProfit")}
@@ -296,6 +300,18 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
               }
               icon={<Boxes size={17} />}
               sub={`${fmtNum(inventory.inStockCount)} · ${fmt(inventory.inventoryCost)} ${t("dash.atCost")}`}
+            />
+            {/*
+              Placeholder tile: Siyam asked for an "Investment" slot on the
+              dashboard before deciding what it should actually track. Shows
+              zero until he specifies the figure.
+            */}
+            <StatTile
+              accent="amber"
+              label={t("dash.investment")}
+              value={fmt(0)}
+              icon={<Landmark size={17} />}
+              sub={t("dash.investmentHint")}
             />
           </div>
 
