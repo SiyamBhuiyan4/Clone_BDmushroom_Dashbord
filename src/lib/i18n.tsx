@@ -36,6 +36,7 @@ const EN = {
 
   "common.add": "Add",
   "common.cancel": "Cancel",
+  "common.done": "Done",
   "common.apply": "Apply",
   "common.save": "Save changes",
   "common.delete": "Delete",
@@ -462,6 +463,8 @@ const EN = {
   "investment.addSubtitle": "This adds a stock lot and moves its cost into Investment — not your regular costs.",
   "investment.totalToInvest": "Total",
   "investment.addConfirm": "Add purchase",
+  "investment.receiptTitle": "Attach a receipt",
+  "investment.receiptSubtitle": "Optional — a photo of the receipt or invoice, if you have one.",
   "fixedCosts.subtitle": "Rent, bills, salary — booked once a month, browsed month by month.",
   "fixedCosts.total": "Total this month",
   "fixedCosts.addCategory": "Add a category",
@@ -564,6 +567,7 @@ const BN: Partial<Record<MessageKey, string>> = {
 
   "common.add": "যোগ করুন",
   "common.cancel": "বাতিল",
+  "common.done": "সম্পন্ন",
   "common.apply": "প্রয়োগ করুন",
   "common.save": "পরিবর্তন সংরক্ষণ",
   "common.delete": "মুছুন",
@@ -990,6 +994,8 @@ const BN: Partial<Record<MessageKey, string>> = {
   "investment.addSubtitle": "এটি একটি স্টক লট যোগ করবে এবং তার খরচ নিয়মিত খরচে না গিয়ে বিনিয়োগে যোগ হবে।",
   "investment.totalToInvest": "মোট",
   "investment.addConfirm": "ক্রয় যোগ করুন",
+  "investment.receiptTitle": "রসিদ যুক্ত করুন",
+  "investment.receiptSubtitle": "ঐচ্ছিক — রসিদ বা ইনভয়েসের ছবি থাকলে দিন।",
   "fixedCosts.subtitle": "ভাড়া, বিল, বেতন — প্রতি মাসে একবার লেখা হয়, মাস ধরে ধরে দেখা যায়।",
   "fixedCosts.total": "এই মাসের মোট",
   "fixedCosts.addCategory": "ক্যাটাগরি যোগ করুন",

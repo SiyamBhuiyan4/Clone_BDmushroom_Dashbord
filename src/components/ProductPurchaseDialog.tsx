@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Landmark } from "lucide-react";
+import { Check, Landmark } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { AmountInput, Button, Field, Input, Modal, ModalFooter, Select, SectionLabel, Textarea } from "./ui";
+import { LotMediaManager } from "./LotMediaManager";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { CURRENCY_SYMBOL, toLocalInputValue } from "../lib/format";
@@ -32,6 +33,13 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
   const [unitCost, setUnitCost] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  /*
+    A lot needs an id before anything can be attached to it, so the receipt
+    step only opens once the purchase above is actually saved — this is the
+    same reason `BatchDialog` only shows `LotMediaManager` in edit mode, not
+    while a lot is still being created.
+  */
+  const [savedLotId, setSavedLotId] = useState<Id<"stockBatches"> | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -41,6 +49,7 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
     setQuantity("");
     setUnitCost("");
     setNote("");
+    setSavedLotId(null);
   }, [open]);
 
   const qty = Number(quantity);
@@ -56,7 +65,7 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
     setSaving(true);
     try {
       const when = purchasedAt ? new Date(purchasedAt).getTime() : Date.now();
-      await add({
+      const id = await add({
         productId: productId as Id<"products">,
         label: "Product purchase",
         purchasedAt: when,
@@ -66,12 +75,36 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
         vendorId: vendorId ? (vendorId as Id<"vendors">) : undefined,
       });
       toast.ok(`Logged ${fmt(total)} as investment.`);
-      onClose();
+      // One more optional step — attach the receipt — rather than closing
+      // straight away, so it doesn't need a second trip through Products.
+      setSavedLotId(id);
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
       setSaving(false);
     }
+  }
+
+  if (savedLotId) {
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        icon={<Landmark size={19} />}
+        title={t("investment.receiptTitle")}
+        subtitle={t("investment.receiptSubtitle")}
+      >
+        <div className="flex flex-col gap-6 px-6 py-6">
+          <LotMediaManager lotId={savedLotId} />
+        </div>
+        <ModalFooter>
+          <Button type="button" variant="primary" onClick={onClose}>
+            <Check size={16} />
+            {t("common.done")}
+          </Button>
+        </ModalFooter>
+      </Modal>
+    );
   }
 
   return (
