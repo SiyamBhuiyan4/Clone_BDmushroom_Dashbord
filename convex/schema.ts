@@ -221,6 +221,13 @@ export default defineSchema({
       many lots it is actually proof of.
     */
     mediaIds: v.optional(v.array(v.id("vendorMedia"))),
+    /*
+      True only for a lot logged through the Costs page's "Product purchase
+      cost" tab rather than the ordinary "Add stock lot" flow on Products.
+      Both write the same row — this just marks the ones that also moved the
+      Investment counter, so removing one later knows to move it back.
+    */
+    investment: v.optional(v.boolean()),
   })
     .index("by_purchasedAt", ["purchasedAt"])
     .index("by_product", ["productId"])

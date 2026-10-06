@@ -15,6 +15,7 @@ import type * as customers from "../customers.js";
 import type * as danger from "../danger.js";
 import type * as dashboard from "../dashboard.js";
 import type * as fixedCosts from "../fixedCosts.js";
+import type * as investment from "../investment.js";
 import type * as orders from "../orders.js";
 import type * as otp from "../otp.js";
 import type * as products from "../products.js";
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   danger: typeof danger;
   dashboard: typeof dashboard;
   fixedCosts: typeof fixedCosts;
+  investment: typeof investment;
   orders: typeof orders;
   otp: typeof otp;
   products: typeof products;

@@ -40,6 +40,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
   const { fmt, fmtNum, fmtPercent } = useSettings();
   const t = useT();
   const data = useAuthedQuery(api.dashboard.overview);
+  const investment = useAuthedQuery(api.investment.current);
   const range = useRangeFilter("ac.range.dashboard");
   const [sellOpen, setSellOpen] = useState(false);
   const [productOpen, setProductOpen] = useState(false);
@@ -302,14 +303,21 @@ export function DashboardPage({ onNavigate }: { onNavigate: (r: "products" | "sa
               sub={`${fmtNum(inventory.inStockCount)} · ${fmt(inventory.inventoryCost)} ${t("dash.atCost")}`}
             />
             {/*
-              Placeholder tile: Siyam asked for an "Investment" slot on the
-              dashboard before deciding what it should actually track. Shows
-              zero until he specifies the figure.
+              Rises when stock is bought through the Costs page's "Product
+              purchase cost" tab, falls when anything sells — see
+              convex/investment.ts. Not the same figure as "Available stock
+              at cost": it only moves on those two triggers, so it starts at
+              zero and stays wrong until Siyam sets its true starting balance.
             */}
             <StatTile
               accent="amber"
               label={t("dash.investment")}
-              value={fmt(0)}
+              value={
+                <AnimatedNumber
+                  value={investment ?? 0}
+                  format={(n) => (n < 0 ? `−${fmt(Math.abs(n))}` : fmt(n))}
+                />
+              }
               icon={<Landmark size={17} />}
               sub={t("dash.investmentHint")}
             />
