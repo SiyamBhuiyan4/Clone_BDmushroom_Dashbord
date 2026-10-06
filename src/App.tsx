@@ -222,10 +222,10 @@ function Sidebar({
         </button>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1 px-3 pt-2">
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 pt-2">
         <p
           className={cx(
-            "px-3 text-[10.5px] font-bold tracking-[0.08em] text-ink-3 uppercase",
+            "shrink-0 px-3 text-[10.5px] font-bold tracking-[0.08em] text-ink-3 uppercase",
             labelMotion,
             rail ? "lg:max-h-0 lg:pb-0 lg:opacity-0" : "max-h-5 pb-2 opacity-100",
           )}
@@ -243,7 +243,7 @@ function Sidebar({
               title={rail ? label : undefined}
               style={active ? { background: "var(--grad-violet)" } : undefined}
               className={cx(
-                "ac-press flex h-11 items-center overflow-hidden rounded-xl px-3 text-[14px] font-semibold",
+                "ac-press flex h-11 shrink-0 items-center overflow-hidden rounded-xl px-3 text-[14px] font-semibold",
                 active
                   ? "text-white shadow-[var(--shadow-hero)]"
                   : "text-ink-2 hover:bg-surface-2 hover:text-ink",
