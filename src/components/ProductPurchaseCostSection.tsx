@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Hash, Landmark, Plus, Trash2 } from "lucide-react";
+import { Hash, Landmark, Plus, StickyNote, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
 import { Button, Card, CardHeader, EmptyState } from "./ui";
@@ -9,6 +9,7 @@ import { ProductPurchaseDialog } from "./ProductPurchaseDialog";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
+import { gradientFor, initialOf } from "../lib/avatar";
 import { useRangeFilter } from "../lib/dateRange";
 import { useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
@@ -145,12 +146,24 @@ export function ProductPurchaseCostSection() {
           <ul className="flex flex-col divide-y divide-line">
             {rows.map((r) => (
               <li key={r._id} className="flex items-start gap-3 px-4 py-4 sm:px-6">
+                <span
+                  className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[13px] font-bold text-white"
+                  style={{ background: gradientFor(r.productName) }}
+                  aria-hidden
+                >
+                  {initialOf(r.productName)}
+                </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[14px] font-semibold text-ink">{r.productName}</p>
+                  <p className="truncate text-[14px] font-semibold text-ink">{r.productName}</p>
                   <p className="mt-0.5 text-[12px] text-ink-3">
                     {fmtDateTime(r.purchasedAt)} · {fmtNum(r.quantity)} × {fmt(r.unitCost)}
                   </p>
-                  {r.note && <p className="mt-1 text-[12.5px] text-ink-3">{r.note}</p>}
+                  {r.note && (
+                    <p className="mt-1 flex items-center gap-1 truncate text-[12px] text-ink-3 italic">
+                      <StickyNote size={11} className="shrink-0 not-italic" aria-hidden />
+                      {r.note}
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="text-[14px] font-bold tabular-nums text-ink">
