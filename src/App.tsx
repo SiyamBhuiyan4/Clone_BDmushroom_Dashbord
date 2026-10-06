@@ -188,8 +188,8 @@ function Sidebar({
       )}
     >
       <div className="flex h-20 shrink-0 items-center px-3.5">
-        <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-[var(--shadow-hero)]">
-          <img src="/brand/bdmushroom-seal.png" alt="" className="size-full object-cover" />
+        <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-1 shadow-[var(--shadow-hero)]">
+          <img src="/brand/bdmushroom-seal.png" alt="" className="size-full object-contain" />
         </span>
         <div
           className={cx(
