@@ -312,6 +312,8 @@ const EN = {
   "orders.selling": "selling at",
   "products.sellPrice": "Selling price",
   "products.sellPriceHint": "Prefilled when this product is added to an order.",
+  "products.unit": "Unit",
+  "products.unitHint": "How you count this product — পিস, কেজি, গ্রাম, লিটার. Shown on lots, sales and receipts.",
   "products.costHint": "What one unit costs you.",
 
   "customers.title": "Customers",
@@ -896,6 +898,8 @@ const BN: Partial<Record<MessageKey, string>> = {
   "orders.selling": "বিক্রয়",
   "products.sellPrice": "বিক্রয়মূল্য",
   "products.sellPriceHint": "অর্ডারে এই পণ্য যোগ করলে এই দাম বসবে।",
+  "products.unit": "একক",
+  "products.unitHint": "যেভাবে এই পণ্য গোনেন — পিস, কেজি, গ্রাম, লিটার। লট, বিক্রয় ও রসিদে দেখাবে।",
   "products.costHint": "প্রতি এককে আপনার খরচ।",
 
   "customers.title": "ক্রেতা",

@@ -249,7 +249,7 @@ export function BatchDialog({
             </Field>
           </div>
 
-          <Field label="Quantity" hint={selected ? `Unit: whatever you count ${selected.name} in.` : undefined}>
+          <Field label={selected ? `Quantity (${selected.unit || "পিস"})` : "Quantity"}>
             {(id) => (
               <Input
                 id={id}
