@@ -154,7 +154,10 @@ export function ProductPurchaseCostSection() {
                   {initialOf(r.productName)}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[14px] font-semibold text-ink">{r.productName}</p>
+                  <p className="truncate text-[14px] font-semibold text-ink">
+                    {r.productName}
+                    {r.variantLabel && <span className="font-normal text-ink-3"> · {r.variantLabel}</span>}
+                  </p>
                   <p className="mt-0.5 text-[12px] text-ink-3">
                     {fmtNum(r.quantity)} × {fmt(r.unitCost)}
                   </p>

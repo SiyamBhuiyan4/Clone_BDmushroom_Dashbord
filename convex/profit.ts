@@ -3,6 +3,8 @@ import { v, ConvexError } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { requireSession, verifyPasscode } from "./auth";
 import { adjustInvestment } from "./investment";
+import { adjustStock } from "./products";
+import { variantAvailable } from "./shared";
 
 /*
   Profit allocation.
@@ -112,6 +114,8 @@ const batchArgs = {
   unitPrice: v.optional(v.number()),
   note: v.optional(v.string()),
   vendorId: v.optional(v.id("vendors")),
+  /** Which size this lot restocks, for a product that sells in sizes. */
+  variantId: v.optional(v.string()),
 };
 
 async function insertBatch(
@@ -125,6 +129,7 @@ async function insertBatch(
     unitPrice?: number;
     note?: string;
     vendorId?: Id<"vendors">;
+    variantId?: string;
   },
   investment: boolean,
 ) {
@@ -134,11 +139,15 @@ async function insertBatch(
   if (args.vendorId && !(await ctx.db.get(args.vendorId))) {
     throw new ConvexError("That vendor no longer exists.");
   }
+  const variant = args.variantId ? product.variants?.find((v) => v.id === args.variantId) : undefined;
+  if (args.variantId && !variant) throw new ConvexError("That size no longer exists on this product.");
 
   // A lot is stock arriving, so it moves the product's stock with it.
   // Without this the app holds two independent answers to "how many do I
   // have": one the sales decrement, one that only feeds projected profit.
-  await ctx.db.patch(args.productId, { quantity: product.quantity + args.quantity });
+  // Variant-aware so a lot bought for one size restocks that size, not the
+  // product's flat total — the same rule a sale already follows.
+  await adjustStock(ctx, args.productId, args.variantId, args.quantity);
 
   const note = (args.note ?? "").trim();
   const id = await ctx.db.insert("stockBatches", {
@@ -153,6 +162,8 @@ async function insertBatch(
     unitPrice: args.unitPrice,
     note: note ? note : undefined,
     vendorId: args.vendorId,
+    variantId: args.variantId,
+    variantLabel: variant?.label,
     investment: investment || undefined,
   });
   if (investment) await adjustInvestment(ctx, args.quantity * args.unitCost);
@@ -216,17 +227,22 @@ export const updateBatch = mutation({
     }
 
     // Move stock by the difference only. A deleted product has no stock left
-    // to adjust; the lot still edits so history stays intact.
+    // to adjust; the lot still edits so history stays intact. Which size (if
+    // any) this lot restocks was fixed when it was created, not re-chosen
+    // here — same reason the product itself can't be changed on an edit.
     const delta = args.quantity - batch.quantity;
     if (delta !== 0) {
       const product = await ctx.db.get(batch.productId);
       if (product) {
-        if (product.quantity + delta < 0) {
+        const available = batch.variantId
+          ? variantAvailable(product, batch.variantId)
+          : product.quantity;
+        if (available + delta < 0) {
           throw new ConvexError(
-            `Reducing this lot would take stock below zero — ${product.quantity} unit(s) remain, and some have already been sold.`,
+            `Reducing this lot would take stock below zero — ${available} unit(s) remain, and some have already been sold.`,
           );
         }
-        await ctx.db.patch(batch.productId, { quantity: product.quantity + delta });
+        await adjustStock(ctx, batch.productId, batch.variantId, delta);
       }
     }
 
@@ -275,9 +291,8 @@ export const removeBatch = mutation({
         far less than a delete the shopkeeper cannot perform at all.
       */
       const left = batch.remaining ?? batch.quantity;
-      await ctx.db.patch(batch.productId, {
-        quantity: Math.max(0, product.quantity - left),
-      });
+      const available = batch.variantId ? variantAvailable(product, batch.variantId) : product.quantity;
+      await adjustStock(ctx, batch.productId, batch.variantId, -Math.min(left, available));
     }
     // The full amount it added, not just what is left — the rest already
     // came back out of Investment when it sold (see sales.ts / orders.ts).

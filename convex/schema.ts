@@ -212,6 +212,13 @@ export default defineSchema({
     */
     unitPrice: v.optional(v.number()),
     note: v.optional(v.string()),
+    /*
+      Which size this lot restocks, for a product that sells in sizes — set
+      once at creation and never changed, the same way the product itself is
+      locked once a lot exists. Absent for a plain product with no variants.
+    */
+    variantId: v.optional(v.string()),
+    variantLabel: v.optional(v.string()),
     /** Who this lot was bought from. */
     vendorId: v.optional(v.id("vendors")),
     /*

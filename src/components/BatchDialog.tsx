@@ -76,6 +76,7 @@ export function BatchDialog({
   const update = useAuthedMutation(api.profit.updateBatch);
 
   const [productId, setProductId] = useState("");
+  const [variantId, setVariantId] = useState("");
   const [label, setLabel] = useState("");
   const [purchasedAt, setPurchasedAt] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -98,6 +99,7 @@ export function BatchDialog({
       setVendorId(batch.vendorId ?? "");
     } else {
       setProductId(presetProductId ?? "");
+      setVariantId("");
       setLabel("");
       setPurchasedAt(toLocalInputValue(Date.now()));
       setQuantity("");
@@ -112,6 +114,10 @@ export function BatchDialog({
     () => products?.find((p) => p._id === productId),
     [products, productId],
   );
+  // Which size this lot restocks is only asked when creating one — an
+  // existing lot's size was fixed the moment it moved real stock, the same
+  // reason its product can't be changed here either.
+  const needsVariant = !batch && Boolean(selected?.variants?.length);
 
   const qty = Number(quantity);
   const cost = Number(unitCost);
@@ -121,7 +127,13 @@ export function BatchDialog({
   // Blank is allowed: a lot can be bought before anyone decides what it sells
   // for, and forcing a number here would invent one.
   const priceOk = unitPrice.trim() === "" || (Number.isFinite(price) && price >= 0);
-  const valid = Boolean(productId) && qtyOk && costOk && priceOk && !saving;
+  const valid =
+    Boolean(productId) &&
+    (!needsVariant || Boolean(variantId)) &&
+    qtyOk &&
+    costOk &&
+    priceOk &&
+    !saving;
 
   /*
     With no sell price there is no margin to preview — the figures read zero
@@ -156,6 +168,7 @@ export function BatchDialog({
       } else {
         await add({
           productId: productId as Id<"products">,
+          variantId: needsVariant ? variantId : undefined,
           ...payload,
           vendorId: vendorArg ?? undefined,
         });
@@ -190,7 +203,10 @@ export function BatchDialog({
             ) : (
               <Select
                 value={productId}
-                onChange={(e) => setProductId(e.target.value)}
+                onChange={(e) => {
+                  setProductId(e.target.value);
+                  setVariantId("");
+                }}
                 aria-label="Product"
                 required
               >
@@ -205,6 +221,30 @@ export function BatchDialog({
               </Select>
             )}
           </div>
+
+          {needsVariant && (
+            <div className="flex flex-col gap-2.5">
+              <SectionLabel>Size</SectionLabel>
+              <Select
+                value={variantId}
+                onChange={(e) => setVariantId(e.target.value)}
+                aria-label="Size"
+                required
+              >
+                <option value="" disabled>
+                  Choose a size…
+                </option>
+                {selected!.variants!.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-[12px] leading-4.5 text-ink-3">
+                This lot restocks this size only, not the product's other sizes.
+              </p>
+            </div>
+          )}
 
           <div className="flex flex-col gap-2.5">
             <div className="flex items-baseline justify-between gap-3">
