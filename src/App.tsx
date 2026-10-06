@@ -7,6 +7,7 @@ import {
   Coins,
   Users,
   Truck,
+  GraduationCap,
   Menu,
   X,
   Monitor,
@@ -29,8 +30,17 @@ import { ProfitPage } from "./pages/Profit";
 import { CostsPage } from "./pages/Costs";
 import { CustomersPage } from "./pages/Customers";
 import { VendorsPage } from "./pages/Vendors";
+import { TraineesPage } from "./pages/Trainees";
 
-type Route = "dashboard" | "products" | "sales" | "customers" | "vendors" | "costs" | "profit";
+type Route =
+  | "dashboard"
+  | "products"
+  | "sales"
+  | "customers"
+  | "vendors"
+  | "trainees"
+  | "costs"
+  | "profit";
 
 const NAV: { route: Route; key: MessageKey; icon: typeof LayoutDashboard }[] = [
   { route: "dashboard", key: "nav.dashboard", icon: LayoutDashboard },
@@ -38,6 +48,7 @@ const NAV: { route: Route; key: MessageKey; icon: typeof LayoutDashboard }[] = [
   { route: "sales", key: "nav.sales", icon: ShoppingCart },
   { route: "customers", key: "nav.customers", icon: Users },
   { route: "vendors", key: "nav.vendors", icon: Truck },
+  { route: "trainees", key: "nav.trainees", icon: GraduationCap },
   { route: "costs", key: "nav.costs", icon: Coins },
   { route: "profit", key: "nav.profit", icon: PieChart },
 ];
@@ -135,6 +146,7 @@ export default function App() {
             {route === "sales" && <SalesPage />}
             {route === "customers" && <CustomersPage />}
             {route === "vendors" && <VendorsPage />}
+            {route === "trainees" && <TraineesPage />}
             {route === "costs" && <CostsPage />}
             {route === "profit" && <ProfitPage />}
           </div>
