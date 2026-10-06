@@ -156,7 +156,7 @@ export function ProductPurchaseCostSection() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[14px] font-semibold text-ink">{r.productName}</p>
                   <p className="mt-0.5 text-[12px] text-ink-3">
-                    {fmtDateTime(r.purchasedAt)} · {fmtNum(r.quantity)} × {fmt(r.unitCost)}
+                    {fmtNum(r.quantity)} × {fmt(r.unitCost)}
                   </p>
                   {r.note && (
                     <p className="mt-1 flex items-center gap-1 truncate text-[12px] text-ink-3 italic">
@@ -165,17 +165,20 @@ export function ProductPurchaseCostSection() {
                     </p>
                   )}
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="text-[14px] font-bold tabular-nums text-ink">
-                    {fmt(r.quantity * r.unitCost)}
-                  </span>
-                  <button
-                    onClick={() => setDeleting(r)}
-                    aria-label={`${t("common.delete")} ${r.productName}`}
-                    className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical"
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                <div className="flex shrink-0 flex-col items-end gap-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[14px] font-bold tabular-nums text-ink">
+                      {fmt(r.quantity * r.unitCost)}
+                    </span>
+                    <button
+                      onClick={() => setDeleting(r)}
+                      aria-label={`${t("common.delete")} ${r.productName}`}
+                      className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                  <span className="text-[11.5px] text-ink-3">{fmtDateTime(r.purchasedAt)}</span>
                 </div>
               </li>
             ))}
