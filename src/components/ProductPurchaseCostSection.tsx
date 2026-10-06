@@ -2,12 +2,14 @@ import { useMemo, useState } from "react";
 import { Hash, Landmark, Plus, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
-import { Button, Card, EmptyState } from "./ui";
+import { Button, Card, CardHeader, EmptyState } from "./ui";
 import { StatTile } from "./StatTile";
+import { RangePills } from "./RangePills";
 import { ProductPurchaseDialog } from "./ProductPurchaseDialog";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
+import { useRangeFilter } from "../lib/dateRange";
 import { useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 
@@ -21,17 +23,40 @@ export function ProductPurchaseCostSection() {
   const { fmt, fmtNum, fmtDateTime } = useSettings();
   const t = useT();
   const toast = useToast();
-  const rows = useAuthedQuery(api.profit.purchaseCostBatches, {});
+  const all = useAuthedQuery(api.profit.purchaseCostBatches, {});
   const remove = useAuthedMutation(api.profit.removeBatch);
+  const range = useRangeFilter("ac.range.investment");
 
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<Doc<"stockBatches"> | null>(null);
 
-  const total = useMemo(() => (rows ?? []).reduce((sum, r) => sum + r.quantity * r.unitCost, 0), [rows]);
+  const rows = useMemo(
+    () => (all ?? []).filter((r) => r.purchasedAt >= range.since && r.purchasedAt < range.untilExclusive),
+    [all, range.since, range.untilExclusive],
+  );
+
+  const total = useMemo(() => rows.reduce((sum, r) => sum + r.quantity * r.unitCost, 0), [rows]);
+
+  /*
+    Which product the money went into, the same question "Where it went"
+    answers for regular expenses — a flat list of entries doesn't say it, and
+    a single total answers only half of it.
+  */
+  const byProduct = useMemo(() => {
+    const groups = new Map<string, { name: string; amount: number; count: number }>();
+    for (const r of rows) {
+      const entry = groups.get(r.productName) ?? { name: r.productName, amount: 0, count: 0 };
+      entry.amount += r.quantity * r.unitCost;
+      entry.count += 1;
+      groups.set(r.productName, entry);
+    }
+    return [...groups.values()].sort((a, b) => b.amount - a.amount);
+  }, [rows]);
 
   return (
     <>
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <RangePills range={range} />
         <Button variant="primary" onClick={() => setAddOpen(true)}>
           <Plus size={17} />
           {t("investment.add")}
@@ -45,28 +70,67 @@ export function ProductPurchaseCostSection() {
           label={t("investment.totalLogged")}
           value={fmt(total)}
           icon={<Landmark size={17} />}
+          sub={range.activeLabel.full}
         />
         <StatTile
           accent="violet"
           label={t("costs.entries")}
-          value={fmtNum((rows ?? []).length)}
+          value={fmtNum(rows.length)}
           icon={<Hash size={17} />}
         />
       </div>
 
+      {byProduct.length > 0 && (
+        <Card>
+          <CardHeader title={t("investment.whereItWent")} subtitle={t("costs.whereItWentSub")} />
+          <ul className="flex flex-col gap-3 px-5 pb-5 sm:px-6 sm:pb-6">
+            {byProduct.slice(0, 6).map((g) => {
+              const share = total > 0 ? g.amount / total : 0;
+              return (
+                <li key={g.name} className="flex flex-col gap-1.5">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="min-w-0 truncate text-[13.5px] font-semibold text-ink">
+                      {g.name}
+                    </span>
+                    <span className="shrink-0 text-[13.5px] font-bold tabular-nums text-ink">
+                      {fmt(g.amount)}
+                      <span className="ml-2 text-[11.5px] font-semibold text-ink-3">
+                        {fmtNum(g.count)}×
+                      </span>
+                    </span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+                    <div
+                      className="h-full rounded-full transition-[width] duration-500 ease-[var(--ease-out)]"
+                      style={{ width: `${Math.max(share * 100, 1.5)}%`, background: "var(--grad-amber)" }}
+                    />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      )}
+
       <Card>
-        {rows === undefined ? (
+        {all === undefined ? (
           <div className="ac-skeleton h-72 rounded-card bg-surface" aria-hidden />
         ) : rows.length === 0 ? (
           <EmptyState
             icon={<Landmark size={24} />}
-            title={t("investment.none")}
-            body={t("investment.noneBody")}
+            title={(all?.length ?? 0) > 0 ? t("costs.noMatches") : t("investment.none")}
+            body={
+              (all?.length ?? 0) > 0
+                ? "Try a wider date range."
+                : t("investment.noneBody")
+            }
             action={
-              <Button variant="primary" onClick={() => setAddOpen(true)}>
-                <Plus size={17} />
-                {t("investment.add")}
-              </Button>
+              (all?.length ?? 0) === 0 ? (
+                <Button variant="primary" onClick={() => setAddOpen(true)}>
+                  <Plus size={17} />
+                  {t("investment.add")}
+                </Button>
+              ) : undefined
             }
           />
         ) : (
