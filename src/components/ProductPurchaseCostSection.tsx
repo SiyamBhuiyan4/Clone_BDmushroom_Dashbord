@@ -55,12 +55,20 @@ export function ProductPurchaseCostSection() {
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <RangePills range={range} />
+      <div className="flex justify-end">
         <Button variant="primary" onClick={() => setAddOpen(true)}>
           <Plus size={17} />
           {t("investment.add")}
         </Button>
+      </div>
+
+      {/* Same row as every other page's date filter: a label on the left, RangePills on the right. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[13.5px] text-ink-3">
+          {t("investment.totalLogged")}{" "}
+          <span className="font-semibold text-ink-2">{range.activeLabel.full}</span>
+        </p>
+        <RangePills range={range} />
       </div>
 
       <div className="ac-stagger grid gap-4 sm:grid-cols-2">
