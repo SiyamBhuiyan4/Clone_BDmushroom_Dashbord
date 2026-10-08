@@ -166,7 +166,13 @@ async function insertBatch(
     variantLabel: variant?.label,
     investment: investment || undefined,
   });
-  if (investment) await adjustInvestment(ctx, args.quantity * args.unitCost);
+  // Every lot ties up money in stock, whether it was logged from Products
+  // or from Investment's own "Add product purchase" — `investment` only
+  // decides which ledger lists it (see `purchaseCostBatches`), not whether
+  // it counts here. A sale already comes off Investment no matter which lot
+  // it drew from (orders.ts / sales.ts), so a purchase that never added to
+  // it in the first place only ever pushed the balance negative.
+  await adjustInvestment(ctx, args.quantity * args.unitCost);
   return id;
 }
 
@@ -246,6 +252,15 @@ export const updateBatch = mutation({
       }
     }
 
+    // Keep Investment in step with whatever this edit changes — a lot
+    // resized or re-priced moves the same money Investment was already
+    // counting it as.
+    const investedBefore = batch.quantity * batch.unitCost;
+    const investedAfter = args.quantity * args.unitCost;
+    if (investedAfter !== investedBefore) {
+      await adjustInvestment(ctx, investedAfter - investedBefore);
+    }
+
     /*
       Resizing a lot moves what is left by the same amount, so the units
       already sold out of it are not forgotten — buying ten more of a lot that
@@ -296,7 +311,7 @@ export const removeBatch = mutation({
     }
     // The full amount it added, not just what is left — the rest already
     // came back out of Investment when it sold (see sales.ts / orders.ts).
-    if (batch.investment) await adjustInvestment(ctx, -(batch.quantity * batch.unitCost));
+    await adjustInvestment(ctx, -(batch.quantity * batch.unitCost));
     await ctx.db.delete(args.id);
   },
 });
