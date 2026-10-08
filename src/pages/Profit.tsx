@@ -398,9 +398,7 @@ function BatchCard({
             {fmtNum(batch.quantity)} {tr("common.units")} · {tr("profit.buyCost")}{" "}
             <span className="font-semibold tabular-nums text-ink">{fmt(batch.unitCost)}</span> ·{" "}
             {tr("sales.unitPrice")}{" "}
-            <span className="font-semibold tabular-nums text-ink">
-              {batch.unitPrice !== undefined ? fmt(batch.unitPrice) : tr("detail.priceOpen")}
-            </span>{" "}
+            <span className="font-semibold tabular-nums text-ink">{fmt(batch.projectedPrice)}</span>{" "}
             ·{" "}
             <span
               className={cx(

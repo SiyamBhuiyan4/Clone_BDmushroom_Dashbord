@@ -32,7 +32,6 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
   const [purchasedAt, setPurchasedAt] = useState("");
   const [quantity, setQuantity] = useState("");
   const [unitCost, setUnitCost] = useState("");
-  const [sellPrice, setSellPrice] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   /*
@@ -51,7 +50,6 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
     setPurchasedAt(toLocalInputValue(Date.now()));
     setQuantity("");
     setUnitCost("");
-    setSellPrice("");
     setNote("");
     setSavedLotId(null);
   }, [open]);
@@ -61,13 +59,9 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
 
   const qty = Number(quantity);
   const cost = Number(unitCost);
-  const price = Number(sellPrice);
   const qtyOk = quantity.trim() !== "" && Number.isFinite(qty) && qty > 0;
   const costOk = unitCost.trim() !== "" && Number.isFinite(cost) && cost >= 0;
-  // Blank is allowed: a lot can be bought before anyone decides what it sells for.
-  const priceOk = sellPrice.trim() === "" || (Number.isFinite(price) && price >= 0);
-  const valid =
-    Boolean(productId) && (!needsVariant || Boolean(variantId)) && qtyOk && costOk && priceOk && !saving;
+  const valid = Boolean(productId) && (!needsVariant || Boolean(variantId)) && qtyOk && costOk && !saving;
   const total = qtyOk && costOk ? qty * cost : 0;
 
   async function submit(e: React.FormEvent) {
@@ -83,7 +77,6 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
         purchasedAt: when,
         quantity: qty,
         unitCost: cost,
-        unitPrice: sellPrice.trim() === "" ? undefined : price,
         note,
         vendorId: vendorId ? (vendorId as Id<"vendors">) : undefined,
       });
@@ -220,29 +213,15 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
             </Field>
           </div>
 
-          <div className="grid gap-5 sm:grid-cols-2">
-            <div className="flex flex-col gap-2.5">
-              <SectionLabel>Buy price (per unit)</SectionLabel>
-              <AmountInput
-                symbol={CURRENCY_SYMBOL}
-                value={unitCost}
-                onChange={(e) => setUnitCost(e.target.value)}
-                placeholder="0"
-                required
-              />
-            </div>
-            <div className="flex flex-col gap-2.5">
-              <div className="flex items-baseline justify-between gap-3">
-                <SectionLabel>Sell price (per unit)</SectionLabel>
-                <span className="text-[11.5px] text-ink-3">{t("common.optional")}</span>
-              </div>
-              <AmountInput
-                symbol={CURRENCY_SYMBOL}
-                value={sellPrice}
-                onChange={(e) => setSellPrice(e.target.value)}
-                placeholder="—"
-              />
-            </div>
+          <div className="flex flex-col gap-2.5">
+            <SectionLabel>Buy price (per unit)</SectionLabel>
+            <AmountInput
+              symbol={CURRENCY_SYMBOL}
+              value={unitCost}
+              onChange={(e) => setUnitCost(e.target.value)}
+              placeholder="0"
+              required
+            />
           </div>
 
           <div className="flex items-center justify-between gap-4 rounded-2xl border border-line bg-page p-5">
