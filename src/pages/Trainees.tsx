@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Award, GraduationCap, Pencil, Phone, Plus, Search, Trash2 } from "lucide-react";
+import { Award, GraduationCap, Globe, Pencil, Phone, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Card, EmptyState, Input } from "../components/ui";
@@ -130,6 +130,15 @@ export function TraineesPage() {
                     </div>
                   </button>
                   <div className="flex shrink-0 items-center gap-0.5">
+                    {/* Placeholder: a trainee's own public web page — nothing wired up yet. */}
+                    <button
+                      onClick={() => {}}
+                      aria-label={`${t("trainees.webPage")} — ${tr.name}`}
+                      title={t("trainees.webPage")}
+                      className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+                    >
+                      <Globe size={15} />
+                    </button>
                     <button
                       onClick={() => setEditing(tr)}
                       aria-label={`${t("common.edit")} ${tr.name}`}

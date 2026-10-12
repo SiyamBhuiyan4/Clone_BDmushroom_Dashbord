@@ -43,7 +43,6 @@ type OpenLot = {
   productId: Id<"products">;
   label: string;
   unitCost: number;
-  unitPrice: number;
   remaining: number;
 };
 
@@ -176,16 +175,12 @@ export function SaleDialog({
       stock: p.quantity,
       quantity: "1",
       /*
-        Only a real selling price is prefilled. Falling back to cost was
-        silently guaranteeing zero profit on every line; an empty box that
-        asks for a number is far better than a wrong one that looks filled.
+        Only a real selling price is prefilled, and always the product's own
+        — never a lot's. Falling back to cost was silently guaranteeing zero
+        profit on every line; an empty box that asks for a number is far
+        better than a wrong one that looks filled.
       */
-      unitPrice:
-        lot?.unitPrice !== undefined
-          ? String(lot.unitPrice)
-          : p.sellPrice !== undefined
-            ? String(p.sellPrice)
-            : "",
+      unitPrice: p.sellPrice !== undefined ? String(p.sellPrice) : "",
       unitCost: lot ? lot.unitCost : p.costPrice,
       batchId: lot ? (lot.id as string) : "",
       variantId: "",
@@ -459,6 +454,7 @@ export function SaleDialog({
                             value={line.batchId}
                             onChange={(e) => {
                               const picked = openLots.find((l) => l.id === e.target.value);
+                              const product = productOf(line.productId);
                               setLines((p) =>
                                 p.map((l) =>
                                   l.key === line.key
@@ -466,12 +462,13 @@ export function SaleDialog({
                                         ...l,
                                         batchId: e.target.value,
                                         // The cost always follows the lot; the
-                                        // asking price only fills a blank, so a
-                                        // price already typed is never overwritten.
+                                        // asking price only fills a blank, and
+                                        // always from the product's own price,
+                                        // so a price already typed stands.
                                         unitCost: picked ? picked.unitCost : l.unitCost,
                                         unitPrice:
-                                          l.unitPrice === "" && picked
-                                            ? String(picked.unitPrice)
+                                          l.unitPrice === "" && product?.sellPrice !== undefined
+                                            ? String(product.sellPrice)
                                             : l.unitPrice,
                                       }
                                     : l,

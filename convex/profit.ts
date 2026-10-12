@@ -1,8 +1,10 @@
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { mutation, query, internalMutation, type MutationCtx } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { requireSession, verifyPasscode } from "./auth";
 import { adjustInvestment } from "./investment";
+import { adjustStock } from "./products";
+import { variantAvailable } from "./shared";
 
 /*
   Profit allocation.
@@ -92,15 +94,11 @@ export const setBuckets = mutation({
 
 /* ---------------------------------------------------------------- batches */
 
-function validateBatch(quantity: number, unitCost: number, unitPrice?: number) {
+function validateBatch(quantity: number, unitCost: number) {
   if (!Number.isFinite(quantity) || quantity <= 0) {
     throw new ConvexError("Quantity must be more than zero.");
   }
   if (!Number.isFinite(unitCost) || unitCost < 0) throw new ConvexError("Buy price cannot be negative.");
-  // Only checked when one was given; leaving it out is allowed.
-  if (unitPrice !== undefined && (!Number.isFinite(unitPrice) || unitPrice < 0)) {
-    throw new ConvexError("Sell price cannot be negative.");
-  }
 }
 
 const batchArgs = {
@@ -109,9 +107,10 @@ const batchArgs = {
   purchasedAt: v.number(),
   quantity: v.number(),
   unitCost: v.number(),
-  unitPrice: v.optional(v.number()),
   note: v.optional(v.string()),
   vendorId: v.optional(v.id("vendors")),
+  /** Which size this lot restocks, for a product that sells in sizes. */
+  variantId: v.optional(v.string()),
 };
 
 async function insertBatch(
@@ -122,23 +121,27 @@ async function insertBatch(
     purchasedAt: number;
     quantity: number;
     unitCost: number;
-    unitPrice?: number;
     note?: string;
     vendorId?: Id<"vendors">;
+    variantId?: string;
   },
   investment: boolean,
 ) {
   const product = await ctx.db.get(args.productId);
   if (!product) throw new ConvexError("That product no longer exists.");
-  validateBatch(args.quantity, args.unitCost, args.unitPrice);
+  validateBatch(args.quantity, args.unitCost);
   if (args.vendorId && !(await ctx.db.get(args.vendorId))) {
     throw new ConvexError("That vendor no longer exists.");
   }
+  const variant = args.variantId ? product.variants?.find((v) => v.id === args.variantId) : undefined;
+  if (args.variantId && !variant) throw new ConvexError("That size no longer exists on this product.");
 
   // A lot is stock arriving, so it moves the product's stock with it.
   // Without this the app holds two independent answers to "how many do I
   // have": one the sales decrement, one that only feeds projected profit.
-  await ctx.db.patch(args.productId, { quantity: product.quantity + args.quantity });
+  // Variant-aware so a lot bought for one size restocks that size, not the
+  // product's flat total — the same rule a sale already follows.
+  await adjustStock(ctx, args.productId, args.variantId, args.quantity);
 
   const note = (args.note ?? "").trim();
   const id = await ctx.db.insert("stockBatches", {
@@ -150,12 +153,19 @@ async function insertBatch(
     // A lot starts with everything it was bought with still in it.
     remaining: args.quantity,
     unitCost: args.unitCost,
-    unitPrice: args.unitPrice,
     note: note ? note : undefined,
     vendorId: args.vendorId,
+    variantId: args.variantId,
+    variantLabel: variant?.label,
     investment: investment || undefined,
   });
-  if (investment) await adjustInvestment(ctx, args.quantity * args.unitCost);
+  // Every lot ties up money in stock, whether it was logged from Products
+  // or from Investment's own "Add product purchase" — `investment` only
+  // decides which ledger lists it (see `purchaseCostBatches`), not whether
+  // it counts here. A sale already comes off Investment no matter which lot
+  // it drew from (orders.ts / sales.ts), so a purchase that never added to
+  // it in the first place only ever pushed the balance negative.
+  await adjustInvestment(ctx, args.quantity * args.unitCost);
   return id;
 }
 
@@ -201,7 +211,6 @@ export const updateBatch = mutation({
     purchasedAt: v.number(),
     quantity: v.number(),
     unitCost: v.number(),
-    unitPrice: v.optional(v.number()),
     note: v.optional(v.string()),
     /** Omit the field to leave the vendor as-is; pass null to clear it. */
     vendorId: v.optional(v.union(v.id("vendors"), v.null())),
@@ -210,24 +219,38 @@ export const updateBatch = mutation({
     await requireSession(ctx, args.token);
     const batch = await ctx.db.get(args.id);
     if (!batch) throw new ConvexError("That stock lot no longer exists.");
-    validateBatch(args.quantity, args.unitCost, args.unitPrice);
+    validateBatch(args.quantity, args.unitCost);
     if (args.vendorId && !(await ctx.db.get(args.vendorId))) {
       throw new ConvexError("That vendor no longer exists.");
     }
 
     // Move stock by the difference only. A deleted product has no stock left
-    // to adjust; the lot still edits so history stays intact.
+    // to adjust; the lot still edits so history stays intact. Which size (if
+    // any) this lot restocks was fixed when it was created, not re-chosen
+    // here — same reason the product itself can't be changed on an edit.
     const delta = args.quantity - batch.quantity;
     if (delta !== 0) {
       const product = await ctx.db.get(batch.productId);
       if (product) {
-        if (product.quantity + delta < 0) {
+        const available = batch.variantId
+          ? variantAvailable(product, batch.variantId)
+          : product.quantity;
+        if (available + delta < 0) {
           throw new ConvexError(
-            `Reducing this lot would take stock below zero — ${product.quantity} unit(s) remain, and some have already been sold.`,
+            `Reducing this lot would take stock below zero — ${available} unit(s) remain, and some have already been sold.`,
           );
         }
-        await ctx.db.patch(batch.productId, { quantity: product.quantity + delta });
+        await adjustStock(ctx, batch.productId, batch.variantId, delta);
       }
+    }
+
+    // Keep Investment in step with whatever this edit changes — a lot
+    // resized or re-priced moves the same money Investment was already
+    // counting it as.
+    const investedBefore = batch.quantity * batch.unitCost;
+    const investedAfter = args.quantity * args.unitCost;
+    if (investedAfter !== investedBefore) {
+      await adjustInvestment(ctx, investedAfter - investedBefore);
     }
 
     /*
@@ -243,11 +266,35 @@ export const updateBatch = mutation({
       quantity: args.quantity,
       remaining: Math.max(0, args.quantity - soldFrom),
       unitCost: args.unitCost,
-      unitPrice: args.unitPrice,
       note: note ? note : undefined,
       // undefined (field omitted) leaves it alone; null clears it.
       ...(args.vendorId !== undefined ? { vendorId: args.vendorId ?? undefined } : {}),
     });
+  },
+});
+
+/*
+  One-time correction, run by hand from the CLI
+  (`npx convex run profit:clearLotSellPrices`), never from the app itself.
+
+  A lot used to carry its own optional sell price, which quietly overrode the
+  product's own price when prefilling a sale — a one-off figure typed for a
+  single purchase would then keep pricing every sale of that product forever,
+  until someone noticed. Lots no longer collect one; this clears whatever is
+  still sitting on old records so none of them can do that again.
+*/
+export const clearLotSellPrices = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const rows = await ctx.db.query("stockBatches").collect();
+    let cleared = 0;
+    for (const r of rows) {
+      if (r.unitPrice !== undefined) {
+        await ctx.db.patch(r._id, { unitPrice: undefined });
+        cleared++;
+      }
+    }
+    return cleared;
   },
 });
 
@@ -275,13 +322,12 @@ export const removeBatch = mutation({
         far less than a delete the shopkeeper cannot perform at all.
       */
       const left = batch.remaining ?? batch.quantity;
-      await ctx.db.patch(batch.productId, {
-        quantity: Math.max(0, product.quantity - left),
-      });
+      const available = batch.variantId ? variantAvailable(product, batch.variantId) : product.quantity;
+      await adjustStock(ctx, batch.productId, batch.variantId, -Math.min(left, available));
     }
     // The full amount it added, not just what is left — the rest already
     // came back out of Investment when it sold (see sales.ts / orders.ts).
-    if (batch.investment) await adjustInvestment(ctx, -(batch.quantity * batch.unitCost));
+    await adjustInvestment(ctx, -(batch.quantity * batch.unitCost));
     await ctx.db.delete(args.id);
   },
 });
@@ -372,7 +418,6 @@ export const openLots = query({
         label: b.label,
         purchasedAt: b.purchasedAt,
         unitCost: b.unitCost,
-        unitPrice: b.unitPrice,
         remaining: b.remaining ?? b.quantity,
         quantity: b.quantity,
       }))
@@ -395,17 +440,18 @@ export const summary = query({
 
     const rows = await ctx.db.query("stockBatches").withIndex("by_purchasedAt").order("desc").collect();
     /*
-      A lot with no sell price of its own is projected at the product's asking
-      price, and at cost when there is not one of those either — which shows
-      no margin rather than inventing one. Counting it as zero revenue would
-      report the whole purchase as a loss, which is worse than saying nothing.
+      A lot has no sell price of its own — only the product does — so profit
+      is always projected at the product's asking price, and at cost when
+      there is not one of those either, which shows no margin rather than
+      inventing one. Counting it as zero revenue would report the whole
+      purchase as a loss, which is worse than saying nothing.
     */
     const askingPrice = new Map<string, number>();
     for (const p of await ctx.db.query("products").collect()) {
       if (p.sellPrice !== undefined) askingPrice.set(p._id as string, p.sellPrice);
     }
     const priceOf = (b: (typeof rows)[number]) =>
-      b.unitPrice ?? askingPrice.get(b.productId as string) ?? b.unitCost;
+      askingPrice.get(b.productId as string) ?? b.unitCost;
     const bucketRows = await ctx.db.query("allocationBuckets").withIndex("by_order").collect();
     const buckets =
       bucketRows.length > 0

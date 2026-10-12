@@ -34,10 +34,19 @@ type Draft = {
   costPrice: string;
   sellPrice: string;
   quantity: number;
+  unit: string;
   details: string;
 };
 
-const EMPTY: Draft = { name: "", category: "", costPrice: "", sellPrice: "", quantity: 1, details: "" };
+const EMPTY: Draft = {
+  name: "",
+  category: "",
+  costPrice: "",
+  sellPrice: "",
+  quantity: 1,
+  unit: "",
+  details: "",
+};
 
 function toDraft(product: Doc<"products">): Draft {
   return {
@@ -46,6 +55,7 @@ function toDraft(product: Doc<"products">): Draft {
     costPrice: String(product.costPrice),
     sellPrice: product.sellPrice !== undefined ? String(product.sellPrice) : "",
     quantity: product.quantity,
+    unit: product.unit ?? "",
     details: product.details,
   };
 }
@@ -211,6 +221,7 @@ export function ProductDialog({
         details: draft.details,
         category: draft.category,
         quantity: draft.quantity,
+        unit: draft.unit,
         variants: useVariants ? parsedVariants : undefined,
         stockMode: useVariants ? stockMode : undefined,
       };
@@ -323,6 +334,26 @@ export function ProductDialog({
               />
             )}
           </Field>
+
+          <Field label={t("products.unit")} hint={t("products.unitHint")}>
+            {(id) => (
+              <Input
+                id={id}
+                list="product-unit-suggestions"
+                value={draft.unit}
+                onChange={(e) => set("unit", e.target.value)}
+                placeholder="পিস"
+              />
+            )}
+          </Field>
+          <datalist id="product-unit-suggestions">
+            <option value="পিস" />
+            <option value="কেজি" />
+            <option value="গ্রাম" />
+            <option value="লিটার" />
+            <option value="বক্স" />
+            <option value="প্যাকেট" />
+          </datalist>
 
           <div className="grid grid-cols-2 gap-2">
             <button

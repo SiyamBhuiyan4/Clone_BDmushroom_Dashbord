@@ -112,7 +112,6 @@ function toBatchInput(lot: Doc<"stockBatches">): BatchInput {
     purchasedAt: lot.purchasedAt,
     quantity: lot.quantity,
     unitCost: lot.unitCost,
-    unitPrice: lot.unitPrice,
     remaining: lot.remaining,
     note: lot.note,
   };

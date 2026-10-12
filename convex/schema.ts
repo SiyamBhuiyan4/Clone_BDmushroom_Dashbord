@@ -206,12 +206,20 @@ export default defineSchema({
     remaining: v.optional(v.number()),
     unitCost: v.number(),
     /*
-      What you expect to get for one. Optional: plenty of stock is bought
-      without a price decided yet, and a lot that has to invent one in order
-      to be recorded would put a made-up figure into the profit projection.
+      Legacy only — lots no longer collect a sell price of their own (it
+      silently overrode the product's price at the point of sale). Kept
+      optional so old records still read; `profit:clearLotSellPrices` wipes
+      it from existing rows, and nothing writes it again.
     */
     unitPrice: v.optional(v.number()),
     note: v.optional(v.string()),
+    /*
+      Which size this lot restocks, for a product that sells in sizes — set
+      once at creation and never changed, the same way the product itself is
+      locked once a lot exists. Absent for a plain product with no variants.
+    */
+    variantId: v.optional(v.string()),
+    variantLabel: v.optional(v.string()),
     /** Who this lot was bought from. */
     vendorId: v.optional(v.id("vendors")),
     /*

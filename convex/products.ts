@@ -3,6 +3,7 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
 import { requireSession, verifyPasscode } from "./auth";
+import { adjustInvestment } from "./investment";
 
 /** Attaches a signed, short-lived photo URL to a product row — the stored `photoId` is never useful to the browser on its own. */
 async function withPhoto<T extends { photoId?: Id<"_storage"> }>(ctx: QueryCtx, p: T) {
@@ -235,6 +236,7 @@ export const create = mutation({
     details: v.string(),
     category: v.optional(v.string()),
     quantity: v.number(),
+    unit: v.optional(v.string()),
     variants: v.optional(v.array(variantInput)),
     stockMode: v.optional(v.union(v.literal("separate"), v.literal("shared"))),
   },
@@ -254,6 +256,7 @@ export const create = mutation({
       details: args.details.trim(),
       category: category ? category : undefined,
       quantity: effective.quantity,
+      unit: args.unit?.trim() || undefined,
       variants,
       stockMode: variants ? (args.stockMode as StockMode) : undefined,
       archived: false,
@@ -272,6 +275,7 @@ export const update = mutation({
     details: v.string(),
     category: v.optional(v.string()),
     quantity: v.number(),
+    unit: v.optional(v.string()),
     variants: v.optional(v.array(variantInput)),
     stockMode: v.optional(v.union(v.literal("separate"), v.literal("shared"))),
   },
@@ -294,6 +298,7 @@ export const update = mutation({
       details: args.details.trim(),
       category: category ? category : undefined,
       quantity: effective.quantity,
+      unit: args.unit?.trim() || undefined,
       variants,
       stockMode: variants ? (args.stockMode as StockMode) : undefined,
     });
@@ -327,7 +332,13 @@ export const setStock = mutation({
     if (product.variants?.length) {
       throw new ConvexError("This product sells in sizes — edit the size's own stock instead.");
     }
+    const delta = args.quantity - product.quantity;
     await ctx.db.patch(args.id, { quantity: args.quantity });
+    // A correction moves stock exactly like a lot does, so it moves
+    // Investment the same way — more on the shelf than the count said is
+    // money that was already spent and never logged, fewer is stock that
+    // was never really there to begin with.
+    if (delta !== 0) await adjustInvestment(ctx, delta * product.costPrice);
   },
 });
 

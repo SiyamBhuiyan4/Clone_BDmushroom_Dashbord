@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Landmark } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -27,6 +27,7 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
   const add = useAuthedMutation(api.profit.addPurchaseCostBatch);
 
   const [productId, setProductId] = useState("");
+  const [variantId, setVariantId] = useState("");
   const [vendorId, setVendorId] = useState("");
   const [purchasedAt, setPurchasedAt] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -44,6 +45,7 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
   useEffect(() => {
     if (!open) return;
     setProductId("");
+    setVariantId("");
     setVendorId("");
     setPurchasedAt(toLocalInputValue(Date.now()));
     setQuantity("");
@@ -52,11 +54,14 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
     setSavedLotId(null);
   }, [open]);
 
+  const selected = useMemo(() => products?.find((p) => p._id === productId), [products, productId]);
+  const needsVariant = Boolean(selected?.variants?.length);
+
   const qty = Number(quantity);
   const cost = Number(unitCost);
   const qtyOk = quantity.trim() !== "" && Number.isFinite(qty) && qty > 0;
   const costOk = unitCost.trim() !== "" && Number.isFinite(cost) && cost >= 0;
-  const valid = Boolean(productId) && qtyOk && costOk && !saving;
+  const valid = Boolean(productId) && (!needsVariant || Boolean(variantId)) && qtyOk && costOk && !saving;
   const total = qtyOk && costOk ? qty * cost : 0;
 
   async function submit(e: React.FormEvent) {
@@ -67,6 +72,7 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
       const when = purchasedAt ? new Date(purchasedAt).getTime() : Date.now();
       const id = await add({
         productId: productId as Id<"products">,
+        variantId: needsVariant ? variantId : undefined,
         label: "Product purchase",
         purchasedAt: when,
         quantity: qty,
@@ -121,7 +127,10 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
             <SectionLabel>Product</SectionLabel>
             <Select
               value={productId}
-              onChange={(e) => setProductId(e.target.value)}
+              onChange={(e) => {
+                setProductId(e.target.value);
+                setVariantId("");
+              }}
               aria-label="Product"
               required
             >
@@ -135,6 +144,30 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
               ))}
             </Select>
           </div>
+
+          {needsVariant && (
+            <div className="flex flex-col gap-2.5">
+              <SectionLabel>Size</SectionLabel>
+              <Select
+                value={variantId}
+                onChange={(e) => setVariantId(e.target.value)}
+                aria-label="Size"
+                required
+              >
+                <option value="" disabled>
+                  Choose a size…
+                </option>
+                {selected!.variants!.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-[12px] leading-4.5 text-ink-3">
+                This purchase restocks this size only, not the product's other sizes.
+              </p>
+            </div>
+          )}
 
           <div className="flex flex-col gap-2.5">
             <div className="flex items-baseline justify-between gap-3">
@@ -162,7 +195,7 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
                 />
               )}
             </Field>
-            <Field label="Quantity">
+            <Field label={selected ? `Quantity (${selected.unit || "পিস"})` : "Quantity"}>
               {(id) => (
                 <Input
                   id={id}
