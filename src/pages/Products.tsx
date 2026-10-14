@@ -347,16 +347,11 @@ function ProductCard({
       <div className="relative h-48 w-full overflow-hidden bg-surface-2/40 border-b border-line flex items-center justify-center select-none">
         {product.photoUrl ? (
           <>
-            {/* Ambient subtle blur to give depth around non-square/transparent images */}
-            <img
-              src={product.photoUrl}
-              alt=""
-              aria-hidden
-              className="absolute inset-0 size-full object-cover blur-xl opacity-25 scale-110 pointer-events-none"
-            />
             <img
               src={product.photoUrl}
               alt={product.name}
+              loading="lazy"
+              decoding="async"
               className="relative size-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
             />
             {/* Top and bottom subtle gradient vignettes for perfect pill contrast */}

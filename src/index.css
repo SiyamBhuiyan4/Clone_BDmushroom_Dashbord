@@ -266,14 +266,12 @@
 
 html {
   height: 100%;
-  overscroll-behavior: none;
   overscroll-behavior-y: none;
+  scroll-behavior: smooth;
 }
 
 body {
   min-height: 100%;
-  overscroll-behavior: none;
-  overscroll-behavior-y: none;
   background: var(--page);
   color: var(--ink);
   font-family: var(--font-sans);
@@ -284,6 +282,14 @@ body {
 
 #root {
   min-height: 100%;
+}
+
+/* Ensure inner scrollable elements (modals, dialogs, drawers, sidebars) maintain natural momentum & elastic bounce */
+.overflow-y-auto,
+.overflow-x-auto,
+.overflow-auto {
+  overscroll-behavior: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /*
