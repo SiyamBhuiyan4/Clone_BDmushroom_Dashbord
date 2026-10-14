@@ -23,9 +23,15 @@ export function getUploadStatus(): UploadStatus | null {
   return currentUpload;
 }
 
-export function setUploadStatus(status: UploadStatus | null) {
-  currentUpload = status;
-  listeners.forEach((l) => l(status));
+export function setUploadStatus(
+  statusOrUpdater: UploadStatus | null | ((prev: UploadStatus | null) => UploadStatus | null),
+) {
+  if (typeof statusOrUpdater === "function") {
+    currentUpload = statusOrUpdater(currentUpload);
+  } else {
+    currentUpload = statusOrUpdater;
+  }
+  listeners.forEach((l) => l(currentUpload));
 }
 
 /** Reactive hook to observe active upload & compression status globally */
@@ -185,7 +191,7 @@ export async function compressMedia(
         },
       });
 
-      // If still slightly over 500KB, perform a second pass with lower max dimension
+      // If still over 500KB, perform a second pass with lower max dimension
       if (compressed.size > TARGET_MAX_BYTES) {
         compressed = await imageCompression(compressed, {
           maxSizeMB: targetMB * 0.75,
@@ -203,8 +209,11 @@ export async function compressMedia(
       compressed = await fallbackCanvasCompress(readyFile, TARGET_MAX_BYTES);
     }
 
-    // Always prefer the smaller file, never enlarge
-    const finalFile = compressed.size < file.size ? compressed : file;
+    let finalFile = compressed.size < file.size ? compressed : file;
+    // Guaranteed safety check: if still above 500KB, canvas fallback
+    if (finalFile.size > TARGET_MAX_BYTES) {
+      finalFile = await fallbackCanvasCompress(readyFile, TARGET_MAX_BYTES);
+    }
 
     console.info(
       `[Compressor] ${file.name}: ${formatFileSize(file.size)} → ${formatFileSize(finalFile.size)} (${Math.round(
@@ -217,45 +226,6 @@ export async function compressMedia(
     console.warn("Media compression failed completely, uploading original file:", err);
     return file;
   }
-}
-
-/** Standard XHR upload providing real-time HTTP progress events */
-function xhrUpload(
-  uploadUrl: string,
-  file: File,
-  onProgress?: (percent: number) => void,
-): Promise<{ storageId: Id<"_storage"> }> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", uploadUrl);
-    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) {
-        const percent = Math.round((e.loaded / e.total) * 100);
-        onProgress(percent);
-      }
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const data = JSON.parse(xhr.responseText) as { storageId: Id<"_storage"> };
-          resolve(data);
-        } catch {
-          reject(new Error("Invalid JSON response from storage server."));
-        }
-      } else {
-        reject(new Error(`The file failed to upload (${xhr.status}). Try again.`));
-      }
-    };
-
-    xhr.onerror = () => {
-      reject(new Error("Network error during file upload. Try again."));
-    };
-
-    xhr.send(file);
-  });
 }
 
 /**
@@ -279,15 +249,15 @@ export async function uploadFile(
     fileName: file.name,
     fileSize: file.size,
     stage: needsCompression ? "compressing" : "uploading",
-    progress: needsCompression ? 5 : 10,
+    progress: needsCompression ? 10 : 25,
   });
 
   try {
     let preparedFile = file;
     if (needsCompression) {
       preparedFile = await compressMedia(file, (_, percent) => {
-        // Map compression 0-100% to overall 5-45%
-        const overall = 5 + Math.round(percent * 0.4);
+        // Map compression 0-100% to overall 10-60%
+        const overall = 10 + Math.round(percent * 0.5);
         setUploadStatus({
           id: uploadId,
           fileName: file.name,
@@ -305,23 +275,41 @@ export async function uploadFile(
       fileSize: file.size,
       compressedSize: preparedFile.size,
       stage: "uploading",
-      progress: 50,
+      progress: 65,
     });
-    onProgress?.(50);
+    onProgress?.(65);
 
-    const { storageId } = await xhrUpload(uploadUrl, preparedFile, (percent) => {
-      // Map upload 0-100% to overall 50-98%
-      const overall = 50 + Math.round(percent * 0.48);
-      setUploadStatus({
-        id: uploadId,
-        fileName: file.name,
-        fileSize: file.size,
-        compressedSize: preparedFile.size,
-        stage: "uploading",
-        progress: overall,
+    // Smooth ticker during the network upload request
+    const progressInterval = setInterval(() => {
+      setUploadStatus((prev) => {
+        if (!prev || prev.id !== uploadId || prev.stage !== "uploading") return prev;
+        if (prev.progress >= 94) return prev;
+        const nextProgress = prev.progress + 3;
+        onProgress?.(nextProgress);
+        return { ...prev, progress: nextProgress };
       });
-      onProgress?.(overall);
-    });
+    }, 150);
+
+    let storageId: Id<"_storage">;
+    try {
+      const res = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": preparedFile.type || file.type || "application/octet-stream" },
+        body: preparedFile,
+      });
+
+      if (!res.ok) {
+        throw new Error(`The file failed to upload (${res.status}). Try again.`);
+      }
+
+      const json = (await res.json()) as { storageId?: Id<"_storage"> };
+      if (!json.storageId) {
+        throw new Error("Storage server did not return a valid storageId.");
+      }
+      storageId = json.storageId;
+    } finally {
+      clearInterval(progressInterval);
+    }
 
     setUploadStatus({
       id: uploadId,
@@ -335,7 +323,7 @@ export async function uploadFile(
 
     // Auto-dismiss after 2.5 seconds
     setTimeout(() => {
-      if (currentUpload?.id === uploadId) {
+      if (getUploadStatus()?.id === uploadId) {
         setUploadStatus(null);
       }
     }, 2500);
@@ -351,7 +339,7 @@ export async function uploadFile(
       error: errorMessage(err),
     });
     setTimeout(() => {
-      if (currentUpload?.id === uploadId) {
+      if (getUploadStatus()?.id === uploadId) {
         setUploadStatus(null);
       }
     }, 4500);

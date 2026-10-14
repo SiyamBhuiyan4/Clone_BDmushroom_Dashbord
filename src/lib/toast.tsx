@@ -143,7 +143,7 @@ export function errorMessage(err: unknown): string {
     }
 
     const trimmed = err.message.trim();
-    if (trimmed && trimmed.length < 120) return trimmed;
+    if (trimmed) return trimmed.slice(0, 240);
   }
   return "Something went wrong. Please try again.";
 }
