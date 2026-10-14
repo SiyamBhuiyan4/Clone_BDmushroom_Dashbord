@@ -7,11 +7,12 @@ import {
   PackagePlus,
   Pencil,
   Search,
+  ShoppingCart,
   Trash2,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
-import { Badge, Button, Card, EmptyState, Input, Select, cx } from "../components/ui";
+import { Button, Card, EmptyState, Input, Select, cx } from "../components/ui";
 import { Pagination, SortSelect, usePagination } from "../components/Pagination";
 import { useT } from "../lib/i18n";
 import { ProductDialog } from "../components/ProductDialog";
@@ -181,7 +182,7 @@ export function ProductsPage() {
       {products === undefined ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-hidden>
           {[0, 1, 2].map((i) => (
-            <div key={i} className="ac-skeleton h-60 rounded-card border border-line bg-surface" />
+            <div key={i} className="ac-skeleton h-96 rounded-card border border-line bg-surface" />
           ))}
         </div>
       ) : visible.length === 0 ? (
@@ -330,170 +331,231 @@ function ProductCard({
   const out = product.quantity === 0;
   const low = product.quantity > 0 && product.quantity <= 3;
   const [showAll, setShowAll] = useState(false);
-  // Roughly where three clamped lines end; below this there is nothing hidden
-  // and an expand control would be noise.
+  // Roughly where clamped lines end; below this there is nothing hidden and an expand control would be noise.
   const clampable = product.details.length > 120;
 
   return (
     <Card
       onClick={onView}
       className={cx(
-        "group relative flex flex-col transition-all duration-300 ease-[var(--ease-out)]",
+        "group relative flex flex-col overflow-hidden transition-all duration-300 ease-[var(--ease-out)]",
         "hover:-translate-y-1 hover:shadow-[var(--shadow-pop)]",
-        product.archived && "opacity-55",
+        product.archived && "opacity-60",
       )}
     >
-      {/*
-        The action cluster is taken out of flow — while hidden it would still
-        reserve its width and force the product name to truncate early.
-      */}
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="absolute top-3.5 right-3.5 z-10 flex items-center gap-0.5 rounded-xl bg-surface/90 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 focus-within:opacity-100"
-      >
-        <IconButton label="Add lot" onClick={onAddLot}>
-          <Layers size={15} />
-        </IconButton>
-        <IconButton label="Edit" onClick={onEdit}>
-          <Pencil size={15} />
-        </IconButton>
-        <IconButton label={product.archived ? "Restore" : "Archive"} onClick={onArchiveToggle}>
-          {product.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
-        </IconButton>
-        <IconButton label="Delete" onClick={onDelete} danger>
-          <Trash2 size={15} />
-        </IconButton>
-      </div>
-
-      <div className="flex items-start gap-3 px-5 pt-5">
+      {/* -------------------- Top Hero Image Stage -------------------- */}
+      <div className="relative h-48 w-full overflow-hidden bg-surface-2/40 border-b border-line flex items-center justify-center select-none">
         {product.photoUrl ? (
-          <img
-            src={product.photoUrl}
-            alt=""
-            className="size-11 shrink-0 rounded-2xl object-cover shadow-[var(--shadow-sm)]"
-          />
+          <>
+            {/* Ambient subtle blur to give depth around non-square/transparent images */}
+            <img
+              src={product.photoUrl}
+              alt=""
+              aria-hidden
+              className="absolute inset-0 size-full object-cover blur-xl opacity-25 scale-110 pointer-events-none"
+            />
+            <img
+              src={product.photoUrl}
+              alt={product.name}
+              className="relative size-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
+            />
+            {/* Top and bottom subtle gradient vignettes for perfect pill contrast */}
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-black/25" />
+          </>
         ) : (
-          <span
-            className="flex size-11 shrink-0 items-center justify-center rounded-2xl text-[16px] font-bold text-white shadow-[var(--shadow-sm)]"
-            style={{ background: gradientFor(product.name) }}
-            aria-hidden
-          >
-            {initialOf(product.name)}
-          </span>
-        )}
-        <button
-          onClick={onView}
-          className="mt-0.5 line-clamp-2 min-w-0 flex-1 text-left text-[15.5px] leading-5.5 font-bold tracking-tight text-ink transition-colors hover:text-accent"
-        >
-          {product.name}
-        </button>
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-1.5 px-5">
-        {product.archived && <Badge>Archived</Badge>}
-        {product.category && <Badge tone="accent">{product.category}</Badge>}
-        {out ? (
-          <Badge tone="critical">Out of stock</Badge>
-        ) : low ? (
-          <Badge tone="warning">{product.quantity} left</Badge>
-        ) : (
-          <Badge tone="good">{product.quantity} in stock</Badge>
-        )}
-      </div>
-
-      <div className="mt-4 px-5">
-        <p
-          className={cx(
-            "min-h-10 text-[13.5px] leading-[1.6] whitespace-pre-wrap",
-            product.details ? "text-ink-2" : "text-ink-3 italic",
-            product.details && !showAll && "line-clamp-3",
-          )}
-        >
-          {product.details || t("products.noDetails")}
-        </p>
-        {clampable && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowAll((v) => !v);
+          <div
+            className="relative size-full flex items-center justify-center overflow-hidden"
+            style={{
+              background: `radial-gradient(circle at 50% 40%, rgba(255,255,255,0.12), transparent 70%), ${gradientFor(product.name)}18`,
             }}
-            className="mt-1 text-[12px] font-semibold text-accent hover:underline"
           >
-            {showAll ? t("detail.showLess") : t("detail.showMore")}
-          </button>
+            {/* Decorative watermark icon */}
+            <Package
+              size={110}
+              strokeWidth={1}
+              className="absolute -right-3 -bottom-5 text-ink/5 pointer-events-none transition-transform duration-500 group-hover:scale-110 group-hover:rotate-6"
+              aria-hidden
+            />
+            {/* Stylish fallback monogram */}
+            <div
+              className="relative flex size-16 items-center justify-center rounded-2xl text-[24px] font-bold text-white shadow-[var(--shadow-card)] ring-4 ring-surface/40 transition-transform duration-300 group-hover:scale-105"
+              style={{ background: gradientFor(product.name) }}
+              aria-hidden
+            >
+              {initialOf(product.name)}
+            </div>
+          </div>
         )}
-      </div>
 
-      <div className="mt-auto border-t border-line px-5 pt-4 pb-5">
-        {/*
-          Once a product has been bought at two prices, one cost figure is a
-          lie of omission. The cost tile shows the range it is actually
-          sitting on; profit is this product's real, already-sold total for
-          whatever range the page is scoped to — never a recalculation
-          against today's prices.
-        */}
-        <div className="grid grid-cols-3 gap-2">
-          <MoneyStat
-            label="Cost price"
-            value={
-              hasVariants
-                ? fmtRange(fmt, product.variants!.map((v) => v.costPrice))
-                : lotCosts.length > 0
-                  ? lotCosts[0] === lotCosts[lotCosts.length - 1]
-                    ? fmt(lotCosts[0])
-                    : `${fmt(lotCosts[0])}–${fmt(lotCosts[lotCosts.length - 1])}`
-                  : fmt(product.costPrice)
-            }
-          />
-          <MoneyStat
-            label={t("products.sellPrice")}
-            value={
-              hasVariants
-                ? fmtRange(
-                    fmt,
-                    product.variants!.map((v) => v.sellPrice).filter((p): p is number => p !== undefined),
-                  )
-                : product.sellPrice !== undefined
-                  ? fmt(product.sellPrice)
-                  : "—"
-            }
-          />
-          <MoneyStat
-            label={t("sales.profit")}
-            value={profit < 0 ? `−${fmt(Math.abs(profit))}` : fmt(profit)}
-            tone={profit > 0 ? "good" : profit < 0 ? "critical" : undefined}
-            sub={rangeLabel}
-          />
+        {/* Floating Top Badges (Category, Stock, Archived) */}
+        <div className="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-1.5 max-w-[calc(100%-8.5rem)]">
+          {product.archived && (
+            <span className="inline-flex items-center rounded-lg bg-surface/90 px-2.5 py-1 text-[11px] font-bold text-ink-2 shadow-[var(--shadow-sm)] backdrop-blur-md border border-line/60">
+              Archived
+            </span>
+          )}
+          {product.category && (
+            <span className="inline-flex items-center rounded-lg bg-surface/90 px-2.5 py-1 text-[11px] font-bold text-accent shadow-[var(--shadow-sm)] backdrop-blur-md border border-accent/25">
+              {product.category}
+            </span>
+          )}
+          {out ? (
+            <span className="inline-flex items-center rounded-lg bg-critical-solid/90 px-2.5 py-1 text-[11px] font-bold text-white shadow-[var(--shadow-sm)] backdrop-blur-md">
+              Out of stock
+            </span>
+          ) : low ? (
+            <span className="inline-flex items-center rounded-lg bg-warning/95 px-2.5 py-1 text-[11px] font-bold text-white shadow-[var(--shadow-sm)] backdrop-blur-md">
+              {product.quantity} left
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-surface/90 px-2.5 py-1 text-[11px] font-semibold text-good-ink shadow-[var(--shadow-sm)] backdrop-blur-md border border-good/25">
+              <span className="size-1.5 rounded-full bg-good animate-pulse" />
+              {product.quantity} in stock
+            </span>
+          )}
         </div>
 
-        {lots.length > 0 && (
+        {/* Floating Quick Action Cluster */}
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-3 right-3 z-10 flex items-center gap-0.5 rounded-xl border border-line-strong/30 bg-surface/90 p-1 shadow-[var(--shadow-card)] backdrop-blur-md transition-all duration-200 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100"
+        >
+          <IconButton label="Add lot" onClick={onAddLot}>
+            <Layers size={14} />
+          </IconButton>
+          <IconButton label="Edit" onClick={onEdit}>
+            <Pencil size={14} />
+          </IconButton>
+          <IconButton label={product.archived ? "Restore" : "Archive"} onClick={onArchiveToggle}>
+            {product.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+          </IconButton>
+          <IconButton label="Delete" onClick={onDelete} danger>
+            <Trash2 size={14} />
+          </IconButton>
+        </div>
+      </div>
+
+      {/* -------------------- Card Content Body -------------------- */}
+      <div className="flex flex-1 flex-col p-5">
+        {/* Title */}
+        <div className="flex items-start justify-between gap-2">
           <button
             onClick={onView}
-            className="mt-2 text-[11.5px] font-semibold text-accent hover:underline"
+            className="text-left text-[16px] leading-snug font-bold tracking-tight text-ink transition-colors hover:text-accent line-clamp-2"
           >
-            {lots.length} {lots.length === 1 ? "lot" : "lots"}
+            {product.name}
           </button>
+        </div>
+
+        {/* Description / Details */}
+        <div className="mt-2 flex-1">
+          <p
+            className={cx(
+              "text-[13px] leading-[1.6] whitespace-pre-wrap",
+              product.details ? "text-ink-2" : "text-ink-3 italic",
+              product.details && !showAll && "line-clamp-2",
+            )}
+          >
+            {product.details || t("products.noDetails")}
+          </p>
+          {clampable && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowAll((v) => !v);
+              }}
+              className="mt-1 text-[11.5px] font-semibold text-accent hover:underline"
+            >
+              {showAll ? t("detail.showLess") : t("detail.showMore")}
+            </button>
+          )}
+        </div>
+
+        {/* ---------------- Financial Metrics Grid ---------------- */}
+        <div className="mt-4 rounded-xl border border-line bg-surface-2/40 p-3">
+          <div className="grid grid-cols-3 gap-2 divide-x divide-line">
+            <div className="min-w-0 pr-1">
+              <MoneyStat
+                label="Cost price"
+                value={
+                  hasVariants
+                    ? fmtRange(fmt, product.variants!.map((v) => v.costPrice))
+                    : lotCosts.length > 0
+                      ? lotCosts[0] === lotCosts[lotCosts.length - 1]
+                        ? fmt(lotCosts[0])
+                        : `${fmt(lotCosts[0])}–${fmt(lotCosts[lotCosts.length - 1])}`
+                      : fmt(product.costPrice)
+                }
+              />
+            </div>
+            <div className="min-w-0 px-2">
+              <MoneyStat
+                label={t("products.sellPrice")}
+                value={
+                  hasVariants
+                    ? fmtRange(
+                        fmt,
+                        product.variants!.map((v) => v.sellPrice).filter((p): p is number => p !== undefined),
+                      )
+                    : product.sellPrice !== undefined
+                      ? fmt(product.sellPrice)
+                      : "—"
+                }
+              />
+            </div>
+            <div className="min-w-0 pl-2">
+              <MoneyStat
+                label={t("sales.profit")}
+                value={profit < 0 ? `−${fmt(Math.abs(profit))}` : fmt(profit)}
+                tone={profit > 0 ? "good" : profit < 0 ? "critical" : undefined}
+                sub={rangeLabel}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Active Lots Link */}
+        {lots.length > 0 && (
+          <div className="mt-2.5">
+            <button
+              onClick={onView}
+              className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-accent hover:underline transition-colors"
+            >
+              <Layers size={13} />
+              <span>
+                {lots.length} active {lots.length === 1 ? "lot" : "lots"}
+              </span>
+            </button>
+          </div>
         )}
 
-        <div className="mt-3 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
-          {/*
-            Each size has its own stock, so a set-stock control here would
-            have to guess which size it meant — the sizes themselves, in Edit
-            product, are where that number actually lives.
-          */}
+        {/* ---------------- Bottom Action Bar ---------------- */}
+        <div
+          className="mt-3.5 flex items-center justify-between gap-2 border-t border-line/60 pt-3"
+          onClick={(e) => e.stopPropagation()}
+        >
           {!hasVariants && (
             <button
               onClick={onSetStock}
               aria-label={`Set stock for ${product.name}`}
-              className="flex h-10 items-center gap-2 rounded-xl border border-line-strong bg-page px-3 text-ink-3 transition-colors hover:text-ink"
+              title="Quick adjust stock quantity"
+              className="group/stock flex h-9.5 items-center gap-2 rounded-xl border border-line-strong bg-surface px-3 text-ink-3 transition-all hover:border-accent hover:bg-surface-2 hover:text-ink active:scale-95"
             >
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">Stock</span>
               <span className="min-w-5 text-center text-[13.5px] font-bold tabular-nums text-ink">
                 {product.quantity}
               </span>
-              <Pencil size={13} />
+              <Pencil size={12} className="text-ink-3 transition-colors group-hover/stock:text-accent" />
             </button>
           )}
-          <Button size="sm" variant="primary" onClick={onSell} disabled={out} className={cx(hasVariants && "w-full")}>
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={onSell}
+            disabled={out}
+            className={cx("h-9.5", hasVariants ? "w-full" : "px-5")}
+          >
+            <ShoppingCart size={14} />
             Sell
           </Button>
         </div>
@@ -523,16 +585,20 @@ function MoneyStat({
 }) {
   return (
     <div className="min-w-0">
-      <p className="truncate text-[10px] font-bold tracking-[0.06em] text-ink-3 uppercase">{label}</p>
+      <p className="truncate text-[9.5px] font-bold tracking-wider text-ink-3 uppercase">{label}</p>
       <p
         className={cx(
-          "mt-1 truncate text-[15px] leading-6 font-bold tracking-tight tabular-nums",
+          "mt-0.5 truncate text-[14px] leading-snug font-bold tracking-tight tabular-nums",
           tone === "good" ? "text-good-ink" : tone === "critical" ? "text-critical-ink" : "text-ink",
         )}
       >
         {value}
       </p>
-      {sub && <p className="mt-0.5 truncate text-[10.5px] text-ink-3">{sub}</p>}
+      {sub && (
+        <p className="mt-0.5 truncate text-[9.5px] font-medium text-ink-3" title={sub}>
+          {sub}
+        </p>
+      )}
     </div>
   );
 }
@@ -554,8 +620,8 @@ function IconButton({
       aria-label={label}
       title={label}
       className={cx(
-        "rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2",
-        danger ? "hover:text-critical" : "hover:text-ink",
+        "rounded-lg p-1.5 text-ink-3 transition-colors hover:bg-surface-2",
+        danger ? "hover:bg-critical-soft hover:text-critical" : "hover:text-ink",
       )}
     >
       {children}
