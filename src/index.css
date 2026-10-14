@@ -264,24 +264,20 @@
   --radius-card: 20px;
 }
 
-html {
+html,
+body,
+#root {
   height: 100%;
-  overscroll-behavior-y: none;
-  scroll-behavior: smooth;
+  overflow: hidden;
 }
 
 body {
-  min-height: 100%;
   background: var(--page);
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-}
-
-#root {
-  min-height: 100%;
 }
 
 /* Ensure inner scrollable elements (modals, dialogs, drawers, sidebars) maintain natural momentum & elastic bounce */

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
   Package,
@@ -92,14 +92,21 @@ export default function App() {
     prefetchReceiptAssets();
   }, []);
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
   const go = (next: Route) => {
     window.location.hash = `/${next}`;
     setRoute(next);
     setDrawerOpen(false);
+    scrollContainerRef.current?.scrollTo({ top: 0 });
   };
 
+  useEffect(() => {
+    scrollContainerRef.current?.scrollTo({ top: 0 });
+  }, [route]);
+
   return (
-    <div className={cx("flex min-h-full bg-page", offline && "pt-9")}>
+    <div className={cx("flex h-dvh w-screen overflow-hidden bg-page", offline && "pt-9")}>
       <ConnectionBanner />
       <SessionWarning />
       <UploadStatusBar />
@@ -118,12 +125,11 @@ export default function App() {
         offline={offline}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div ref={scrollContainerRef} className="flex min-w-0 flex-1 flex-col h-full overflow-y-auto">
         <header
           className={cx(
-            "sticky z-20 flex h-16 items-center gap-3 border-b border-line bg-page/80 px-4",
+            "sticky top-0 z-20 flex h-16 shrink-0 items-center gap-3 border-b border-line bg-page/80 px-4",
             "backdrop-blur-xl sm:px-6 lg:hidden",
-            offline ? "top-9" : "top-0",
           )}
         >
           <button
@@ -197,8 +203,8 @@ function Sidebar({
       className={cx(
         "fixed inset-y-0 left-0 z-40 flex w-68 shrink-0 flex-col overflow-hidden border-r border-line bg-surface",
         "transition-[width,transform] duration-300 ease-[var(--ease-out)]",
-        "lg:sticky lg:h-screen lg:translate-x-0",
-        offline ? "lg:top-9" : "lg:top-0",
+        "lg:static lg:h-full lg:translate-x-0",
+        offline ? "top-9 lg:top-0" : "top-0",
         drawerOpen ? "translate-x-0" : "-translate-x-full",
         rail && "lg:w-17",
       )}
