@@ -183,8 +183,15 @@ export const setPhoto = mutation({
     await requireSession(ctx, args.token);
     const vendor = await ctx.db.get(args.id);
     if (!vendor) throw new ConvexError("That vendor no longer exists.");
+    const oldPhotoId = vendor.photoId;
     await ctx.db.patch(args.id, { photoId: args.storageId });
-    if (vendor.photoId) await ctx.storage.delete(vendor.photoId);
+    if (oldPhotoId && oldPhotoId !== args.storageId) {
+      try {
+        await ctx.storage.delete(oldPhotoId);
+      } catch {
+        // Safe to ignore if old file was missing
+      }
+    }
   },
 });
 
@@ -194,9 +201,14 @@ export const removePhoto = mutation({
     await requireSession(ctx, args.token);
     const vendor = await ctx.db.get(args.id);
     if (!vendor) throw new ConvexError("That vendor no longer exists.");
-    if (vendor.photoId) {
+    const oldPhotoId = vendor.photoId;
+    if (oldPhotoId) {
       await ctx.db.patch(args.id, { photoId: undefined });
-      await ctx.storage.delete(vendor.photoId);
+      try {
+        await ctx.storage.delete(oldPhotoId);
+      } catch {
+        // Safe to ignore if old file was missing
+      }
     }
   },
 });

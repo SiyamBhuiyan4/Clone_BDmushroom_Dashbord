@@ -1,4 +1,4 @@
-import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { mutation, query, internalMutation, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
@@ -87,8 +87,15 @@ export const setPhoto = mutation({
     await requireSession(ctx, args.token);
     const product = await ctx.db.get(args.id);
     if (!product) throw new ConvexError("That product no longer exists.");
+    const oldPhotoId = product.photoId;
     await ctx.db.patch(args.id, { photoId: args.storageId });
-    if (product.photoId) await ctx.storage.delete(product.photoId);
+    if (oldPhotoId && oldPhotoId !== args.storageId) {
+      try {
+        await ctx.storage.delete(oldPhotoId);
+      } catch {
+        // Safe to ignore if the old storage file was already deleted or missing
+      }
+    }
   },
 });
 
@@ -98,10 +105,34 @@ export const removePhoto = mutation({
     await requireSession(ctx, args.token);
     const product = await ctx.db.get(args.id);
     if (!product) throw new ConvexError("That product no longer exists.");
-    if (product.photoId) {
+    const oldPhotoId = product.photoId;
+    if (oldPhotoId) {
       await ctx.db.patch(args.id, { photoId: undefined });
-      await ctx.storage.delete(product.photoId);
+      try {
+        await ctx.storage.delete(oldPhotoId);
+      } catch {
+        // Safe to ignore if the old storage file was already deleted or missing
+      }
     }
+  },
+});
+
+/** Repairs any products pointing to non-existent storage IDs */
+export const repairDanglingPhotos = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const products = await ctx.db.query("products").collect();
+    let cleaned = 0;
+    for (const p of products) {
+      if (p.photoId) {
+        const url = await ctx.storage.getUrl(p.photoId);
+        if (!url) {
+          await ctx.db.patch(p._id, { photoId: undefined });
+          cleaned++;
+        }
+      }
+    }
+    return { cleaned };
   },
 });
 

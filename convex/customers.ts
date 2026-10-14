@@ -299,8 +299,15 @@ export const setPhoto = mutation({
     await requireSession(ctx, args.token);
     const customer = await ctx.db.get(args.id);
     if (!customer) throw new ConvexError("That customer is no longer saved.");
+    const oldPhotoId = customer.photoId;
     await ctx.db.patch(args.id, { photoId: args.storageId });
-    if (customer.photoId) await ctx.storage.delete(customer.photoId);
+    if (oldPhotoId && oldPhotoId !== args.storageId) {
+      try {
+        await ctx.storage.delete(oldPhotoId);
+      } catch {
+        // Safe to ignore if old file was missing
+      }
+    }
   },
 });
 
@@ -310,9 +317,14 @@ export const removePhoto = mutation({
     await requireSession(ctx, args.token);
     const customer = await ctx.db.get(args.id);
     if (!customer) throw new ConvexError("That customer is no longer saved.");
-    if (customer.photoId) {
+    const oldPhotoId = customer.photoId;
+    if (oldPhotoId) {
       await ctx.db.patch(args.id, { photoId: undefined });
-      await ctx.storage.delete(customer.photoId);
+      try {
+        await ctx.storage.delete(oldPhotoId);
+      } catch {
+        // Safe to ignore if old file was missing
+      }
     }
   },
 });

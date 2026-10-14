@@ -135,8 +135,15 @@ export const setPhoto = mutation({
     await requireSession(ctx, args.token);
     const row = await ctx.db.get(args.id);
     if (!row) throw new ConvexError("That trainee no longer exists.");
+    const oldPhotoId = row.photoId;
     await ctx.db.patch(args.id, { photoId: args.storageId });
-    if (row.photoId) await ctx.storage.delete(row.photoId);
+    if (oldPhotoId && oldPhotoId !== args.storageId) {
+      try {
+        await ctx.storage.delete(oldPhotoId);
+      } catch {
+        // Safe to ignore if old file was missing
+      }
+    }
   },
 });
 
@@ -148,7 +155,13 @@ export const remove = mutation({
     await verifyPasscode(ctx, args.passcode);
     const row = await ctx.db.get(args.id);
     if (!row) return;
-    if (row.photoId) await ctx.storage.delete(row.photoId);
+    if (row.photoId) {
+      try {
+        await ctx.storage.delete(row.photoId);
+      } catch {
+        // Safe to ignore if old file was missing
+      }
+    }
 
     const [lessons, media] = await Promise.all([
       ctx.db
