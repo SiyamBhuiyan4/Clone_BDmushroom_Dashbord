@@ -264,19 +264,26 @@
   --radius-card: 20px;
 }
 
-html,
-body,
-#root {
+html {
   height: 100%;
+  overscroll-behavior: none;
+  overscroll-behavior-y: none;
 }
 
 body {
+  min-height: 100%;
+  overscroll-behavior: none;
+  overscroll-behavior-y: none;
   background: var(--page);
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100%;
 }
 
 /*
