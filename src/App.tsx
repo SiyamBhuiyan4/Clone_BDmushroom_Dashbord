@@ -22,6 +22,7 @@ import { useSettings, type ThemeChoice } from "./lib/settings";
 import { useSession } from "./lib/session";
 import { prefetchReceiptAssets } from "./lib/pdf";
 import { ConnectionBanner, SessionWarning, useIsOffline } from "./components/StatusBar";
+import { UploadStatusBar } from "./components/UploadStatusBar";
 import { useT, type MessageKey } from "./lib/i18n";
 import { cx } from "./components/ui";
 import { DashboardPage } from "./pages/Dashboard";
@@ -101,6 +102,7 @@ export default function App() {
     <div className={cx("flex min-h-full bg-page", offline && "pt-9")}>
       <ConnectionBanner />
       <SessionWarning />
+      <UploadStatusBar />
       {drawerOpen && (
         <div
           className="ac-fade-in fixed inset-0 z-30 bg-scrim backdrop-blur-sm lg:hidden"

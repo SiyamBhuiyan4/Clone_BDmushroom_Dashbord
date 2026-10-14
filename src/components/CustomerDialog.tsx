@@ -8,7 +8,7 @@ import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation } from "../lib/session";
 import { normalisePhone } from "../../convex/shared";
-import { uploadFile, useFileDrop } from "../lib/upload";
+import { uploadFile, useFileDrop, useUploadProgress } from "../lib/upload";
 
 /** What the dialog needs to edit someone — the list query's shape, not the row's. */
 export type EditableCustomer = {
@@ -61,6 +61,7 @@ export function CustomerDialog({
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const uploadStatus = useUploadProgress();
   /*
     On by default, because in this trade the phone and the WhatsApp number are
     the same one far more often than not. Ticked, the field follows the phone
@@ -238,6 +239,20 @@ export function CustomerDialog({
                   </Button>
                 )}
               </div>
+              {photoBusy && uploadStatus && (
+                <div className="w-48 mt-1">
+                  <div className="flex items-center justify-between text-[11px] text-ink-3 mb-1">
+                    <span>{uploadStatus.stage === "compressing" ? "Compressing..." : "Uploading..."}</span>
+                    <span className="font-semibold tabular-nums">{uploadStatus.progress}%</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
+                    <div
+                      className="h-full rounded-full bg-accent transition-all duration-200"
+                      style={{ width: `${Math.max(5, uploadStatus.progress)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

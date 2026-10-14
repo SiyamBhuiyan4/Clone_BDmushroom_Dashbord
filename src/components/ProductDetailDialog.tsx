@@ -13,7 +13,7 @@ import { gradientFor } from "../lib/avatar";
 import { plural } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
-import { uploadFile, useFileDrop } from "../lib/upload";
+import { uploadFile, useFileDrop, useUploadProgress } from "../lib/upload";
 import { variantAvailable } from "../../convex/shared";
 
 type ProductWithPhoto = Doc<"products"> & { photoUrl?: string | null };
@@ -32,6 +32,7 @@ function ProductPhotoAvatar({ product }: { product: ProductWithPhoto }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(product.photoUrl ?? null);
   const [busy, setBusy] = useState(false);
+  const uploadStatus = useUploadProgress();
 
   useEffect(() => {
     setPreview(product.photoUrl ?? null);
@@ -90,8 +91,8 @@ function ProductPhotoAvatar({ product }: { product: ProductWithPhoto }) {
         <Camera size={19} aria-hidden />
       )}
       {busy && (
-        <div className="absolute inset-0 flex items-center justify-center bg-ink/40">
-          <div className="ac-skeleton size-4 rounded-full" aria-hidden />
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-ink/70 rounded-full text-white text-[10px] font-bold">
+          {uploadStatus ? `${uploadStatus.progress}%` : <div className="ac-skeleton size-4 rounded-full" aria-hidden />}
         </div>
       )}
     </div>

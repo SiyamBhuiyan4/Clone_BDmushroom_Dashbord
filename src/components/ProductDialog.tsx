@@ -24,7 +24,7 @@ import { CURRENCY_SYMBOL } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedQuery, useAuthedMutation } from "../lib/session";
-import { uploadFile, useFileDrop } from "../lib/upload";
+import { uploadFile, useFileDrop, useUploadProgress } from "../lib/upload";
 
 type ProductWithPhoto = Doc<"products"> & { photoUrl?: string | null };
 
@@ -94,6 +94,7 @@ export function ProductDialog({
 
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [saving, setSaving] = useState(false);
+  const uploadStatus = useUploadProgress();
   /*
     The photo is its own small state machine, independent of the rest of the
     form — editing a name and swapping a photo are two different actions that
@@ -316,9 +317,24 @@ export function ProductDialog({
                   </Button>
                 )}
               </div>
-              <p className="text-[11.5px] text-ink-3">
-                {photoBusy ? t("products.uploading") : t("products.photo")}
-              </p>
+              {photoBusy && uploadStatus ? (
+                <div className="w-48 mt-0.5">
+                  <div className="flex items-center justify-between text-[11px] text-ink-3 mb-1">
+                    <span>{uploadStatus.stage === "compressing" ? "Compressing..." : "Uploading..."}</span>
+                    <span className="font-semibold tabular-nums">{uploadStatus.progress}%</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
+                    <div
+                      className="h-full rounded-full bg-accent transition-all duration-200"
+                      style={{ width: `${Math.max(5, uploadStatus.progress)}%` }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11.5px] text-ink-3">
+                  {photoBusy ? t("products.uploading") : t("products.photo")}
+                </p>
+              )}
             </div>
           </div>
 

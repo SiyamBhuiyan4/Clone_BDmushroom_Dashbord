@@ -3,7 +3,7 @@ import { Camera } from "lucide-react";
 import { cx } from "./ui";
 import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
-import { useFileDrop } from "../lib/upload";
+import { useFileDrop, useUploadProgress } from "../lib/upload";
 
 /**
  * A photo shown where a detail dialog's header icon would otherwise sit —
@@ -24,6 +24,7 @@ export function ContactPhotoAvatar({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(photoUrl ?? null);
   const [busy, setBusy] = useState(false);
+  const uploadStatus = useUploadProgress();
 
   useEffect(() => {
     setPreview(photoUrl ?? null);
@@ -80,8 +81,8 @@ export function ContactPhotoAvatar({
         <Camera size={19} aria-hidden />
       )}
       {busy && (
-        <div className="absolute inset-0 flex items-center justify-center bg-ink/40">
-          <div className="ac-skeleton size-4 rounded-full" aria-hidden />
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-ink/70 rounded-full text-white text-[10px] font-bold">
+          {uploadStatus ? `${uploadStatus.progress}%` : <div className="ac-skeleton size-4 rounded-full" aria-hidden />}
         </div>
       )}
     </div>

@@ -6,7 +6,7 @@ import { Button, cx } from "./ui";
 import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
-import { mediaKindOf, uploadFile, useFileDrop } from "../lib/upload";
+import { mediaKindOf, uploadFile, useFileDrop, useUploadProgress } from "../lib/upload";
 
 /**
  * The receipts/photos/videos attached to one stock lot — shared by the lot's
@@ -32,6 +32,7 @@ export function LotMediaManager({ lotId }: { lotId: Id<"stockBatches"> }) {
 
   const [uploading, setUploading] = useState(false);
   const [picking, setPicking] = useState(false);
+  const uploadStatus = useUploadProgress();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const vendor = data?.vendor;
@@ -102,6 +103,20 @@ export function LotMediaManager({ lotId }: { lotId: Id<"stockBatches"> }) {
           </div>
         )}
       </div>
+      {uploading && uploadStatus && (
+        <div className="mb-2 rounded-xl border border-line bg-page p-2.5">
+          <div className="flex items-center justify-between text-[11.5px] text-ink-3 mb-1.5">
+            <span>{uploadStatus.stage === "compressing" ? "Compressing media..." : "Uploading..."}</span>
+            <span className="font-semibold tabular-nums">{uploadStatus.progress}%</span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
+            <div
+              className="h-full rounded-full bg-accent transition-all duration-200"
+              style={{ width: `${Math.max(5, uploadStatus.progress)}%` }}
+            />
+          </div>
+        </div>
+      )}
       <input
         ref={fileInputRef}
         type="file"
