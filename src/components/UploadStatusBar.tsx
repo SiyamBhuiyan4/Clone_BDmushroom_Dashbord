@@ -60,9 +60,9 @@ export function UploadStatusBar() {
               {formatFileSize(status.fileSize)} → {formatFileSize(status.compressedSize)} (
               {Math.max(0, Math.round((1 - status.compressedSize / status.fileSize) * 100))}% smaller)
             </p>
-          ) : status.fileSize > 200 * 1024 && isCompressing ? (
+          ) : isCompressing ? (
             <p className="text-[11px] text-amber-500 mt-0.5">
-              Optimizing {formatFileSize(status.fileSize)} to under 500 KB...
+              Optimizing {formatFileSize(status.fileSize)} to under 200 KB...
             </p>
           ) : null}
 

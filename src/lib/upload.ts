@@ -3,8 +3,8 @@ import imageCompression from "browser-image-compression";
 import type { Id } from "../../convex/_generated/dataModel";
 import { errorMessage } from "./toast";
 
-const COMPRESS_THRESHOLD_BYTES = 200 * 1024; // 200 KB
-const TARGET_MAX_BYTES = 480 * 1024;         // 480 KB (strictly under 500 KB)
+export const COMPRESS_THRESHOLD_BYTES = 160 * 1024; // 160 KB
+export const TARGET_MAX_BYTES = 180 * 1024;         // 180 KB (strictly under 200 KB)
 
 export type UploadStatus = {
   id: string;
@@ -96,8 +96,8 @@ async function fallbackCanvasCompress(file: File, targetBytes: number): Promise<
       img.src = url;
     });
 
-    let maxDim = 1920;
-    const qualities = [0.8, 0.65, 0.5, 0.35];
+    let maxDim = 1280;
+    const qualities = [0.75, 0.6, 0.45, 0.3];
     let bestBlob: Blob | null = null;
 
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -156,15 +156,15 @@ async function fallbackCanvasCompress(file: File, targetBytes: number): Promise<
 }
 
 /**
- * Compresses an image file if it is larger than 200KB so that its final
- * size is under 500KB, preserving visual clarity while drastically
+ * Compresses an image file if it is larger than 160KB so that its final
+ * size is strictly under 200KB, preserving visual clarity while drastically
  * reducing network bandwidth and Convex database storage.
  */
 export async function compressMedia(
   file: File,
   onProgress?: (stage: "compressing", percent: number) => void,
 ): Promise<File> {
-  // If <= 200KB, no compression needed
+  // If <= 160KB, no compression needed
   if (file.size <= COMPRESS_THRESHOLD_BYTES) {
     return file;
   }
@@ -176,29 +176,29 @@ export async function compressMedia(
 
   try {
     const readyFile = await ensureJpegCompatible(file);
-    const targetMB = TARGET_MAX_BYTES / (1024 * 1024); // ~0.47 MB
+    const targetMB = TARGET_MAX_BYTES / (1024 * 1024); // ~0.175 MB (180 KB)
 
     let compressed: File;
     try {
       compressed = await imageCompression(readyFile, {
         maxSizeMB: targetMB,
-        maxWidthOrHeight: 1920,
+        maxWidthOrHeight: 1280,
         useWebWorker: false, // Runs 100% locally in browser thread (no CDN dependency)
         maxIteration: 10,
-        initialQuality: 0.85,
+        initialQuality: 0.8,
         onProgress: (p: number) => {
           onProgress?.("compressing", p);
         },
       });
 
-      // If still over 500KB, perform a second pass with lower max dimension
+      // If still over 180KB, perform a second pass with lower max dimension and quality
       if (compressed.size > TARGET_MAX_BYTES) {
         compressed = await imageCompression(compressed, {
-          maxSizeMB: targetMB * 0.75,
-          maxWidthOrHeight: 1280,
+          maxSizeMB: targetMB * 0.8,
+          maxWidthOrHeight: 1024,
           useWebWorker: false,
           maxIteration: 8,
-          initialQuality: 0.7,
+          initialQuality: 0.65,
           onProgress: (p: number) => {
             onProgress?.("compressing", p);
           },
@@ -210,7 +210,7 @@ export async function compressMedia(
     }
 
     let finalFile = compressed.size < file.size ? compressed : file;
-    // Guaranteed safety check: if still above 500KB, canvas fallback
+    // Guaranteed safety check: if still above 180KB, canvas fallback
     if (finalFile.size > TARGET_MAX_BYTES) {
       finalFile = await fallbackCanvasCompress(readyFile, TARGET_MAX_BYTES);
     }
@@ -229,7 +229,7 @@ export async function compressMedia(
 }
 
 /**
- * Uploads a file to a Convex upload URL with compression (for images > 200KB down to under 500KB)
+ * Uploads a file to a Convex upload URL with compression (for images > 160KB down to under 200KB)
  * and updates the global upload status bar.
  */
 export async function uploadFile(
