@@ -33,6 +33,8 @@ export type BatchInput = {
   purchasedAt: number;
   quantity: number;
   unitCost: number;
+  /** What one unit of this lot sells for; old lots may not have one yet. */
+  unitPrice?: number;
   /*
     What is left in the lot. Not edited here — it follows from the quantity
     and what has sold — but a caller about to delete the lot needs it to say
@@ -46,7 +48,7 @@ export type BatchInput = {
 
 /** A lot with the profit the Profit page works out from it. */
 export type BatchRow = BatchInput & {
-  /** The product's own price, or cost when it has none — never the lot's. */
+  /** The lot's own sell price, or cost for an old lot that has none. */
   projectedPrice: number;
   unitProfit: number;
   totalProfit: number;
@@ -73,11 +75,11 @@ export function BatchDialog({
   const update = useAuthedMutation(api.profit.updateBatch);
 
   const [productId, setProductId] = useState("");
-  const [variantId, setVariantId] = useState("");
   const [label, setLabel] = useState("");
   const [purchasedAt, setPurchasedAt] = useState("");
   const [quantity, setQuantity] = useState("");
   const [unitCost, setUnitCost] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
   const [note, setNote] = useState("");
   const [vendorId, setVendorId] = useState("");
   const [saving, setSaving] = useState(false);
@@ -90,15 +92,16 @@ export function BatchDialog({
       setPurchasedAt(toLocalInputValue(batch.purchasedAt));
       setQuantity(String(batch.quantity));
       setUnitCost(String(batch.unitCost));
+      setUnitPrice(batch.unitPrice !== undefined ? String(batch.unitPrice) : "");
       setNote(batch.note ?? "");
       setVendorId(batch.vendorId ?? "");
     } else {
       setProductId(presetProductId ?? "");
-      setVariantId("");
       setLabel("");
       setPurchasedAt(toLocalInputValue(Date.now()));
       setQuantity("");
       setUnitCost("");
+      setUnitPrice("");
       setNote("");
       setVendorId("");
     }
@@ -108,21 +111,13 @@ export function BatchDialog({
     () => products?.find((p) => p._id === productId),
     [products, productId],
   );
-  // Which size this lot restocks is only asked when creating one — an
-  // existing lot's size was fixed the moment it moved real stock, the same
-  // reason its product can't be changed here either.
-  const needsVariant = !batch && Boolean(selected?.variants?.length);
-
   const qty = Number(quantity);
   const cost = Number(unitCost);
   const qtyOk = quantity.trim() !== "" && Number.isFinite(qty) && qty > 0;
   const costOk = unitCost.trim() !== "" && Number.isFinite(cost) && cost >= 0;
-  const valid =
-    Boolean(productId) &&
-    (!needsVariant || Boolean(variantId)) &&
-    qtyOk &&
-    costOk &&
-    !saving;
+  const price = Number(unitPrice);
+  const priceOk = unitPrice.trim() !== "" && Number.isFinite(price) && price >= 0;
+  const valid = Boolean(productId) && qtyOk && costOk && priceOk && !saving;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -135,6 +130,7 @@ export function BatchDialog({
         purchasedAt: when,
         quantity: qty,
         unitCost: cost,
+        unitPrice: price,
         note,
       };
       const vendorArg = vendorId ? (vendorId as Id<"vendors">) : null;
@@ -144,7 +140,6 @@ export function BatchDialog({
       } else {
         await add({
           productId: productId as Id<"products">,
-          variantId: needsVariant ? variantId : undefined,
           ...payload,
           vendorId: vendorArg ?? undefined,
         });
@@ -164,7 +159,7 @@ export function BatchDialog({
       onClose={onClose}
       icon={<Layers size={19} />}
       title={batch ? "Edit stock lot" : "Add stock lot"}
-      subtitle="What this lot cost you — the product's own sell price covers the rest."
+      subtitle="Stock, buy price and sell price all live on the lot — a size is just a lot of its own."
     >
       <form onSubmit={submit}>
         <div className="flex flex-col gap-6 px-6 py-6">
@@ -175,10 +170,7 @@ export function BatchDialog({
             ) : (
               <Select
                 value={productId}
-                onChange={(e) => {
-                  setProductId(e.target.value);
-                  setVariantId("");
-                }}
+                onChange={(e) => setProductId(e.target.value)}
                 aria-label="Product"
                 required
               >
@@ -193,30 +185,6 @@ export function BatchDialog({
               </Select>
             )}
           </div>
-
-          {needsVariant && (
-            <div className="flex flex-col gap-2.5">
-              <SectionLabel>Size</SectionLabel>
-              <Select
-                value={variantId}
-                onChange={(e) => setVariantId(e.target.value)}
-                aria-label="Size"
-                required
-              >
-                <option value="" disabled>
-                  Choose a size…
-                </option>
-                {selected!.variants!.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}
-                  </option>
-                ))}
-              </Select>
-              <p className="text-[12px] leading-4.5 text-ink-3">
-                This lot restocks this size only, not the product's other sizes.
-              </p>
-            </div>
-          )}
 
           <div className="flex flex-col gap-2.5">
             <div className="flex items-baseline justify-between gap-3">
@@ -238,7 +206,7 @@ export function BatchDialog({
           </div>
 
           <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Lot name" hint="e.g. 1st stock, 2nd stock.">
+            <Field label="Lot name / size" hint="e.g. 1st stock, 500 gram, 1 kg.">
               {(id) => (
                 <Input
                   id={id}
@@ -278,15 +246,27 @@ export function BatchDialog({
             )}
           </Field>
 
-          <div className="flex flex-col gap-2.5">
-            <SectionLabel>Buy price (per unit)</SectionLabel>
-            <AmountInput
-              symbol={CURRENCY_SYMBOL}
-              value={unitCost}
-              onChange={(e) => setUnitCost(e.target.value)}
-              placeholder="0"
-              required
-            />
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="flex flex-col gap-2.5">
+              <SectionLabel>Buy price (per unit)</SectionLabel>
+              <AmountInput
+                symbol={CURRENCY_SYMBOL}
+                value={unitCost}
+                onChange={(e) => setUnitCost(e.target.value)}
+                placeholder="0"
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-2.5">
+              <SectionLabel>Sell price (per unit)</SectionLabel>
+              <AmountInput
+                symbol={CURRENCY_SYMBOL}
+                value={unitPrice}
+                onChange={(e) => setUnitPrice(e.target.value)}
+                placeholder="0"
+                required
+              />
+            </div>
           </div>
 
           {/*

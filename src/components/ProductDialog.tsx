@@ -1,26 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, PackagePlus, Pencil, Trash2, Upload } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Doc } from "../../convex/_generated/dataModel";
-import {
-  AmountInput,
-  Button,
-  Field,
-  Input,
-  Modal,
-  ModalFooter,
-  SectionLabel,
-  Stepper,
-  Textarea,
-  cx,
-} from "./ui";
-import {
-  ProductVariantsField,
-  newVariantRow,
-  type StockMode,
-  type VariantRow,
-} from "./ProductVariantsField";
-import { CURRENCY_SYMBOL } from "../lib/format";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
+import { Button, Field, Input, Modal, ModalFooter, SectionLabel, Textarea, cx } from "./ui";
 import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedQuery, useAuthedMutation } from "../lib/session";
@@ -28,59 +10,40 @@ import { uploadFile, useFileDrop, useUploadProgress } from "../lib/upload";
 
 type ProductWithPhoto = Doc<"products"> & { photoUrl?: string | null };
 
+/*
+  Only what a product is. Its stock and prices live on its lots — a product
+  is added here, then stocked with a lot.
+*/
 type Draft = {
   name: string;
   category: string;
-  costPrice: string;
-  sellPrice: string;
-  quantity: number;
   unit: string;
   details: string;
 };
 
-const EMPTY: Draft = {
-  name: "",
-  category: "",
-  costPrice: "",
-  sellPrice: "",
-  quantity: 1,
-  unit: "",
-  details: "",
-};
+const EMPTY: Draft = { name: "", category: "", unit: "", details: "" };
 
 function toDraft(product: Doc<"products">): Draft {
   return {
     name: product.name,
     category: product.category ?? "",
-    costPrice: String(product.costPrice),
-    sellPrice: product.sellPrice !== undefined ? String(product.sellPrice) : "",
-    quantity: product.quantity,
     unit: product.unit ?? "",
     details: product.details,
   };
-}
-
-function toVariantRows(product?: Doc<"products"> | null): VariantRow[] {
-  if (!product?.variants?.length) return [newVariantRow()];
-  return product.variants.map((v) => ({
-    id: v.id,
-    label: v.label,
-    costPrice: String(v.costPrice),
-    sellPrice: v.sellPrice !== undefined ? String(v.sellPrice) : "",
-    quantity: v.quantity !== undefined ? String(v.quantity) : "",
-    baseQuantity: v.baseQuantity !== undefined ? String(v.baseQuantity) : "",
-  }));
 }
 
 export function ProductDialog({
   open,
   onClose,
   product,
+  onCreated,
 }: {
   open: boolean;
   onClose: () => void;
   /** Present when editing; absent when adding. */
   product?: ProductWithPhoto | null;
+  /** Called with the new product's id, so its first lot can be added straight away. */
+  onCreated?: (id: Id<"products">) => void;
 }) {
   const t = useT();
   const toast = useToast();
@@ -109,25 +72,12 @@ export function ProductDialog({
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
-  /*
-    Sizes are an opt-in alternative to the plain cost/sell/quantity above,
-    not a second copy of them — a product keeps behaving exactly as before
-    until this is switched on, so the thirteen products that already exist
-    see no change at all.
-  */
-  const [useVariants, setUseVariants] = useState(false);
-  const [stockMode, setStockMode] = useState<StockMode>("separate");
-  const [variantRows, setVariantRows] = useState<VariantRow[]>([newVariantRow()]);
-
   useEffect(() => {
     if (!open) return;
     setDraft(product ? toDraft(product) : EMPTY);
     setSavedPhotoUrl(product?.photoUrl ?? null);
     setPhotoPreview(product?.photoUrl ?? null);
     setPendingPhoto(null);
-    setUseVariants(Boolean(product?.variants?.length));
-    setStockMode(product?.stockMode ?? "separate");
-    setVariantRows(toVariantRows(product));
   }, [open, product]);
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
@@ -178,35 +128,7 @@ export function ProductDialog({
     }
   }
 
-  const costPrice = Number(draft.costPrice);
-  const sellPrice = draft.sellPrice.trim() === "" ? undefined : Number(draft.sellPrice);
-
-  const parsedVariants = variantRows.map((r) => ({
-    id: r.id,
-    label: r.label.trim(),
-    costPrice: Number(r.costPrice),
-    sellPrice: r.sellPrice.trim() === "" ? undefined : Number(r.sellPrice),
-    quantity: stockMode === "separate" ? Number(r.quantity || 0) : undefined,
-    baseQuantity: stockMode === "shared" ? Number(r.baseQuantity) : undefined,
-  }));
-  const variantsValid =
-    parsedVariants.length > 0 &&
-    parsedVariants.every((v) => {
-      if (!v.label) return false;
-      if (!Number.isFinite(v.costPrice) || v.costPrice < 0) return false;
-      if (v.sellPrice !== undefined && (!Number.isFinite(v.sellPrice) || v.sellPrice < 0)) return false;
-      return stockMode === "separate"
-        ? Number.isInteger(v.quantity) && (v.quantity as number) >= 0
-        : Number.isFinite(v.baseQuantity) && (v.baseQuantity as number) > 0;
-    });
-
-  const valid =
-    draft.name.trim().length > 0 &&
-    (useVariants
-      ? variantsValid
-      : draft.costPrice.trim() !== "" && Number.isFinite(costPrice) && costPrice >= 0) &&
-    Number.isInteger(draft.quantity) &&
-    draft.quantity >= 0;
+  const valid = draft.name.trim().length > 0;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -215,16 +137,9 @@ export function ProductDialog({
     try {
       const payload = {
         name: draft.name,
-        // The server computes these from the sizes when there are any —
-        // what's sent here only matters for a plain, single-price product.
-        costPrice: useVariants ? 0 : costPrice,
-        sellPrice: useVariants ? undefined : sellPrice,
         details: draft.details,
         category: draft.category,
-        quantity: draft.quantity,
         unit: draft.unit,
-        variants: useVariants ? parsedVariants : undefined,
-        stockMode: useVariants ? stockMode : undefined,
       };
       if (product) {
         await update({ id: product._id, ...payload });
@@ -239,6 +154,9 @@ export function ProductDialog({
           await setPhoto({ id, storageId });
         }
         toast.ok(`Added ${payload.name.trim()}.`);
+        onClose();
+        onCreated?.(id);
+        return;
       }
       onClose();
     } catch (err) {
@@ -257,7 +175,7 @@ export function ProductDialog({
       subtitle={
         product
           ? "Past sales keep the cost they were recorded with."
-          : "Cost price is what you pay — profit is measured against it."
+          : "Next you'll add its first lot — that's where stock and prices go."
       }
     >
       <form onSubmit={submit}>
@@ -370,109 +288,6 @@ export function ProductDialog({
             <option value="বক্স" />
             <option value="প্যাকেট" />
           </datalist>
-
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setUseVariants(false)}
-              aria-pressed={!useVariants}
-              className={cx(
-                "rounded-xl border px-3 py-2.5 text-[12.5px] font-semibold transition-colors",
-                !useVariants
-                  ? "border-accent bg-accent-soft text-ink"
-                  : "border-line-strong bg-page text-ink-2 hover:bg-surface-2",
-              )}
-            >
-              {t("products.simplePricing")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setUseVariants(true)}
-              aria-pressed={useVariants}
-              className={cx(
-                "rounded-xl border px-3 py-2.5 text-[12.5px] font-semibold transition-colors",
-                useVariants
-                  ? "border-accent bg-accent-soft text-ink"
-                  : "border-line-strong bg-page text-ink-2 hover:bg-surface-2",
-              )}
-            >
-              {t("products.multipleSizes")}
-            </button>
-          </div>
-
-          {useVariants ? (
-            <div className="flex flex-col gap-3">
-              <ProductVariantsField
-                stockMode={stockMode}
-                onStockModeChange={setStockMode}
-                rows={variantRows}
-                onChange={setVariantRows}
-              />
-              {stockMode === "shared" && (
-                <div className="flex items-center justify-between gap-4 rounded-xl border border-line bg-page px-3.5 py-3">
-                  <div>
-                    <SectionLabel>{t("products.totalStock")}</SectionLabel>
-                    <p className="mt-1 text-[11.5px] text-ink-3">{t("products.stockSharedHint")}</p>
-                  </div>
-                  <div className="w-36">
-                    <Stepper
-                      value={draft.quantity}
-                      onChange={(n) => set("quantity", n)}
-                      min={0}
-                      label={t("products.totalStock")}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2.5">
-              <div className="flex items-baseline justify-between gap-3">
-                <SectionLabel>Cost price</SectionLabel>
-                <span className="text-[11.5px] text-ink-3">What one unit costs you</span>
-              </div>
-              <AmountInput
-                symbol={CURRENCY_SYMBOL}
-                value={draft.costPrice}
-                onChange={(e) => set("costPrice", e.target.value)}
-                placeholder="0"
-                required
-              />
-
-              {/*
-                Without this, orders had no selling price to prefill and fell
-                back to cost — which recorded every sale at zero profit.
-              */}
-              <div className="mt-2 flex flex-col gap-2.5">
-                <div className="flex items-baseline justify-between gap-3">
-                  <SectionLabel>{t("products.sellPrice")}</SectionLabel>
-                  <span className="text-[11.5px] text-ink-3">{t("common.optional")}</span>
-                </div>
-                <AmountInput
-                  symbol={CURRENCY_SYMBOL}
-                  value={draft.sellPrice}
-                  onChange={(e) => set("sellPrice", e.target.value)}
-                  placeholder="0"
-                />
-                <p className="text-[12px] leading-4.5 text-ink-3">{t("products.sellPriceHint")}</p>
-              </div>
-
-              <div className="mt-2 flex items-center justify-between gap-4">
-                <div>
-                  <SectionLabel>Quantity in stock</SectionLabel>
-                  <p className="mt-1 text-[11.5px] text-ink-3">Units available to sell</p>
-                </div>
-                <div className="w-36">
-                  <Stepper
-                    value={draft.quantity}
-                    onChange={(n) => set("quantity", n)}
-                    min={0}
-                    label="quantity in stock"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
 
           <div className="flex flex-col gap-2.5">
             <div className="flex items-baseline justify-between gap-3">

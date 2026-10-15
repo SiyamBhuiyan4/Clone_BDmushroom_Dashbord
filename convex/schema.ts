@@ -206,17 +206,15 @@ export default defineSchema({
     remaining: v.optional(v.number()),
     unitCost: v.number(),
     /*
-      Legacy only — lots no longer collect a sell price of their own (it
-      silently overrode the product's price at the point of sale). Kept
-      optional so old records still read; `profit:clearLotSellPrices` wipes
-      it from existing rows, and nothing writes it again.
+      What one unit of this lot sells for. Every lot has one — a product has
+      no price of its own any more (see stock.ts). Optional only for lots
+      recorded before that, until `migrations:lotsOnly` fills them in.
     */
     unitPrice: v.optional(v.number()),
     note: v.optional(v.string()),
     /*
-      Which size this lot restocks, for a product that sells in sizes — set
-      once at creation and never changed, the same way the product itself is
-      locked once a lot exists. Absent for a plain product with no variants.
+      Legacy: which product size this lot restocked, from when sizes lived
+      on the product. A size is now just a lot of its own, named after it.
     */
     variantId: v.optional(v.string()),
     variantLabel: v.optional(v.string()),
@@ -426,12 +424,13 @@ export default defineSchema({
     name: v.string(),
     /** The product's photo, stored in Convex file storage. */
     photoId: v.optional(v.id("_storage")),
-    // What it costs you to acquire one unit.
-    costPrice: v.number(),
     /*
-      Default selling price, so picking a product on an order fills the price
-      in. Optional because products created before orders existed have none.
+      Kept in step with the product's lots by `syncProduct` (stock.ts) — the
+      cheapest buy and sell price among lots with stock left — and never set
+      by hand. The lots are the truth; these are for screens that only need
+      one figure.
     */
+    costPrice: v.number(),
     sellPrice: v.optional(v.number()),
     /*
       What a "unit" means for this product — পিস, কেজি, গ্রাম, লিটার. Without
@@ -441,17 +440,14 @@ export default defineSchema({
     tags: v.optional(v.array(v.string())),
     details: v.string(),
     category: v.optional(v.string()),
-    // Units currently on hand.
+    // Units currently on hand: what is left across all lots (see stock.ts).
     quantity: v.number(),
     /** Per-product low-stock threshold; falls back to a global default. */
     reorderLevel: v.optional(v.number()),
     /*
-      Size/package options for one product — "500 gram" at one price, "1 kg"
-      at another — each with its own buy and sell price. Absent for an
-      ordinary single-price product, which is most of them; `costPrice`,
-      `sellPrice` and `quantity` above keep meaning what they always have.
-      When present, those three fields mirror what the variants add up to
-      (see products.ts) so every other screen keeps reading from one place.
+      Legacy: sizes used to live on the product. Each size is now a lot of its
+      own, with its own prices, and `migrations:lotsOnly` clears these two.
+      Kept optional only so the rows still validate until it has run.
     */
     variants: v.optional(
       v.array(
@@ -468,11 +464,6 @@ export default defineSchema({
         }),
       ),
     ),
-    /*
-      "separate": each variant is its own countable stock (pre-packed sizes).
-      "shared": one pooled `quantity` in the base unit, each variant just a
-      priced slice of it. Meaningless without `variants`.
-    */
     stockMode: v.optional(v.union(v.literal("separate"), v.literal("shared"))),
     archived: v.boolean(),
     createdAt: v.number(),

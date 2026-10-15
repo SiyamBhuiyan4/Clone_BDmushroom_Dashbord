@@ -2,6 +2,7 @@ import { internalMutation, internalQuery, mutation, query, type MutationCtx } fr
 import type { Doc } from "./_generated/dataModel";
 import { v, ConvexError } from "convex/values";
 import { requireSession, verifyPasscode } from "./auth";
+import { returnSaleToStock, syncProduct } from "./stock";
 
 /*
   Erase actions.
@@ -295,22 +296,8 @@ export const resetRange = mutation({
     }
 
     for (const sale of doomedSales.values()) {
-      if (args.restoreStock) {
-        const product = await ctx.db.get(sale.productId);
-        if (product) {
-          await ctx.db.patch(sale.productId, { quantity: product.quantity + sale.quantity });
-        }
-        // Back to the lot it was drawn from, not just to the shelf total.
-        if (sale.batchId) {
-          const batch = await ctx.db.get(sale.batchId);
-          if (batch) {
-            const left = batch.remaining ?? batch.quantity;
-            await ctx.db.patch(sale.batchId, {
-              remaining: Math.min(batch.quantity, left + sale.quantity),
-            });
-          }
-        }
-      }
+      // Back to the lot it was drawn from.
+      if (args.restoreStock) await returnSaleToStock(ctx, sale);
       await archiveDoc(ctx, "sales", sale, batchId, "resetRange");
       await ctx.db.delete(sale._id);
       removed.sales++;
@@ -352,17 +339,10 @@ export const resetRange = mutation({
         )
         .collect();
       for (const l of rows) {
-        const product = await ctx.db.get(l.productId);
-        if (product) {
-          // Only what is left in the lot, for the same reason removeBatch
-          // takes only that: the sold units already came off stock.
-          const left = l.remaining ?? l.quantity;
-          await ctx.db.patch(l.productId, {
-            quantity: Math.max(0, product.quantity - left),
-          });
-        }
         await archiveDoc(ctx, "stockBatches", l, batchId, "resetRange");
         await ctx.db.delete(l._id);
+        // Only what was left in it leaves stock; sold units already had.
+        await syncProduct(ctx, l.productId);
         removed.lots++;
       }
     }

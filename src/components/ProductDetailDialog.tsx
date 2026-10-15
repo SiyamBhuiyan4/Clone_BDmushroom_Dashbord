@@ -14,7 +14,6 @@ import { plural } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { uploadFile, useFileDrop, useUploadProgress } from "../lib/upload";
-import { variantAvailable } from "../../convex/shared";
 
 type ProductWithPhoto = Doc<"products"> & { photoUrl?: string | null };
 
@@ -113,8 +112,10 @@ function toBatchInput(lot: Doc<"stockBatches">): BatchInput {
     purchasedAt: lot.purchasedAt,
     quantity: lot.quantity,
     unitCost: lot.unitCost,
+    unitPrice: lot.unitPrice,
     remaining: lot.remaining,
     note: lot.note,
+    vendorId: lot.vendorId,
   };
 }
 
@@ -199,33 +200,6 @@ export function ProductDetailDialog({
               <p className="text-[13px] leading-6 whitespace-pre-wrap text-ink-2">
                 {data.product.details}
               </p>
-            </div>
-          )}
-
-          {data.product.variants && data.product.variants.length > 0 && (
-            <div>
-              <p className="mb-2.5 text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">
-                {t("products.multipleSizes")}
-              </p>
-              <ul className="flex flex-col gap-2">
-                {data.product.variants.map((v) => (
-                  <li
-                    key={v.id}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-[13px] font-semibold text-ink">{v.label}</p>
-                      <p className="mt-0.5 text-[12px] text-ink-3">
-                        {fmt(v.costPrice)}
-                        {v.sellPrice !== undefined ? ` → ${fmt(v.sellPrice)}` : ""}
-                      </p>
-                    </div>
-                    <Badge tone="accent">
-                      {fmtNum(variantAvailable(data.product, v.id))} {t("products.variantStock").toLowerCase()}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
             </div>
           )}
 

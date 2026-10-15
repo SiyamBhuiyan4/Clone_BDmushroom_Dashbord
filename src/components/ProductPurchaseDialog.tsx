@@ -27,11 +27,12 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
   const add = useAuthedMutation(api.profit.addPurchaseCostBatch);
 
   const [productId, setProductId] = useState("");
-  const [variantId, setVariantId] = useState("");
+  const [label, setLabel] = useState("");
   const [vendorId, setVendorId] = useState("");
   const [purchasedAt, setPurchasedAt] = useState("");
   const [quantity, setQuantity] = useState("");
   const [unitCost, setUnitCost] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   /*
@@ -45,23 +46,25 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
   useEffect(() => {
     if (!open) return;
     setProductId("");
-    setVariantId("");
+    setLabel("");
     setVendorId("");
     setPurchasedAt(toLocalInputValue(Date.now()));
     setQuantity("");
     setUnitCost("");
+    setUnitPrice("");
     setNote("");
     setSavedLotId(null);
   }, [open]);
 
   const selected = useMemo(() => products?.find((p) => p._id === productId), [products, productId]);
-  const needsVariant = Boolean(selected?.variants?.length);
 
   const qty = Number(quantity);
   const cost = Number(unitCost);
   const qtyOk = quantity.trim() !== "" && Number.isFinite(qty) && qty > 0;
   const costOk = unitCost.trim() !== "" && Number.isFinite(cost) && cost >= 0;
-  const valid = Boolean(productId) && (!needsVariant || Boolean(variantId)) && qtyOk && costOk && !saving;
+  const price = Number(unitPrice);
+  const priceOk = unitPrice.trim() !== "" && Number.isFinite(price) && price >= 0;
+  const valid = Boolean(productId) && qtyOk && costOk && priceOk && !saving;
   const total = qtyOk && costOk ? qty * cost : 0;
 
   async function submit(e: React.FormEvent) {
@@ -72,11 +75,11 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
       const when = purchasedAt ? new Date(purchasedAt).getTime() : Date.now();
       const id = await add({
         productId: productId as Id<"products">,
-        variantId: needsVariant ? variantId : undefined,
-        label: "Product purchase",
+        label: label.trim() || "Product purchase",
         purchasedAt: when,
         quantity: qty,
         unitCost: cost,
+        unitPrice: price,
         note,
         vendorId: vendorId ? (vendorId as Id<"vendors">) : undefined,
       });
@@ -127,10 +130,7 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
             <SectionLabel>Product</SectionLabel>
             <Select
               value={productId}
-              onChange={(e) => {
-                setProductId(e.target.value);
-                setVariantId("");
-              }}
+              onChange={(e) => setProductId(e.target.value)}
               aria-label="Product"
               required
             >
@@ -145,29 +145,17 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
             </Select>
           </div>
 
-          {needsVariant && (
-            <div className="flex flex-col gap-2.5">
-              <SectionLabel>Size</SectionLabel>
-              <Select
-                value={variantId}
-                onChange={(e) => setVariantId(e.target.value)}
-                aria-label="Size"
-                required
-              >
-                <option value="" disabled>
-                  Choose a size…
-                </option>
-                {selected!.variants!.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}
-                  </option>
-                ))}
-              </Select>
-              <p className="text-[12px] leading-4.5 text-ink-3">
-                This purchase restocks this size only, not the product's other sizes.
-              </p>
-            </div>
-          )}
+          <Field label="Lot name / size" hint="e.g. 1st stock, 500 gram, 1 kg.">
+            {(id) => (
+              <Input
+                id={id}
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="Product purchase"
+                autoComplete="off"
+              />
+            )}
+          </Field>
 
           <div className="flex flex-col gap-2.5">
             <div className="flex items-baseline justify-between gap-3">
@@ -213,15 +201,27 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
             </Field>
           </div>
 
-          <div className="flex flex-col gap-2.5">
-            <SectionLabel>Buy price (per unit)</SectionLabel>
-            <AmountInput
-              symbol={CURRENCY_SYMBOL}
-              value={unitCost}
-              onChange={(e) => setUnitCost(e.target.value)}
-              placeholder="0"
-              required
-            />
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="flex flex-col gap-2.5">
+              <SectionLabel>Buy price (per unit)</SectionLabel>
+              <AmountInput
+                symbol={CURRENCY_SYMBOL}
+                value={unitCost}
+                onChange={(e) => setUnitCost(e.target.value)}
+                placeholder="0"
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-2.5">
+              <SectionLabel>Sell price (per unit)</SectionLabel>
+              <AmountInput
+                symbol={CURRENCY_SYMBOL}
+                value={unitPrice}
+                onChange={(e) => setUnitPrice(e.target.value)}
+                placeholder="0"
+                required
+              />
+            </div>
           </div>
 
           <div className="flex items-center justify-between gap-4 rounded-2xl border border-line bg-page p-5">

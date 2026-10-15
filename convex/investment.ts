@@ -45,29 +45,15 @@ export const current = query({
   Day to day, the balance is kept by `adjustInvestment` calls scattered across
   every place stock moves — which only stays right if every one of those call
   sites was already wired up correctly. This instead throws that history away
-  and prices what is on the shelf *right now*, straight from each product's
-  own quantity and cost — the same ground truth the Products page already
-  shows — so it also corrects for stock that changed through a path nothing
-  here ever taught to touch Investment.
+  and prices what is on the shelf *right now*: what is left in every lot, at
+  what that lot cost.
 */
 export const recalculate = internalMutation({
   args: {},
   handler: async (ctx) => {
-    const products = await ctx.db.query("products").collect();
     let total = 0;
-    for (const p of products) {
-      if (!p.variants?.length) {
-        total += p.quantity * p.costPrice;
-      } else if (p.stockMode === "separate") {
-        for (const v of p.variants) total += (v.quantity ?? 0) * v.costPrice;
-      } else {
-        // A shared pool has no price of its own — each size prices its own
-        // package, not the pool unit. Valuing it at the cheapest rate on
-        // record means an approximation this can't get exactly right errs
-        // low rather than overstating what is actually invested.
-        const perUnit = Math.min(...p.variants.map((v) => v.costPrice / (v.baseQuantity ?? 1)));
-        total += p.quantity * perUnit;
-      }
+    for (const lot of await ctx.db.query("stockBatches").collect()) {
+      total += (lot.remaining ?? lot.quantity) * lot.unitCost;
     }
     const row = await ctx.db
       .query("counters")

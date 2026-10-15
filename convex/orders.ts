@@ -3,8 +3,7 @@ import { v, ConvexError } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { requireSession, verifyPasscode } from "./auth";
 import { rememberCustomer } from "./customers";
-import { adjustStock } from "./products";
-import { variantAvailable } from "./shared";
+import { oldestOpenLot, returnSaleToStock, takeFromLot } from "./stock";
 import { adjustInvestment } from "./investment";
 
 /*
@@ -27,13 +26,10 @@ const itemInput = v.object({
   quantity: v.number(),
   unitPrice: v.number(),
   /*
-    Which purchase lot to sell out of. Optional: a product with no lots, or a
-    sale nobody wants to attribute, still works and falls back to the
-    product's own cost price.
+    Which lot to sell out of. Stock only lives in lots, so every line draws
+    from one; left out, it is the oldest lot that still has stock.
   */
   batchId: v.optional(v.id("stockBatches")),
-  /** Which size, for a product sold in variants. */
-  variantId: v.optional(v.string()),
 });
 
 type Totals = { subtotal: number; total: number };
@@ -82,19 +78,13 @@ function validate(
 }
 
 /**
- * Resolves each line against its product, snapshotting the name, unit and
- * cost. Returns which lines exceed available stock so the caller can decide
- * whether that needs an override.
+ * Resolves each line against its product and lot, snapshotting the name,
+ * unit and cost. Returns which lines exceed what is left in their lot so the
+ * caller can decide whether that needs an override.
  */
 async function resolveItems(
   ctx: MutationCtx,
-  items: {
-    productId: Id<"products">;
-    quantity: number;
-    unitPrice: number;
-    batchId?: Id<"stockBatches">;
-    variantId?: string;
-  }[],
+  items: { productId: Id<"products">; quantity: number; unitPrice: number; batchId?: Id<"stockBatches"> }[],
 ) {
   const resolved = [];
   const short: string[] = [];
@@ -102,73 +92,46 @@ async function resolveItems(
     const product = await ctx.db.get(line.productId);
     if (!product) throw new ConvexError("A product on this sale no longer exists.");
 
-    const variant = line.variantId ? product.variants?.find((v) => v.id === line.variantId) : undefined;
-    if (line.variantId && !variant) {
-      throw new ConvexError(`That size of ${product.name} no longer exists.`);
+    const batch = line.batchId ? await ctx.db.get(line.batchId) : await oldestOpenLot(ctx, line.productId);
+    if (line.batchId && !batch) throw new ConvexError("That stock lot no longer exists.");
+    if (!batch) throw new ConvexError(`${product.name} has no stock — add a lot first.`);
+    if (batch.productId !== line.productId) {
+      throw new ConvexError(`${batch.label} is not a lot of ${product.name}.`);
     }
-
-    if (variant) {
-      const available = variantAvailable(product, variant.id);
-      if (line.quantity > available) {
-        short.push(
-          `${product.name} (${variant.label}): ${line.quantity} requested, ${available} available`,
-        );
-      }
-    } else if (line.quantity > product.quantity) {
-      short.push(
-        `${product.name}: ${line.quantity} requested, ${product.quantity} ${product.unit ?? DEFAULT_UNIT} available`,
-      );
+    const left = batch.remaining ?? batch.quantity;
+    if (line.quantity > left) {
+      short.push(`${product.name} (${batch.label}): ${line.quantity} requested, ${left} left in that lot`);
     }
 
     /*
-      Cost comes from the chosen lot when there is one, else the chosen size,
-      else the product's own cost. The same product bought twice at different
+      Cost comes from the lot. The same product bought twice at different
       prices makes two different profits, and averaging them into a single
       cost price is how a shop convinces itself a bad buy was fine. The figure
-      is snapshotted here, so editing the lot or the size later cannot
-      rewrite what this sale earned.
+      is snapshotted here, so editing the lot later cannot rewrite what this
+      sale earned.
     */
-    let unitCost = variant ? variant.costPrice : product.costPrice;
-    if (line.batchId) {
-      const batch = await ctx.db.get(line.batchId);
-      if (!batch) throw new ConvexError("That stock lot no longer exists.");
-      if (batch.productId !== line.productId) {
-        throw new ConvexError(`${batch.label} is not a lot of ${product.name}.`);
-      }
-      const left = batch.remaining ?? batch.quantity;
-      if (line.quantity > left) {
-        short.push(
-          `${product.name} (${batch.label}): ${line.quantity} requested, ${left} left in that lot`,
-        );
-      }
-      unitCost = batch.unitCost;
-    }
-
     resolved.push({
       productId: line.productId,
       productName: product.name,
       quantity: line.quantity,
-      unit: variant ? variant.label : (product.unit ?? DEFAULT_UNIT),
+      unit: product.unit ?? DEFAULT_UNIT,
       unitPrice: line.unitPrice,
-      unitCost,
-      batchId: line.batchId,
-      variantId: variant?.id,
-      variantLabel: variant?.label,
+      unitCost: batch.unitCost,
+      batchId: batch._id,
     });
   }
   return { resolved, short };
 }
 
-/** Which already-recorded lines, if confirmed/restored right now, would oversell. */
+/** Which already-recorded lines, if confirmed/restored right now, would oversell their lot. */
 async function shortageOf(
   ctx: MutationCtx,
-  items: { productId: Id<"products">; productName: string; quantity: number; variantId?: string }[],
+  items: { productId: Id<"products">; productName: string; quantity: number; batchId?: Id<"stockBatches"> }[],
 ) {
   const short: string[] = [];
   for (const line of items) {
-    const product = await ctx.db.get(line.productId);
-    if (!product) continue;
-    const available = line.variantId ? variantAvailable(product, line.variantId) : product.quantity;
+    const lot = line.batchId ? await ctx.db.get(line.batchId) : await oldestOpenLot(ctx, line.productId);
+    const available = lot ? (lot.remaining ?? lot.quantity) : 0;
     if (line.quantity > available) {
       short.push(`${line.productName}: only ${available} left`);
     }
@@ -334,15 +297,10 @@ async function fulfil(ctx: MutationCtx, id: Id<"orders">) {
   const saleIds: Id<"sales">[] = [];
 
   for (const line of order.items) {
-    await adjustStock(ctx, line.productId, line.variantId, -line.quantity);
-    // The lot empties along with the shelf it sits on.
-    if (line.batchId) {
-      const batch = await ctx.db.get(line.batchId);
-      if (batch) {
-        const left = batch.remaining ?? batch.quantity;
-        await ctx.db.patch(line.batchId, { remaining: Math.max(0, left - line.quantity) });
-      }
-    }
+    // An order written before every line named its lot sells out of the
+    // oldest one that has stock now.
+    const lot = line.batchId ? await ctx.db.get(line.batchId) : await oldestOpenLot(ctx, line.productId);
+    if (lot) await takeFromLot(ctx, lot._id, line.quantity);
     const effectivePrice = line.unitPrice * (1 - discountRatio);
     // A sale recovers money that was sitting in stock, so it comes off
     // Investment the same way buying stock added to it.
@@ -350,7 +308,7 @@ async function fulfil(ctx: MutationCtx, id: Id<"orders">) {
     saleIds.push(
       await ctx.db.insert("sales", {
         productId: line.productId,
-        batchId: line.batchId,
+        batchId: lot?._id,
         productName: line.productName,
         unitCost: line.unitCost,
         unitPrice: effectivePrice,
@@ -421,17 +379,8 @@ export const cancel = mutation({
     for (const saleId of order.saleIds ?? []) {
       const sale = await ctx.db.get(saleId);
       if (!sale) continue;
-      await adjustStock(ctx, sale.productId, sale.variantId, sale.quantity);
-      // Back to the lot it was drawn from, not just to the shelf total.
-      if (sale.batchId) {
-        const batch = await ctx.db.get(sale.batchId);
-        if (batch) {
-          const left = batch.remaining ?? batch.quantity;
-          await ctx.db.patch(sale.batchId, {
-            remaining: Math.min(batch.quantity, left + sale.quantity),
-          });
-        }
-      }
+      // Back to the lot it was drawn from.
+      await returnSaleToStock(ctx, sale);
       // The sale no longer happened, so what it took out of Investment comes back.
       await adjustInvestment(ctx, sale.unitCost * sale.quantity);
       await ctx.db.delete(saleId);
@@ -601,17 +550,8 @@ export const remove = mutation({
     for (const saleId of order.saleIds ?? []) {
       const sale = await ctx.db.get(saleId);
       if (!sale) continue;
-      await adjustStock(ctx, sale.productId, sale.variantId, sale.quantity);
-      // Back to the lot it was drawn from, not just to the shelf total.
-      if (sale.batchId) {
-        const batch = await ctx.db.get(sale.batchId);
-        if (batch) {
-          const left = batch.remaining ?? batch.quantity;
-          await ctx.db.patch(sale.batchId, {
-            remaining: Math.min(batch.quantity, left + sale.quantity),
-          });
-        }
-      }
+      // Back to the lot it was drawn from.
+      await returnSaleToStock(ctx, sale);
       // The sale no longer happened, so what it took out of Investment comes back.
       await adjustInvestment(ctx, sale.unitCost * sale.quantity);
       await ctx.db.delete(saleId);

@@ -11,7 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Doc } from "../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Button, Card, EmptyState, Input, Select, cx } from "../components/ui";
 import { Pagination, SortSelect, usePagination } from "../components/Pagination";
 import { useT } from "../lib/i18n";
@@ -20,7 +20,6 @@ import { ProductDetailDialog } from "../components/ProductDetailDialog";
 import { SaleDialog } from "../components/SaleDialog";
 import { BatchDialog } from "../components/BatchDialog";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
-import { SetStockDialog } from "../components/SetStockDialog";
 import { RangePills } from "../components/RangePills";
 import { useSettings } from "../lib/settings";
 import { useRangeFilter } from "../lib/dateRange";
@@ -59,11 +58,10 @@ export function ProductsPage() {
     return map;
   }, [salesWindow, range.since, range.untilExclusive]);
 
-  const setStock = useAuthedMutation(api.products.setStock);
   /*
-    Lots with stock left, so a card can say what this product actually cost —
-    which is a range once it has been bought twice at two prices, not the one
-    figure on the product.
+    Lots with stock left, so a card can say what this product costs and sells
+    for — a range once it has been bought twice at two prices. Empty lots are
+    not counted: their price can no longer be sold at.
   */
   const openLots = useAuthedQuery(api.profit.openLots) ?? [];
   const setArchived = useAuthedMutation(api.products.setArchived);
@@ -74,8 +72,7 @@ export function ProductsPage() {
   const [selling, setSelling] = useState<Doc<"products"> | null>(null);
   const [deleting, setDeleting] = useState<Doc<"products"> | null>(null);
   const [viewing, setViewing] = useState<Doc<"products"> | null>(null);
-  const [lotFor, setLotFor] = useState<Doc<"products"> | null>(null);
-  const [settingStock, setSettingStock] = useState<Doc<"products"> | null>(null);
+  const [lotFor, setLotFor] = useState<Id<"products"> | null>(null);
 
   const visible = useMemo(() => {
     const filtered = (products ?? []).filter((p) => !category || p.category === category);
@@ -193,7 +190,7 @@ export function ProductsPage() {
             body={
               search || category
                 ? "Try a different search term or clear the category filter."
-                : "Add a product with a name, a cost price and however many units you have."
+                : "Add a product, then a lot with how many you bought and its buy and sell price."
             }
             action={
               !search && !category ? (
@@ -217,7 +214,7 @@ export function ProductsPage() {
                 key={product._id}
                 product={product}
                 lots={openLots.filter((l) => l.productId === product._id)}
-                onAddLot={() => setLotFor(product)}
+                onAddLot={() => setLotFor(product._id)}
                 onView={() => setViewing(product)}
                 onSell={() => setSelling(product)}
                 onEdit={() => setEditing(product)}
@@ -228,7 +225,6 @@ export function ProductsPage() {
                     product.archived ? `${product.name} restored.` : `${product.name} archived.`,
                   );
                 }}
-                onSetStock={() => setSettingStock(product)}
                 fmt={fmt}
                 profit={profitByProduct.get(product._id) ?? 0}
                 rangeLabel={range.activeLabel.full}
@@ -259,9 +255,9 @@ export function ProductsPage() {
       <BatchDialog
         open={lotFor !== null}
         onClose={() => setLotFor(null)}
-        presetProductId={lotFor?._id}
+        presetProductId={lotFor ?? undefined}
       />
-      <ProductDialog open={addOpen} onClose={() => setAddOpen(false)} />
+      <ProductDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={setLotFor} />
       <ProductDialog open={editing !== null} onClose={() => setEditing(null)} product={editing} />
       <SaleDialog
         open={selling !== null}
@@ -281,17 +277,6 @@ export function ProductsPage() {
           toast.ok(t("toast.productDeleted"));
         }}
       />
-      <SetStockDialog
-        open={settingStock !== null}
-        onClose={() => setSettingStock(null)}
-        productName={settingStock?.name ?? ""}
-        currentQuantity={settingStock?.quantity ?? 0}
-        onConfirm={async (quantity, passcode) => {
-          if (!settingStock) return;
-          await setStock({ id: settingStock._id, quantity, passcode });
-          toast.ok(t("toast.stockUpdated"));
-        }}
-      />
     </div>
   );
 }
@@ -305,29 +290,26 @@ function ProductCard({
   onEdit,
   onDelete,
   onArchiveToggle,
-  onSetStock,
   fmt,
   profit,
   rangeLabel,
 }: {
   product: ProductRow;
-  lots: { unitCost: number; remaining: number }[];
+  lots: { unitCost: number; unitPrice?: number; remaining: number }[];
   onAddLot: () => void;
   onView: () => void;
   onSell: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onArchiveToggle: () => void;
-  onSetStock: () => void;
   fmt: (v: number) => string;
   /** This product's actual profit in the page's selected date range. */
   profit: number;
   rangeLabel: string;
 }) {
   const t = useT();
-  // Ascending, so the footer can read the cheapest and dearest off the ends.
-  const lotCosts = [...lots].map((l) => l.unitCost).sort((a, b) => a - b);
-  const hasVariants = Boolean(product.variants?.length);
+  const lotCosts = lots.map((l) => l.unitCost);
+  const lotPrices = lots.map((l) => l.unitPrice).filter((p): p is number => p !== undefined);
   const out = product.quantity === 0;
   const low = product.quantity > 0 && product.quantity <= 3;
   const [showAll, setShowAll] = useState(false);
@@ -470,33 +452,10 @@ function ProductCard({
         <div className="mt-4 rounded-xl border border-line bg-surface-2/40 p-3">
           <div className="grid grid-cols-3 gap-2 divide-x divide-line">
             <div className="min-w-0 pr-1">
-              <MoneyStat
-                label="Cost price"
-                value={
-                  hasVariants
-                    ? fmtRange(fmt, product.variants!.map((v) => v.costPrice))
-                    : lotCosts.length > 0
-                      ? lotCosts[0] === lotCosts[lotCosts.length - 1]
-                        ? fmt(lotCosts[0])
-                        : `${fmt(lotCosts[0])}–${fmt(lotCosts[lotCosts.length - 1])}`
-                      : fmt(product.costPrice)
-                }
-              />
+              <MoneyStat label="Buy price" value={fmtRange(fmt, lotCosts)} />
             </div>
             <div className="min-w-0 px-2">
-              <MoneyStat
-                label={t("products.sellPrice")}
-                value={
-                  hasVariants
-                    ? fmtRange(
-                        fmt,
-                        product.variants!.map((v) => v.sellPrice).filter((p): p is number => p !== undefined),
-                      )
-                    : product.sellPrice !== undefined
-                      ? fmt(product.sellPrice)
-                      : "—"
-                }
-              />
+              <MoneyStat label={t("products.sellPrice")} value={fmtRange(fmt, lotPrices)} />
             </div>
             <div className="min-w-0 pl-2">
               <MoneyStat
@@ -529,26 +488,28 @@ function ProductCard({
           className="mt-3.5 flex items-center justify-between gap-2 border-t border-line/60 pt-3"
           onClick={(e) => e.stopPropagation()}
         >
-          {!hasVariants && (
-            <button
-              onClick={onSetStock}
-              aria-label={`Set stock for ${product.name}`}
-              title="Quick adjust stock quantity"
-              className="group/stock flex h-9.5 items-center gap-2 rounded-xl border border-line-strong bg-surface px-3 text-ink-3 transition-all hover:border-accent hover:bg-surface-2 hover:text-ink active:scale-95"
-            >
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">Stock</span>
-              <span className="min-w-5 text-center text-[13.5px] font-bold tabular-nums text-ink">
-                {product.quantity}
-              </span>
-              <Pencil size={12} className="text-ink-3 transition-colors group-hover/stock:text-accent" />
-            </button>
-          )}
+          {/*
+            Stock is what is left in the lots, so it is changed by adding or
+            editing a lot — tapping here opens them.
+          */}
+          <button
+            onClick={onView}
+            aria-label={`Lots for ${product.name}`}
+            title="Stock comes from lots — open to add or edit one"
+            className="group/stock flex h-9.5 items-center gap-2 rounded-xl border border-line-strong bg-surface px-3 text-ink-3 transition-all hover:border-accent hover:bg-surface-2 hover:text-ink active:scale-95"
+          >
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">Stock</span>
+            <span className="min-w-5 text-center text-[13.5px] font-bold tabular-nums text-ink">
+              {product.quantity}
+            </span>
+            <Layers size={12} className="text-ink-3 transition-colors group-hover/stock:text-accent" />
+          </button>
           <Button
             size="sm"
             variant="primary"
             onClick={onSell}
             disabled={out}
-            className={cx("h-9.5", hasVariants ? "w-full" : "px-5")}
+            className="h-9.5 px-5"
           >
             <ShoppingCart size={14} />
             Sell
