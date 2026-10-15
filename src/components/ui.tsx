@@ -414,6 +414,19 @@ export function Modal({
   const dismissRef = useRef(dismiss);
   dismissRef.current = dismiss;
 
+  /** Which panel is in focus — the one a click anywhere else steps back from. */
+  const topLayer = detail ? "detail" : stacked ? "stacked" : aside ? "aside" : "main";
+  /**
+   * True when the event's DOM target is in a panel of this dialog that is
+   * not the one in focus — the profile beside an open dashboard, say.
+   */
+  const isBehindPanel = (target: EventTarget | null) => {
+    const root = rootRef.current;
+    if (topLayer === "main" || !root || !(target instanceof Element) || !root.contains(target)) return false;
+    const layer = target.closest("[data-modal-layer]")?.getAttribute("data-modal-layer");
+    return Boolean(layer && layer !== topLayer && target.closest("[data-modal-panel]"));
+  };
+
   /** True when the event's DOM target sits inside this dialog's own markup, outside every panel. */
   const isOutsidePanels = (target: EventTarget | null) => {
     const root = rootRef.current;
@@ -497,6 +510,17 @@ export function Modal({
       onMouseDown={(e) => {
         downOutsideRef.current = isOutsidePanels(e.target);
       }}
+      /*
+        A click on a panel behind the one in focus steps back, like a click
+        outside — and does only that, so it can't also press whatever button
+        it landed on in the panel behind.
+      */
+      onClickCapture={(e) => {
+        if (!isBehindPanel(e.target)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        dismiss();
+      }}
       onClick={(e) => {
         if (downOutsideRef.current && isOutsidePanels(e.target)) dismiss();
         downOutsideRef.current = false;
@@ -524,6 +548,7 @@ export function Modal({
       <div
         ref={panelRef}
         data-modal-panel
+        data-modal-layer="main"
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -572,8 +597,8 @@ export function Modal({
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </div>
       </div>
-      <SlidePanel panel={side} layer="z-10" />
-      <SlidePanel panel={detailPanel} layer="z-20" />
+      <SlidePanel panel={side} layer="z-10" name="aside" />
+      <SlidePanel panel={detailPanel} layer="z-20" name="detail" />
       <Modal
         open={confirmingDiscard}
         onClose={() => setConfirmingDiscard(false)}
@@ -609,7 +634,9 @@ export function Modal({
               stack.shown ? "-translate-y-[5vh] opacity-100" : "translate-y-[70vh] opacity-0",
             )}
           >
-            <div className="pointer-events-auto flex max-h-full min-h-0 flex-col">{stack.content}</div>
+            <div data-modal-layer="stacked" className="pointer-events-auto flex max-h-full min-h-0 flex-col">
+              {stack.content}
+            </div>
           </div>
         </div>
       )}
@@ -654,11 +681,12 @@ function useSlidePanel(node: ReactNode): SlideState {
 }
 
 /** A dialog's side panel: beside it on a wide screen, over it on a narrow one. */
-function SlidePanel({ panel, layer }: { panel: SlideState; layer: string }) {
+function SlidePanel({ panel, layer, name }: { panel: SlideState; layer: string; name: string }) {
   if (!panel.mounted) return null;
   return (
     <div
       aria-hidden={!panel.shown}
+      data-modal-layer={name}
       className={cx(
         "absolute inset-0 flex items-center justify-center",
         layer,
