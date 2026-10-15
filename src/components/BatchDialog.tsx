@@ -164,6 +164,7 @@ export function BatchDialog({
 
   return (
     <Modal
+      guardChanges
       open={open}
       onClose={onClose}
       icon={<Layers size={19} />}

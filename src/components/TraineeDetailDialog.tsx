@@ -271,6 +271,7 @@ export function TraineeDetailDialog({
       subtitle={trainee?.phone}
       width="sm:max-w-2xl"
       stacked={lessonsPanel}
+      onBack={() => setLessonsOpen(false)}
     >
       {!data ? (
         <div className="ac-skeleton h-64 bg-surface" aria-hidden />

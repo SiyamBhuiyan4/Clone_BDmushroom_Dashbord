@@ -340,6 +340,7 @@ export function FixedCostsSection() {
       )}
 
       <Modal
+        guardChanges
         open={addOpen}
         onClose={() => setAddOpen(false)}
         title={t("fixedCosts.addCategoryTitle")}

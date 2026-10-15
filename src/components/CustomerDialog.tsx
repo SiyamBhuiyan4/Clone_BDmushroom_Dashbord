@@ -176,6 +176,7 @@ export function CustomerDialog({
 
   return (
     <Modal
+      guardChanges
       open={open}
       onClose={onClose}
       icon={<UserRound size={19} />}

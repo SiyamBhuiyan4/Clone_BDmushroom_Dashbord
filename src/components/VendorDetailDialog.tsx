@@ -128,6 +128,7 @@ export function VendorDetailDialog({
         setOpenFolderId(null);
         onClose();
       }}
+      onBack={() => setDashboardOpen(false)}
       aside={
         dashboardOpen && data ? (
           <VendorDashboardPanel

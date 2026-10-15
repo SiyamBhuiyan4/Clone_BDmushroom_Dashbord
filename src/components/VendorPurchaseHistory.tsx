@@ -289,6 +289,7 @@ function PayVendorDialog({ lot, onClose }: { lot: Doc<"stockBatches"> | null; on
 
   return (
     <Modal
+      guardChanges
       open={lot !== null}
       onClose={onClose}
       icon={<Wallet size={19} />}

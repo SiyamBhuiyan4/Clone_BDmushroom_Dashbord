@@ -168,6 +168,7 @@ export function ProductDialog({
 
   return (
     <Modal
+      guardChanges
       open={open}
       onClose={onClose}
       icon={product ? <Pencil size={18} /> : <PackagePlus size={19} />}

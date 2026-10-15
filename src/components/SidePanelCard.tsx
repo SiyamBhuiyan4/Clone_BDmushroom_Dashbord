@@ -24,7 +24,7 @@ export function SidePanelCard({
   children: ReactNode;
 }) {
   return (
-    <div className="flex max-h-full w-full min-w-0 flex-col rounded-[24px] border border-line bg-surface shadow-[var(--shadow-pop)]">
+    <div data-modal-panel className="flex max-h-full w-full min-w-0 flex-col rounded-[24px] border border-line bg-surface shadow-[var(--shadow-pop)]">
       <div className="relative shrink-0 overflow-hidden rounded-t-[24px] border-b border-line">
         <div
           className="pointer-events-none absolute -top-24 -right-16 size-56 rounded-full opacity-[0.13] blur-3xl"

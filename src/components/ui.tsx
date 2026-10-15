@@ -11,6 +11,7 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "../lib/i18n";
 import { ChevronDown, Minus, Plus, X } from "lucide-react";
 
 export function cx(...parts: (string | false | null | undefined)[]) {
@@ -324,6 +325,8 @@ export function Modal({
   aside,
   detail,
   stacked,
+  onBack,
+  guardChanges = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -355,8 +358,51 @@ export function Modal({
     point. Closing it plays that backwards.
   */
   stacked?: ReactNode;
+  /*
+    Steps back one layer — closes whichever of `aside`, `detail` or `stacked`
+    is on top. While one is open, a click outside the panels or Escape calls
+    this instead of closing the whole dialog, so each one backs out a step.
+  */
+  onBack?: () => void;
+  /*
+    For a form: once anything has been typed or picked in it, closing by a
+    click outside, Escape or the X asks "discard changes?" first. Saving
+    still closes it directly — the form calls `onClose` itself for that.
+  */
+  guardChanges?: boolean;
 }) {
+  const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
+  /** Identity for the stack below; the object itself is never read. */
+  const idRef = useRef({});
+
+  const side = useSlidePanel(aside);
+  const detailPanel = useSlidePanel(detail);
+  const stack = useSlidePanel(stacked);
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  /** Set by the first edit inside the dialog; cleared each time it opens. */
+  const dirtyRef = useRef(false);
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  /** Where the current click began — a drag that starts inside a panel and ends outside it is not a click outside. */
+  const downOutsideRef = useRef(false);
+  useEffect(() => {
+    if (open) {
+      dirtyRef.current = false;
+      setConfirmingDiscard(false);
+    }
+  }, [open]);
+
+  /** Closes the dialog, unless that would throw away an edit — then asks first. */
+  const requestClose = () => {
+    if (guardChanges && dirtyRef.current) setConfirmingDiscard(true);
+    else onClose();
+  };
+  /** One step back: the top side panel if one is open, else the dialog itself. */
+  const dismiss = () => {
+    if ((aside || detail || stacked) && onBack) onBack();
+    else requestClose();
+  };
   /*
     Held in a ref so the effect below keys on `open` alone. Callers pass an
     inline arrow for `onClose`, which is a fresh function on every render of
@@ -365,14 +411,15 @@ export function Modal({
     a lot on the Products page re-rendered it on every query update, so typing
     into a dialog kept losing the caret to the panel behind it.
   */
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  /** Identity for the stack below; the object itself is never read. */
-  const idRef = useRef({});
+  const dismissRef = useRef(dismiss);
+  dismissRef.current = dismiss;
 
-  const side = useSlidePanel(aside);
-  const detailPanel = useSlidePanel(detail);
-  const stack = useSlidePanel(stacked);
+  /** True when the event's DOM target sits inside this dialog's own markup, outside every panel. */
+  const isOutsidePanels = (target: EventTarget | null) => {
+    const root = rootRef.current;
+    if (!root || !(target instanceof Node) || !root.contains(target)) return false;
+    return !(target instanceof Element && target.closest("[data-modal-panel]"));
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -385,7 +432,7 @@ export function Modal({
       // Only the dialog on top answers. Otherwise one press dismisses the
       // sheet and the dialog it was opened from, together.
       if (OPEN_MODALS[OPEN_MODALS.length - 1] !== id) return;
-      closeRef.current();
+      dismissRef.current();
     };
     document.addEventListener("keydown", onKey);
 
@@ -438,15 +485,28 @@ export function Modal({
     element instead of the viewport.
   */
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 sm:p-6">
-      <div className="ac-fade-in fixed inset-0 bg-scrim" onClick={onClose} />
-      <div
-        className="relative flex h-full max-h-full w-full items-center justify-center"
-        // The empty space around the panels is still the backdrop.
-        onClick={(e) => {
-          if (e.target === e.currentTarget) onClose();
-        }}
-      >
+    <div
+      ref={rootRef}
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 sm:p-6"
+      /*
+        Anywhere that is not a panel is the backdrop — including the empty
+        layout boxes around the panels, which cover the whole screen. The DOM
+        check matters: React bubbles events out of a dialog opened from inside
+        this one (a passcode prompt, say), and those are not clicks here.
+      */
+      onMouseDown={(e) => {
+        downOutsideRef.current = isOutsidePanels(e.target);
+      }}
+      onClick={(e) => {
+        if (downOutsideRef.current && isOutsidePanels(e.target)) dismiss();
+        downOutsideRef.current = false;
+      }}
+      onInput={(e) => {
+        if (rootRef.current?.contains(e.target as Node)) dirtyRef.current = true;
+      }}
+    >
+      <div className="ac-fade-in fixed inset-0 bg-scrim" />
+      <div className="relative flex h-full max-h-full w-full items-center justify-center">
       {/* Collapses on a wide screen to make way for `detail`, clipping from the left. */}
       <div
         className={cx(
@@ -463,6 +523,7 @@ export function Modal({
       >
       <div
         ref={panelRef}
+        data-modal-panel
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -500,7 +561,7 @@ export function Modal({
               {subtitle && <p className="mt-1 text-[13px] leading-5 text-ink-3">{subtitle}</p>}
             </div>
             <button
-              onClick={onClose}
+              onClick={requestClose}
               aria-label="Close"
               className="-mr-2 -mt-1 shrink-0 rounded-xl p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
             >
@@ -513,6 +574,30 @@ export function Modal({
       </div>
       <SlidePanel panel={side} layer="z-10" />
       <SlidePanel panel={detailPanel} layer="z-20" />
+      <Modal
+        open={confirmingDiscard}
+        onClose={() => setConfirmingDiscard(false)}
+        title={t("confirm.discardTitle")}
+        width="sm:max-w-md"
+        gradient="linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)"
+      >
+        <p className="px-6 py-5 text-[14px] leading-6.5 text-ink-2">{t("confirm.discardBody")}</p>
+        <ModalFooter>
+          <Button type="button" variant="ghost" onClick={() => setConfirmingDiscard(false)} autoFocus>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            onClick={() => {
+              setConfirmingDiscard(false);
+              onClose();
+            }}
+          >
+            {t("confirm.discard")}
+          </Button>
+        </ModalFooter>
+      </Modal>
       {stack.mounted && (
         <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
           <div

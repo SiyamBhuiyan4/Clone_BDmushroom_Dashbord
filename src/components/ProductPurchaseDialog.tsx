@@ -125,6 +125,7 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
 
   return (
     <Modal
+      guardChanges
       open={open}
       onClose={onClose}
       icon={<Landmark size={19} />}

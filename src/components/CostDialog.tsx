@@ -99,6 +99,7 @@ export function CostDialog({
 
   return (
     <Modal
+      guardChanges
       open={open}
       onClose={onClose}
       icon={<Coins size={19} />}

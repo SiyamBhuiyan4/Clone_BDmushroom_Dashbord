@@ -120,6 +120,7 @@ export function TraineeDialog({
 
   return (
     <Modal
+      guardChanges
       open={open}
       onClose={onClose}
       icon={<GraduationCap size={19} />}

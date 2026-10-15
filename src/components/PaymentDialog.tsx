@@ -100,6 +100,7 @@ export function PaymentDialog({
 
   return (
     <Modal
+      guardChanges
       open={open}
       onClose={onClose}
       icon={<Wallet size={19} />}

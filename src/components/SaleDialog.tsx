@@ -241,6 +241,7 @@ export function SaleDialog({
 
   return (
     <Modal
+      guardChanges
       open={open}
       onClose={onClose}
       icon={<Receipt size={19} />}

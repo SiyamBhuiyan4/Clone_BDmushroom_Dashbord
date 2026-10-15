@@ -89,6 +89,7 @@ export function VendorDialog({
 
   return (
     <Modal
+      guardChanges
       open={open}
       onClose={onClose}
       icon={<Truck size={19} />}

@@ -67,6 +67,7 @@ export function CustomerDetailDialog({
       title={name || t("customers.title")}
       subtitle={data?.customer.phone ?? data?.customer.address ?? undefined}
       width="sm:max-w-2xl"
+      onBack={() => (receiptId ? setReceiptId(null) : setDashboardOpen(false))}
       aside={
         dashboardOpen && data ? (
           <CustomerDashboardPanel
