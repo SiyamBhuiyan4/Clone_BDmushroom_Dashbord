@@ -308,8 +308,8 @@ export function Badge({
 */
 const OPEN_MODALS: object[] = [];
 
-/** How long a dialog's side panel takes to slide in or out — matches `duration-[850ms]` below. */
-const ASIDE_MS = 850;
+/** How long a dialog's side panel takes to slide in or out — matches `duration-[800ms]` below. */
+const ASIDE_MS = 800;
 
 export function Modal({
   open,
@@ -322,6 +322,7 @@ export function Modal({
   children,
   width = "sm:max-w-xl",
   aside,
+  detail,
 }: {
   open: boolean;
   onClose: () => void;
@@ -340,6 +341,13 @@ export function Modal({
     slides in over the dialog, and is expected to carry its own back control.
   */
   aside?: ReactNode;
+  /*
+    A third panel, opened from the side panel. On a wide screen the dialog
+    slides out to the left and vanishes, the side panel takes its place, and
+    this comes in on the right — closing it plays that backwards. On a narrow
+    screen it slides in over everything, like the side panel does.
+  */
+  detail?: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   /*
@@ -355,34 +363,8 @@ export function Modal({
   /** Identity for the stack below; the object itself is never read. */
   const idRef = useRef({});
 
-  /*
-    The side panel animates both ways, so it outlives `aside` by one
-    transition: mounted first, shown a frame later (so the browser has a
-    closed state to transition from), and on the way out hidden first and
-    unmounted once the transition has played. The last content is kept so
-    the panel slides away still showing what it showed.
-  */
-  const hasAside = Boolean(aside);
-  const lastAside = useRef<ReactNode>(null);
-  if (aside) lastAside.current = aside;
-  const [asideMounted, setAsideMounted] = useState(hasAside);
-  const [asideShown, setAsideShown] = useState(false);
-  useEffect(() => {
-    if (hasAside) {
-      setAsideMounted(true);
-      let inner = 0;
-      const outer = requestAnimationFrame(() => {
-        inner = requestAnimationFrame(() => setAsideShown(true));
-      });
-      return () => {
-        cancelAnimationFrame(outer);
-        cancelAnimationFrame(inner);
-      };
-    }
-    setAsideShown(false);
-    const timer = window.setTimeout(() => setAsideMounted(false), ASIDE_MS + 50);
-    return () => window.clearTimeout(timer);
-  }, [hasAside]);
+  const side = useSlidePanel(aside);
+  const detailPanel = useSlidePanel(detail);
 
   useEffect(() => {
     if (!open) return;
@@ -457,6 +439,17 @@ export function Modal({
           if (e.target === e.currentTarget) onClose();
         }}
       >
+      {/* Collapses on a wide screen to make way for `detail`, clipping from the left. */}
+      <div
+        className={cx(
+          "flex h-full max-h-full w-full items-center justify-center",
+          side.mounted && "xl:w-auto xl:flex-none",
+          detailPanel.mounted &&
+            "xl:justify-end xl:overflow-hidden transition-[max-width,opacity] duration-[800ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
+          detailPanel.mounted && (detailPanel.shown ? "xl:max-w-0 xl:opacity-0" : "xl:max-w-[42rem]"),
+        )}
+        aria-hidden={detailPanel.shown || undefined}
+      >
       <div
         ref={panelRef}
         role="dialog"
@@ -468,7 +461,7 @@ export function Modal({
           width,
           // Its own width held fixed (the max-width above still caps it), so
           // making room for the panel moves the dialog rather than squeezing it.
-          asideMounted ? "xl:w-[42rem] xl:flex-none" : null,
+          side.mounted ? "xl:w-[42rem] xl:flex-none xl:shrink-0" : null,
         )}
       >
         <div className="relative shrink-0 overflow-hidden rounded-t-[24px] border-b border-line">
@@ -506,36 +499,78 @@ export function Modal({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </div>
-      {asideMounted && (
-        <div
-          aria-hidden={!asideShown}
-          className={cx(
-            // Narrow screens: over the dialog. Wide: beside it, growing from nothing.
-            "absolute inset-0 z-10 flex items-center justify-center",
-            "xl:relative xl:inset-auto xl:z-auto xl:h-full xl:max-h-full xl:overflow-hidden",
-            "transition-[opacity,max-width] duration-[850ms] ease-[cubic-bezier(0.65,0,0.35,1)]",
-            // Exactly the panel's width plus its gap, so no part of the
-            // transition is spent growing past what can be seen.
-            asideShown ? "opacity-100 xl:max-w-[35rem]" : "pointer-events-none opacity-0 xl:max-w-0",
-          )}
-        >
-          <div
-            className={cx(
-              // A definite height, so the panel's own max-h-full resolves and it
-              // scrolls inside rather than running off the screen.
-              "flex h-full w-full max-w-xl min-w-0 flex-col justify-center xl:ml-4 xl:w-[34rem] xl:shrink-0",
-              "transition-transform duration-[850ms] ease-[cubic-bezier(0.65,0,0.35,1)]",
-              // Comes out from behind the dialog on a wide screen, in from the edge on a narrow one.
-              asideShown ? "translate-x-0" : "translate-x-[110%] xl:-translate-x-10",
-            )}
-          >
-            {aside ?? lastAside.current}
-          </div>
-        </div>
-      )}
+      </div>
+      <SlidePanel panel={side} layer="z-10" />
+      <SlidePanel panel={detailPanel} layer="z-20" />
       </div>
     </div>,
     document.body,
+  );
+}
+
+/*
+  A panel that animates both ways, so it outlives its content by one
+  transition: mounted first, shown a frame later (so the browser has a closed
+  state to transition from), and on the way out hidden first and unmounted
+  once the transition has played. The last content is kept so the panel
+  slides away still showing what it showed.
+*/
+type SlideState = { mounted: boolean; shown: boolean; content: ReactNode };
+
+function useSlidePanel(node: ReactNode): SlideState {
+  const present = Boolean(node);
+  const last = useRef<ReactNode>(null);
+  if (node) last.current = node;
+  const [mounted, setMounted] = useState(present);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (present) {
+      setMounted(true);
+      let inner = 0;
+      const outer = requestAnimationFrame(() => {
+        inner = requestAnimationFrame(() => setShown(true));
+      });
+      return () => {
+        cancelAnimationFrame(outer);
+        cancelAnimationFrame(inner);
+      };
+    }
+    setShown(false);
+    const timer = window.setTimeout(() => setMounted(false), ASIDE_MS + 50);
+    return () => window.clearTimeout(timer);
+  }, [present]);
+  return { mounted, shown, content: node ?? last.current };
+}
+
+/** A dialog's side panel: beside it on a wide screen, over it on a narrow one. */
+function SlidePanel({ panel, layer }: { panel: SlideState; layer: string }) {
+  if (!panel.mounted) return null;
+  return (
+    <div
+      aria-hidden={!panel.shown}
+      className={cx(
+        "absolute inset-0 flex items-center justify-center",
+        layer,
+        "xl:relative xl:inset-auto xl:z-auto xl:h-full xl:max-h-full xl:overflow-hidden",
+        "transition-[opacity,max-width] duration-[800ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
+        // Exactly the panel's width plus its gap, so no part of the
+        // transition is spent growing past what can be seen.
+        panel.shown ? "opacity-100 xl:max-w-[35rem]" : "pointer-events-none opacity-0 xl:max-w-0",
+      )}
+    >
+      <div
+        className={cx(
+          // A definite height, so the panel's own max-h-full resolves and it
+          // scrolls inside rather than running off the screen.
+          "flex h-full w-full max-w-xl min-w-0 flex-col justify-center xl:ml-4 xl:w-[34rem] xl:shrink-0",
+          "transition-transform duration-[800ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
+          // Comes out from behind on a wide screen, in from the edge on a narrow one.
+          panel.shown ? "translate-x-0" : "translate-x-[110%] xl:-translate-x-10",
+        )}
+      >
+        {panel.content}
+      </div>
+    </div>
   );
 }
 

@@ -13,7 +13,6 @@ import {
   Truck,
   Upload,
   Video as VideoIcon,
-  X,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
@@ -21,6 +20,7 @@ import { Button, Input, Modal, cx } from "./ui";
 import { ContactPhotoAvatar } from "./ContactPhotoAvatar";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { VendorPurchaseHistory } from "./VendorPurchaseHistory";
+import { SidePanelCard } from "./SidePanelCard";
 import { useT } from "../lib/i18n";
 import { gradientFor } from "../lib/avatar";
 import { plural } from "../lib/format";
@@ -441,45 +441,8 @@ function VendorDashboardPanel({
 }) {
   const t = useT();
   return (
-    <div className="flex max-h-full w-full min-w-0 flex-col rounded-[24px] border border-line bg-surface shadow-[var(--shadow-pop)]">
-      <div className="relative shrink-0 overflow-hidden rounded-t-[24px] border-b border-line">
-        <div
-          className="pointer-events-none absolute -top-24 -right-16 size-56 rounded-full opacity-[0.13] blur-3xl"
-          style={{ background: "var(--grad-violet)" }}
-          aria-hidden
-        />
-        <div className="relative flex items-center gap-3 px-5 py-4">
-          {/* Back on a narrow screen, where this covers the profile; close beside it. */}
-          <button
-            onClick={onClose}
-            aria-label="Back"
-            className="-ml-1 rounded-xl p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink xl:hidden"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <span
-            className="flex size-10 shrink-0 items-center justify-center rounded-2xl text-white shadow-[var(--shadow-hero)]"
-            style={{ background: "var(--grad-violet)" }}
-            aria-hidden
-          >
-            <BarChart3 size={18} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-[17px] leading-6 font-bold tracking-tight text-ink">{t("vendors.dashboard")}</h3>
-            <p className="truncate text-[12.5px] text-ink-3">{name}</p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="-mr-1 hidden rounded-xl p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink xl:block"
-          >
-            <X size={18} />
-          </button>
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <VendorPurchaseHistory lots={lots} />
-      </div>
-    </div>
+    <SidePanelCard icon={<BarChart3 size={18} />} title={t("vendors.dashboard")} subtitle={name} onClose={onClose}>
+      <VendorPurchaseHistory lots={lots} />
+    </SidePanelCard>
   );
 }

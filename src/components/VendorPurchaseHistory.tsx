@@ -15,7 +15,7 @@ import { useAuthedMutation } from "../lib/session";
   A vendor's purchases are worth looking at over years, not just a year, so
   this offers "all" on top of the usual presets.
 */
-const RANGES: RangePreset[] = [
+export const RANGES: RangePreset[] = [
   ...DEFAULT_RANGES,
   { days: 3650, label: "All", full: "all time", prev: "before that" },
 ];
@@ -215,7 +215,7 @@ export function VendorPurchaseHistory({ lots }: { lots: Doc<"stockBatches">[] })
   );
 }
 
-function MiniTile({
+export function MiniTile({
   gradient,
   icon,
   label,
