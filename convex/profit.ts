@@ -111,6 +111,8 @@ const batchArgs = {
   unitPrice: v.number(),
   note: v.optional(v.string()),
   vendorId: v.optional(v.id("vendors")),
+  /** How much of the lot's cost was paid to the vendor; left out means all of it. */
+  vendorPaid: v.optional(v.number()),
 };
 
 async function insertBatch(
@@ -124,6 +126,7 @@ async function insertBatch(
     unitPrice: number;
     note?: string;
     vendorId?: Id<"vendors">;
+    vendorPaid?: number;
   },
   investment: boolean,
 ) {
@@ -132,6 +135,10 @@ async function insertBatch(
   validateBatch(args.quantity, args.unitCost, args.unitPrice);
   if (args.vendorId && !(await ctx.db.get(args.vendorId))) {
     throw new ConvexError("That vendor no longer exists.");
+  }
+  const total = args.quantity * args.unitCost;
+  if (args.vendorPaid !== undefined && (!Number.isFinite(args.vendorPaid) || args.vendorPaid < 0)) {
+    throw new ConvexError("Amount paid can't be negative.");
   }
 
   const note = (args.note ?? "").trim();
@@ -147,6 +154,11 @@ async function insertBatch(
     unitPrice: args.unitPrice,
     note: note ? note : undefined,
     vendorId: args.vendorId,
+    // Only a lot with a vendor can owe one; a full payment is the default.
+    vendorPaid:
+      args.vendorId && args.vendorPaid !== undefined && args.vendorPaid < total
+        ? args.vendorPaid
+        : undefined,
     investment: investment || undefined,
   });
   // A lot is stock arriving: the product's stock and prices follow from it.
@@ -243,9 +255,13 @@ export const updateBatch = mutation({
       label: args.label.trim() || "Stock",
       purchasedAt: args.purchasedAt,
       quantity: args.quantity,
-      remaining: args.quantity - soldFrom,
+      // A lot taken off its product stays empty whatever its size says.
+      remaining: batch.removedAt ? 0 : args.quantity - soldFrom,
       unitCost: args.unitCost,
       unitPrice: args.unitPrice,
+      // A resized lot never claims more was paid than it now costs.
+      vendorPaid:
+        batch.vendorPaid !== undefined && batch.vendorPaid < investedAfter ? batch.vendorPaid : undefined,
       note: note ? note : undefined,
       // undefined (field omitted) leaves it alone; null clears it.
       ...(args.vendorId !== undefined ? { vendorId: args.vendorId ?? undefined } : {}),
@@ -254,21 +270,76 @@ export const updateBatch = mutation({
   },
 });
 
+export async function removeLot(ctx: MutationCtx, id: Id<"stockBatches">, mode: "remove" | "delete") {
+  const batch = await ctx.db.get(id);
+  if (!batch) return;
+
+  if (mode === "remove") {
+    if (batch.removedAt) return;
+    const left = batch.remaining ?? batch.quantity;
+    const now = Date.now();
+    if (left > 0) {
+      const loss = left * batch.unitCost;
+      await ctx.db.insert("costs", {
+        name: `Stock write-off: ${batch.productName}`,
+        amount: loss,
+        spentAt: now,
+        note: `${batch.label} · ${left} unit(s) at ${batch.unitCost}`,
+        createdAt: now,
+      });
+      // The stock is gone, so the money tied up in it is too.
+      await adjustInvestment(ctx, -loss);
+    }
+    await ctx.db.patch(id, { removedAt: now, writtenOff: left, remaining: 0 });
+    await syncProduct(ctx, batch.productId);
+    return;
+  }
+
+  // The full amount it added, not just what is left — the rest already
+  // came back out of Investment when it sold (see orders.ts).
+  await adjustInvestment(ctx, -(batch.quantity * batch.unitCost));
+  await ctx.db.delete(id);
+  // What was left in it leaves stock with it; units already sold from it
+  // left when they sold.
+  await syncProduct(ctx, batch.productId);
+}
+
+/**
+ * Takes a lot away, one of two ways:
+ *
+ * - "remove": off its product, but kept everywhere else. It was a real
+ *   purchase, so it stays in the vendor's history; whatever was still in it
+ *   (spoiled, lost) is booked as a cost today, so Net profit carries the loss.
+ * - "delete": gone everywhere, for a lot that was entered by mistake.
+ */
 export const removeBatch = mutation({
-  args: { token: v.string(), id: v.id("stockBatches"), passcode: v.string() },
+  args: {
+    token: v.string(),
+    id: v.id("stockBatches"),
+    passcode: v.string(),
+    mode: v.optional(v.union(v.literal("remove"), v.literal("delete"))),
+  },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
     await verifyPasscode(ctx, args.passcode);
-    const batch = await ctx.db.get(args.id);
-    if (!batch) return;
+    await removeLot(ctx, args.id, args.mode ?? "delete");
+  },
+});
 
-    // The full amount it added, not just what is left — the rest already
-    // came back out of Investment when it sold (see orders.ts).
-    await adjustInvestment(ctx, -(batch.quantity * batch.unitCost));
-    await ctx.db.delete(args.id);
-    // What was left in it leaves stock with it; units already sold from it
-    // left when they sold.
-    await syncProduct(ctx, batch.productId);
+/** Records a payment to the vendor against one lot, capped at what the lot cost. */
+export const payVendor = mutation({
+  args: { token: v.string(), id: v.id("stockBatches"), amount: v.number() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const lot = await ctx.db.get(args.id);
+    if (!lot) throw new ConvexError("That stock lot no longer exists.");
+    if (!Number.isFinite(args.amount) || args.amount <= 0) {
+      throw new ConvexError("Enter how much was paid.");
+    }
+    const total = lot.quantity * lot.unitCost;
+    const paid = Math.min(total, (lot.vendorPaid ?? total) + args.amount);
+    await ctx.db.patch(args.id, { vendorPaid: paid >= total ? undefined : paid });
+    return { due: total - paid };
   },
 });
 

@@ -234,6 +234,19 @@ export default defineSchema({
       Investment counter, so removing one later knows to move it back.
     */
     investment: v.optional(v.boolean()),
+    /*
+      How much of this lot's cost has been paid to the vendor. Absent means
+      fully paid — every lot recorded before this was tracked, and any lot
+      with no vendor. The rest is what the shop still owes them.
+    */
+    vendorPaid: v.optional(v.number()),
+    /*
+      Set when the lot was taken off its product without being deleted —
+      spoiled or lost stock. It stays in the vendor's purchase history; what
+      was left in it (`writtenOff` units) was booked as a cost on that day.
+    */
+    removedAt: v.optional(v.number()),
+    writtenOff: v.optional(v.number()),
   })
     .index("by_purchasedAt", ["purchasedAt"])
     .index("by_product", ["productId"])

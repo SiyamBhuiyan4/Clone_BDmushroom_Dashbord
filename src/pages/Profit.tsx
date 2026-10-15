@@ -16,13 +16,11 @@ import { StatTile } from "../components/StatTile";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { BatchDialog, type BatchRow } from "../components/BatchDialog";
 import { DateRangeControls, rangeLabel, useDateRange } from "../components/DateRange";
-import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
+import { LotRemoveDialog } from "../components/LotRemoveDialog";
 import { useSettings } from "../lib/settings";
 import { useT, type MessageKey } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
-import { plural } from "../lib/format";
-import { useToast } from "../lib/toast";
-import { useAuthedMutation, useAuthedQuery } from "../lib/session";
+import { useAuthedQuery } from "../lib/session";
 
 /** One bucket's share of an amount. Percentages already total 100. */
 function share(amount: number, pct: number) {
@@ -41,9 +39,7 @@ type Basis = "projected" | "realised";
 export function ProfitPage() {
   const { fmt, fmtNum, fmtPercent, fmtDateFull } = useSettings();
   const t = useT();
-  const toast = useToast();
   const data = useAuthedQuery(api.profit.summary);
-  const removeBatch = useAuthedMutation(api.profit.removeBatch);
 
   const [basis, setBasis] = useState<Basis>("projected");
   const range = useDateRange(0, "ac.range.profit");
@@ -345,21 +341,7 @@ export function ProfitPage() {
 
       <BatchDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <BatchDialog open={editing !== null} onClose={() => setEditing(null)} batch={editing} />
-      <PasscodeConfirmDialog
-        open={deleting !== null}
-        onClose={() => setDeleting(null)}
-        title="Delete this stock lot?"
-        body={
-          deleting
-            ? `${deleting.label} of ${deleting.productName}\n${plural(deleting.remaining ?? deleting.quantity, "unit")} still in it come off your stock, and the whole lot off your projected profit.`
-            : ""
-        }
-        onConfirm={async (passcode) => {
-          if (!deleting) return;
-          await removeBatch({ id: deleting.id as never, passcode });
-          toast.ok("Stock lot deleted.");
-        }}
-      />
+      <LotRemoveDialog lot={deleting} onClose={() => setDeleting(null)} />
     </div>
   );
 }

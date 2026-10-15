@@ -6,13 +6,12 @@ import { Button, Card, CardHeader, EmptyState } from "./ui";
 import { StatTile } from "./StatTile";
 import { RangePills } from "./RangePills";
 import { ProductPurchaseDialog } from "./ProductPurchaseDialog";
-import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
+import { LotRemoveDialog } from "./LotRemoveDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
 import { useRangeFilter } from "../lib/dateRange";
-import { useToast } from "../lib/toast";
-import { useAuthedMutation, useAuthedQuery } from "../lib/session";
+import { useAuthedQuery } from "../lib/session";
 
 /**
  * Stock bought and logged as an investment rather than an operating cost —
@@ -23,9 +22,7 @@ import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 export function ProductPurchaseCostSection() {
   const { fmt, fmtNum, fmtDateTime } = useSettings();
   const t = useT();
-  const toast = useToast();
   const all = useAuthedQuery(api.profit.purchaseCostBatches, {});
-  const remove = useAuthedMutation(api.profit.removeBatch);
   const range = useRangeFilter("ac.range.investment");
 
   const [addOpen, setAddOpen] = useState(false);
@@ -191,20 +188,9 @@ export function ProductPurchaseCostSection() {
 
       <ProductPurchaseDialog open={addOpen} onClose={() => setAddOpen(false)} />
 
-      <PasscodeConfirmDialog
-        open={deleting !== null}
+      <LotRemoveDialog
+        lot={deleting ? { ...deleting, id: deleting._id } : null}
         onClose={() => setDeleting(null)}
-        title={t("investment.deleteTitle")}
-        body={
-          deleting
-            ? `${deleting.productName} — ${fmt(deleting.quantity * deleting.unitCost)} comes off Investment, and its stock comes off the product.`
-            : ""
-        }
-        onConfirm={async (passcode) => {
-          if (!deleting) return;
-          await remove({ id: deleting._id, passcode });
-          toast.ok(t("investment.deleted"));
-        }}
       />
     </>
   );

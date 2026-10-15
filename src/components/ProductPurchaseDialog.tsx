@@ -4,6 +4,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { AmountInput, Button, Field, Input, Modal, ModalFooter, Select, SectionLabel, Textarea } from "./ui";
 import { LotMediaManager } from "./LotMediaManager";
+import { PAID_IN_FULL, VendorPaymentField, vendorPaidAmount, type VendorPayment } from "./VendorPaymentField";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { CURRENCY_SYMBOL, toLocalInputValue } from "../lib/format";
@@ -29,6 +30,7 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
   const [productId, setProductId] = useState("");
   const [label, setLabel] = useState("");
   const [vendorId, setVendorId] = useState("");
+  const [vendorPayment, setVendorPayment] = useState<VendorPayment>(PAID_IN_FULL);
   const [purchasedAt, setPurchasedAt] = useState("");
   const [quantity, setQuantity] = useState("");
   const [unitCost, setUnitCost] = useState("");
@@ -48,6 +50,7 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
     setProductId("");
     setLabel("");
     setVendorId("");
+    setVendorPayment(PAID_IN_FULL);
     setPurchasedAt(toLocalInputValue(Date.now()));
     setQuantity("");
     setUnitCost("");
@@ -64,7 +67,10 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
   const costOk = unitCost.trim() !== "" && Number.isFinite(cost) && cost >= 0;
   const price = Number(unitPrice);
   const priceOk = unitPrice.trim() !== "" && Number.isFinite(price) && price >= 0;
-  const valid = Boolean(productId) && qtyOk && costOk && priceOk && !saving;
+  const askPayment = Boolean(vendorId);
+  const paidNow = vendorPaidAmount(vendorPayment, qtyOk && costOk ? qty * cost : 0);
+  const valid =
+    Boolean(productId) && qtyOk && costOk && priceOk && (!askPayment || paidNow !== null) && !saving;
   const total = qtyOk && costOk ? qty * cost : 0;
 
   async function submit(e: React.FormEvent) {
@@ -82,6 +88,7 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
         unitPrice: price,
         note,
         vendorId: vendorId ? (vendorId as Id<"vendors">) : undefined,
+        vendorPaid: askPayment ? (paidNow ?? undefined) : undefined,
       });
       toast.ok(`Logged ${fmt(total)} as investment.`);
       // One more optional step — attach the receipt — rather than closing
@@ -223,6 +230,10 @@ export function ProductPurchaseDialog({ open, onClose }: { open: boolean; onClos
               />
             </div>
           </div>
+
+          {askPayment && (
+            <VendorPaymentField value={vendorPayment} onChange={setVendorPayment} total={total} />
+          )}
 
           <div className="flex items-center justify-between gap-4 rounded-2xl border border-line bg-page p-5">
             <span className="text-[13px] text-ink-2">{t("investment.totalToInvest")}</span>

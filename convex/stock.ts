@@ -62,13 +62,15 @@ export async function takeFromLot(ctx: MutationCtx, lotId: Id<"stockBatches">, q
  * Puts a cancelled or deleted sale's units back on the shelf — into the lot
  * they came out of. A sale recorded before every sale named its lot has
  * nowhere to go back to, so it comes back as a lot of its own at the cost it
- * was sold at, rather than being added to a lot it never came from.
+ * was sold at, rather than being added to a lot it never came from. So does
+ * one whose lot has since been taken off the product.
  */
 export async function returnSaleToStock(ctx: MutationCtx, sale: Doc<"sales">) {
   const product = await ctx.db.get(sale.productId);
   if (!product) return;
   const lot = sale.batchId ? await ctx.db.get(sale.batchId) : null;
-  if (lot) {
+  // A lot taken off its product is closed; units coming back start a new one.
+  if (lot && !lot.removedAt) {
     await ctx.db.patch(lot._id, { remaining: Math.min(lot.quantity, left(lot) + sale.quantity) });
   } else {
     await ctx.db.insert("stockBatches", {

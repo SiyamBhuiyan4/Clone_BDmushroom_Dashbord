@@ -14,6 +14,7 @@ import {
   Textarea,
 } from "./ui";
 import { LotMediaManager } from "./LotMediaManager";
+import { PAID_IN_FULL, VendorPaymentField, vendorPaidAmount, type VendorPayment } from "./VendorPaymentField";
 import { useT } from "../lib/i18n";
 import { CURRENCY_SYMBOL, toLocalInputValue } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
@@ -82,6 +83,7 @@ export function BatchDialog({
   const [unitPrice, setUnitPrice] = useState("");
   const [note, setNote] = useState("");
   const [vendorId, setVendorId] = useState("");
+  const [vendorPayment, setVendorPayment] = useState<VendorPayment>(PAID_IN_FULL);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -104,6 +106,7 @@ export function BatchDialog({
       setUnitPrice("");
       setNote("");
       setVendorId("");
+      setVendorPayment(PAID_IN_FULL);
     }
   }, [open, batch, presetProductId]);
 
@@ -117,7 +120,12 @@ export function BatchDialog({
   const costOk = unitCost.trim() !== "" && Number.isFinite(cost) && cost >= 0;
   const price = Number(unitPrice);
   const priceOk = unitPrice.trim() !== "" && Number.isFinite(price) && price >= 0;
-  const valid = Boolean(productId) && qtyOk && costOk && priceOk && !saving;
+  // Asked only when a lot is created with a vendor; later payments go
+  // through the vendor's own page.
+  const askPayment = !batch && Boolean(vendorId);
+  const paidNow = vendorPaidAmount(vendorPayment, qtyOk && costOk ? qty * cost : 0);
+  const valid =
+    Boolean(productId) && qtyOk && costOk && priceOk && (!askPayment || paidNow !== null) && !saving;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -142,6 +150,7 @@ export function BatchDialog({
           productId: productId as Id<"products">,
           ...payload,
           vendorId: vendorArg ?? undefined,
+          vendorPaid: askPayment ? (paidNow ?? undefined) : undefined,
         });
         toast.ok(`Added ${label.trim() || "stock lot"}.`);
       }
@@ -268,6 +277,14 @@ export function BatchDialog({
               />
             </div>
           </div>
+
+          {askPayment && (
+            <VendorPaymentField
+              value={vendorPayment}
+              onChange={setVendorPayment}
+              total={qtyOk && costOk ? qty * cost : 0}
+            />
+          )}
 
           {/*
             Only a saved lot has an id to attach a receipt to — a lot being

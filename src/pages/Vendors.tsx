@@ -11,6 +11,8 @@ import { useT } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
 import { normalisePhone, whatsappUrl, VENDOR_CATEGORIES, type VendorCategory } from "../../convex/shared";
 import { useToast } from "../lib/toast";
+import { useSettings } from "../lib/settings";
+import { relativeTime } from "../lib/format";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 
 const CATEGORY_KEY: Record<VendorCategory, "vendors.categorySpawn" | "vendors.categoryMaterials" | "vendors.categoryEquipment" | "vendors.categoryPackaging" | "vendors.categoryOther"> = {
@@ -25,6 +27,12 @@ export function VendorsPage() {
   const t = useT();
   const toast = useToast();
   const vendors = useAuthedQuery(api.vendors.list, {});
+  const { fmt } = useSettings();
+  // The start of this calendar month in the browser's own timezone.
+  const monthStart = useMemo(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+  }, []);
   const removeVendor = useAuthedMutation(api.vendors.remove);
 
   const [search, setSearch] = useState("");
@@ -163,6 +171,33 @@ export function VendorsPage() {
                         )}
                         <Badge tone="accent">{t(CATEGORY_KEY[v.category])}</Badge>
                       </p>
+                      {/* What this vendor has been to the shop lately, at a glance. */}
+                      {v.lastPurchaseAt !== null && (
+                        <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[12px] text-ink-3">
+                          <span>
+                            {t("vendors.lastBought")} {relativeTime(v.lastPurchaseAt)}
+                          </span>
+                          <span aria-hidden>·</span>
+                          <span>
+                            {t("vendors.thisMonth")}{" "}
+                            <span className="font-semibold tabular-nums text-ink-2">
+                              {fmt(
+                                v.purchases
+                                  .filter((p) => p.at >= monthStart)
+                                  .reduce((sum, p) => sum + p.amount, 0),
+                              )}
+                            </span>
+                          </span>
+                          {v.due > 0 && (
+                            <>
+                              <span aria-hidden>·</span>
+                              <span className="font-semibold tabular-nums text-critical-ink">
+                                {t("vendors.youOwe")} {fmt(v.due)}
+                              </span>
+                            </>
+                          )}
+                        </p>
+                      )}
                     </div>
                   </button>
                   <div className="flex shrink-0 items-center gap-0.5">

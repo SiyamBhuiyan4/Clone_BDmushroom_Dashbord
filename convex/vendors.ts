@@ -36,7 +36,26 @@ export const list = query({
           .collect()
       : await ctx.db.query("vendors").collect();
     const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
-    return await Promise.all(sorted.map((v) => withPhoto(ctx, v)));
+    return await Promise.all(
+      sorted.map(async (vendor) => {
+        const lots = await ctx.db
+          .query("stockBatches")
+          .withIndex("by_vendor", (q) => q.eq("vendorId", vendor._id))
+          .collect();
+        /*
+          Each purchase as a dated amount rather than a pre-summed "this
+          month" — which month it is depends on the browser's timezone, so
+          the card does that sum itself.
+        */
+        const purchases = lots.map((l) => ({ at: l.purchasedAt, amount: l.quantity * l.unitCost }));
+        const due = lots.reduce(
+          (sum, l) => sum + (l.vendorPaid !== undefined ? l.quantity * l.unitCost - l.vendorPaid : 0),
+          0,
+        );
+        const lastPurchaseAt = purchases.length > 0 ? Math.max(...purchases.map((p) => p.at)) : null;
+        return { ...(await withPhoto(ctx, vendor)), purchases, due, lastPurchaseAt };
+      }),
+    );
   },
 });
 

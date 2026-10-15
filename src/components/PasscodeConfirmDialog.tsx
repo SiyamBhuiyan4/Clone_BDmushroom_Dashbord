@@ -30,6 +30,7 @@ export function PasscodeConfirmDialog({
   confirmLabel,
   tone = "critical",
   icon,
+  children,
 }: {
   open: boolean;
   onClose: () => void;
@@ -45,6 +46,8 @@ export function PasscodeConfirmDialog({
   */
   tone?: "critical" | "neutral";
   icon?: ReactNode;
+  /** A choice the action needs, shown between the explanation and the passcode. */
+  children?: ReactNode;
 }) {
   const t = useT();
   const toast = useToast();
@@ -89,6 +92,7 @@ export function PasscodeConfirmDialog({
           {/* Callers pass the record being acted on above the explanation, so the
               break between them has to survive. */}
           <p className="text-[14px] leading-6.5 whitespace-pre-line text-ink-2">{body}</p>
+          {children}
 
           <label className="flex flex-col gap-2">
             <span className="text-[13px] font-semibold text-ink-2">{t("confirm.passcode")}</span>

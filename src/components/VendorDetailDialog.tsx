@@ -15,9 +15,10 @@ import {
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Badge, Button, Input, Modal, cx } from "./ui";
+import { Button, Input, Modal, cx } from "./ui";
 import { ContactPhotoAvatar } from "./ContactPhotoAvatar";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
+import { VendorPurchaseHistory } from "./VendorPurchaseHistory";
 import { useT } from "../lib/i18n";
 import { gradientFor } from "../lib/avatar";
 import { plural } from "../lib/format";
@@ -366,28 +367,7 @@ export function VendorDetailDialog({
             )}
           </div>
 
-          {data.lots.length > 0 && (
-            <div>
-              <p className="mb-2.5 text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">
-                {t("vendors.lotsBought")}
-              </p>
-              <ul className="flex flex-col gap-2">
-                {data.lots.map((l) => (
-                  <li
-                    key={l._id}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-[13px] font-semibold text-ink">{l.productName}</p>
-                      <p className="mt-0.5 text-[11.5px] text-ink-3">
-                        <Badge tone="accent">{l.label}</Badge>
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <VendorPurchaseHistory lots={data.lots} />
         </div>
       )}
 
