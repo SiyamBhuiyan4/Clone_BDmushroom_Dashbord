@@ -133,12 +133,19 @@ function formatQty(value: number, bengali: boolean) {
   return value.toLocaleString(bengali ? "bn-BD" : "en-GB", { maximumFractionDigits: 3 });
 }
 
+/** Date and time of the sale, always in Bangladesh time whatever the printing device's zone. */
 function formatDate(ts: number, bengali: boolean) {
-  return new Date(ts).toLocaleDateString(bengali ? "bn-BD" : "en-GB", {
+  const locale = bengali ? "bn-BD" : "en-GB";
+  const date = new Date(ts).toLocaleDateString(locale, {
+    timeZone: "Asia/Dhaka",
     day: "numeric",
     month: "long",
     year: "numeric",
   });
+  const time = new Date(ts)
+    .toLocaleTimeString(locale, { timeZone: "Asia/Dhaka", hour: "numeric", minute: "2-digit", hour12: true })
+    .toUpperCase();
+  return `${date}, ${time} BST`;
 }
 
 const PAYMENT_LABELS: Record<string, { en: string; bn: string }> = {
