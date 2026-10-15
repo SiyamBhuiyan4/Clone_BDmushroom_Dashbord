@@ -139,8 +139,7 @@ export function SaleDialog({
    * shop sells what it bought first. It is only a default: the row says which
    * lot it landed on, and a dropdown changes it (a size is a lot of its own).
    */
-  function lineFor(p: Doc<"products">): Line {
-    const lot = lotsOf(p._id)[0];
+  function lineFor(p: Doc<"products">, lot = lotsOf(p._id)[0]): Line {
     return {
       key: `l${lineSeq++}`,
       productId: p._id,
@@ -156,17 +155,19 @@ export function SaleDialog({
 
   function addProduct(p: Doc<"products">) {
     setLines((prev) => {
-      // Picking the same product twice bumps its quantity rather than
-      // creating a duplicate line the customer would have to reconcile.
-      const existing = prev.find((l) => l.productId === p._id);
-      if (existing) {
-        return prev.map((l) =>
-          l.key === existing.key
-            ? { ...l, quantity: String((Number(l.quantity) || 0) + 1) }
-            : l,
-        );
-      }
-      return [...prev, lineFor(p)];
+      /*
+        Picking a product that is already on the sale adds another line from
+        a lot not used yet — the 1 kg after the 500 gram, say, since a size
+        is a lot of its own. Only once every lot is on the sale does it bump
+        the quantity instead, rather than two lines claiming the same lot.
+      */
+      const existing = prev.filter((l) => l.productId === p._id);
+      if (existing.length === 0) return [...prev, lineFor(p)];
+      const unused = lotsOf(p._id).find((lot) => !existing.some((l) => l.batchId === lot.id));
+      if (unused) return [...prev, lineFor(p, unused)];
+      return prev.map((l) =>
+        l.key === existing[0].key ? { ...l, quantity: String((Number(l.quantity) || 0) + 1) } : l,
+      );
     });
   }
 
