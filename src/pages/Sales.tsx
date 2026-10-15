@@ -12,6 +12,7 @@ import {
   Search,
   CircleDollarSign,
   Trash2,
+  Wallet,
   XCircle,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
@@ -173,6 +174,25 @@ export function SalesPage() {
     }
     return { revenue, cost, profit: revenue - cost, booked, pending };
   }, [rows]);
+
+  /*
+    What customers still owe, across every sale ever made — not just the
+    range on screen, since a debt from last month is still owed today. Only
+    sales that have gone out count; a cancelled one is owed by nobody, and a
+    pending one is not owed until the goods have left.
+  */
+  const due = useMemo(() => {
+    let amount = 0;
+    const owing = new Set<string>();
+    for (const o of orders ?? []) {
+      if (!isBooked(o) || o.paymentStatus === "paid") continue;
+      const left = o.total - (o.paidAmount ?? 0);
+      if (left <= 0) continue;
+      amount += left;
+      owing.add(customerKey(o.customerName, o.customerPhone));
+    }
+    return { amount, customers: owing.size };
+  }, [orders]);
 
   /*
     Net profit takes the same operating costs the Dashboard takes off gross
@@ -363,7 +383,7 @@ export function SalesPage() {
         <RangePills range={range} />
       </div>
 
-      <div className="ac-stagger grid gap-4 sm:grid-cols-3">
+      <div className="ac-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
           hero
           accent="emerald"
@@ -389,6 +409,13 @@ export function SalesPage() {
           value={fmtNum(totals.booked)}
           icon={<Receipt size={17} />}
           sub={totals.pending > 0 ? `${fmtNum(totals.pending)} ${t("orders.pending")}` : undefined}
+        />
+        <StatTile
+          accent="violet"
+          label={t("sales.totalDue")}
+          value={fmt(due.amount)}
+          icon={<Wallet size={17} />}
+          sub={`${fmtNum(due.customers)} ${t("sales.dueCustomers")} · ${t("dash.allTime")}`}
         />
       </div>
 
