@@ -2,6 +2,7 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
   type ButtonHTMLAttributes,
   type ComponentProps,
   type InputHTMLAttributes,
@@ -307,6 +308,9 @@ export function Badge({
 */
 const OPEN_MODALS: object[] = [];
 
+/** How long a dialog's side panel takes to slide in or out — matches `duration-[850ms]` below. */
+const ASIDE_MS = 850;
+
 export function Modal({
   open,
   onClose,
@@ -350,6 +354,35 @@ export function Modal({
   closeRef.current = onClose;
   /** Identity for the stack below; the object itself is never read. */
   const idRef = useRef({});
+
+  /*
+    The side panel animates both ways, so it outlives `aside` by one
+    transition: mounted first, shown a frame later (so the browser has a
+    closed state to transition from), and on the way out hidden first and
+    unmounted once the transition has played. The last content is kept so
+    the panel slides away still showing what it showed.
+  */
+  const hasAside = Boolean(aside);
+  const lastAside = useRef<ReactNode>(null);
+  if (aside) lastAside.current = aside;
+  const [asideMounted, setAsideMounted] = useState(hasAside);
+  const [asideShown, setAsideShown] = useState(false);
+  useEffect(() => {
+    if (hasAside) {
+      setAsideMounted(true);
+      let inner = 0;
+      const outer = requestAnimationFrame(() => {
+        inner = requestAnimationFrame(() => setAsideShown(true));
+      });
+      return () => {
+        cancelAnimationFrame(outer);
+        cancelAnimationFrame(inner);
+      };
+    }
+    setAsideShown(false);
+    const timer = window.setTimeout(() => setAsideMounted(false), ASIDE_MS + 50);
+    return () => window.clearTimeout(timer);
+  }, [hasAside]);
 
   useEffect(() => {
     if (!open) return;
@@ -433,7 +466,9 @@ export function Modal({
           "ac-pop-in relative flex max-h-full w-full flex-col rounded-[24px] border border-line",
           "bg-surface shadow-[var(--shadow-pop)]",
           width,
-          aside ? "xl:w-[36rem] xl:flex-none" : null,
+          // Its own width held fixed (the max-width above still caps it), so
+          // making room for the panel moves the dialog rather than squeezing it.
+          asideMounted ? "xl:w-[42rem] xl:flex-none" : null,
         )}
       >
         <div className="relative shrink-0 overflow-hidden rounded-t-[24px] border-b border-line">
@@ -471,14 +506,29 @@ export function Modal({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </div>
-      {aside && (
+      {asideMounted && (
         <div
+          aria-hidden={!asideShown}
           className={cx(
-            "ac-slide-in-right absolute inset-0 z-10 flex items-center justify-center",
-            "ac-aside-grow xl:relative xl:inset-auto xl:z-auto xl:h-full xl:max-h-full xl:overflow-hidden",
+            // Narrow screens: over the dialog. Wide: beside it, growing from nothing.
+            "absolute inset-0 z-10 flex items-center justify-center",
+            "xl:relative xl:inset-auto xl:z-auto xl:h-full xl:max-h-full xl:overflow-hidden",
+            "transition-[opacity,max-width] duration-[850ms] ease-[cubic-bezier(0.65,0,0.35,1)]",
+            // Exactly the panel's width plus its gap, so no part of the
+            // transition is spent growing past what can be seen.
+            asideShown ? "opacity-100 xl:max-w-[35rem]" : "pointer-events-none opacity-0 xl:max-w-0",
           )}
         >
-          <div className="flex max-h-full w-full max-w-xl min-w-0 flex-col xl:ml-4 xl:w-[34rem]">{aside}</div>
+          <div
+            className={cx(
+              "flex max-h-full w-full max-w-xl min-w-0 flex-col xl:ml-4 xl:w-[34rem] xl:shrink-0",
+              "transition-transform duration-[850ms] ease-[cubic-bezier(0.65,0,0.35,1)]",
+              // Comes out from behind the dialog on a wide screen, in from the edge on a narrow one.
+              asideShown ? "translate-x-0" : "translate-x-[110%] xl:-translate-x-10",
+            )}
+          >
+            {aside ?? lastAside.current}
+          </div>
         </div>
       )}
       </div>

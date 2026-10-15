@@ -418,21 +418,6 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   }
 }
 
-/*
-  A dialog's side panel opening: it grows from nothing beside the dialog, so
-  the pair — centred together — glides the dialog to the left as it comes in.
-*/
-@keyframes ac-aside-grow {
-  from {
-    max-width: 0;
-    opacity: 0;
-  }
-  to {
-    max-width: 36rem;
-    opacity: 1;
-  }
-}
-
 /* A soft breathing glow, for the one control on a screen worth finding. */
 @keyframes ac-glow {
   0%,
@@ -485,11 +470,6 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
 }
 .ac-slide-down {
   animation: ac-slide-down 240ms var(--ease-out) both;
-}
-@media (min-width: 80rem) {
-  .ac-aside-grow {
-    animation: ac-aside-grow 460ms var(--ease-out) both;
-  }
 }
 .ac-glow {
   animation: ac-glow 2.6s ease-in-out infinite;
@@ -575,7 +555,6 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   .ac-pop-in,
   .ac-slide-in-right,
   .ac-slide-down,
-  .ac-aside-grow,
   .ac-glow,
   .ac-stagger > *,
   .ac-draw {
