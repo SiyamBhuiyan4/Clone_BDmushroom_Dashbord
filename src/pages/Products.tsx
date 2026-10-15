@@ -488,28 +488,12 @@ function ProductCard({
           className="mt-3.5 flex items-center justify-between gap-2 border-t border-line/60 pt-3"
           onClick={(e) => e.stopPropagation()}
         >
-          {/*
-            Stock is what is left in the lots, so it is changed by adding or
-            editing a lot — tapping here opens them.
-          */}
-          <button
-            onClick={onView}
-            aria-label={`Lots for ${product.name}`}
-            title="Stock comes from lots — open to add or edit one"
-            className="group/stock flex h-9.5 items-center gap-2 rounded-xl border border-line-strong bg-surface px-3 text-ink-3 transition-all hover:border-accent hover:bg-surface-2 hover:text-ink active:scale-95"
-          >
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">Stock</span>
-            <span className="min-w-5 text-center text-[13.5px] font-bold tabular-nums text-ink">
-              {product.quantity}
-            </span>
-            <Layers size={12} className="text-ink-3 transition-colors group-hover/stock:text-accent" />
-          </button>
           <Button
             size="sm"
             variant="primary"
             onClick={onSell}
             disabled={out}
-            className="h-9.5 px-5"
+            className="h-9.5 w-full"
           >
             <ShoppingCart size={14} />
             Sell
