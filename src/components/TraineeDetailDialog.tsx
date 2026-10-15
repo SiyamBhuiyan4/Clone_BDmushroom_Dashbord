@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Award,
   Cake,
@@ -19,6 +19,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Input, Modal, cx } from "./ui";
 import { ContactPhotoAvatar } from "./ContactPhotoAvatar";
+import { SidePanelCard } from "./SidePanelCard";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -70,6 +71,14 @@ export function TraineeDetailDialog({
     null,
   );
   const [generating, setGenerating] = useState(false);
+  /*
+    Lessons and the certificate open as a page of their own, rising over the
+    profile, so the profile stays about who the trainee is.
+  */
+  const [lessonsOpen, setLessonsOpen] = useState(false);
+  useEffect(() => {
+    if (!open) setLessonsOpen(false);
+  }, [open, traineeId]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const trainee = data?.trainee;
@@ -125,6 +134,119 @@ export function TraineeDetailDialog({
     }
   }
 
+  const lessonsPanel =
+    lessonsOpen && trainee ? (
+      <SidePanelCard
+        icon={<GraduationCap size={18} />}
+        title={t("trainees.lessonsAndCertificate")}
+        subtitle={trainee.name}
+        onClose={() => setLessonsOpen(false)}
+      >
+        <div>
+          {/* How far along they are, at a glance — the certificate waits on this. */}
+          <div
+            className="relative mb-4 overflow-hidden rounded-2xl p-5 text-white shadow-[var(--shadow-hero)]"
+            style={{ background: allDone ? "var(--grad-emerald)" : "var(--grad-violet)" }}
+          >
+            <div
+              className="pointer-events-none absolute -top-16 -right-10 size-44 rounded-full opacity-25 blur-2xl"
+              style={{ background: "rgba(255,255,255,0.9)" }}
+              aria-hidden
+            />
+            <div className="relative flex items-start justify-between gap-3">
+              <p className="text-[12.5px] font-semibold text-white/80">{t("trainees.lessons")}</p>
+              <span className="flex size-8 items-center justify-center rounded-xl bg-white/20" aria-hidden>
+                <Award size={16} />
+              </span>
+            </div>
+            <p className="relative mt-2 text-[32px] leading-10 font-bold tracking-tight tabular-nums">
+              {doneCount} / {lessons.length}
+            </p>
+            <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-white/25">
+              <div
+                className="h-full rounded-full bg-white transition-[width] duration-500 ease-[var(--ease-out)]"
+                style={{ width: `${lessons.length > 0 ? (doneCount / lessons.length) * 100 : 0}%` }}
+              />
+            </div>
+            <p className="relative mt-2 text-[12.5px] text-white/80">
+              {lessons.length === 0
+                ? t("trainees.noLessonsYet")
+                : allDone
+                  ? t("trainees.allDone")
+                  : `${Math.round((doneCount / lessons.length) * 100)}% · ${t("trainees.unlocksAtFull")}`}
+            </p>
+          </div>
+
+          <ul className="flex flex-col gap-2">
+            {lessons.map((l) => (
+              <li
+                key={l._id}
+                className="flex items-center gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5"
+              >
+                <button
+                  type="button"
+                  onClick={() => void setLessonCompleted({ id: l._id, completed: !l.completed })}
+                  aria-pressed={l.completed}
+                  className={cx(
+                    "flex size-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors",
+                    l.completed ? "border-good bg-good text-white" : "border-line-strong",
+                  )}
+                >
+                  {l.completed && <Award size={12} />}
+                </button>
+                <span
+                  className={cx(
+                    "min-w-0 flex-1 truncate text-[13.5px] font-semibold",
+                    l.completed ? "text-ink-3 line-through" : "text-ink",
+                  )}
+                >
+                  {l.name}
+                </span>
+                <button
+                  onClick={() => setDeletingLesson({ id: l._id, name: l.name })}
+                  aria-label={`${t("common.delete")} ${l.name}`}
+                  className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          <form onSubmit={submitLesson} className="mt-2.5 flex items-center gap-2">
+            <Input
+              value={newLesson}
+              onChange={(e) => setNewLesson(e.target.value)}
+              placeholder={t("trainees.addLessonPlaceholder")}
+              className="h-10"
+            />
+            <Button type="submit" size="sm" variant="secondary" disabled={!newLesson.trim() || addingLesson}>
+              <Plus size={15} />
+              {t("common.add")}
+            </Button>
+          </form>
+
+          <Button
+            type="button"
+            variant="primary"
+            className="mt-3 w-full"
+            disabled={!allDone || generating}
+            onClick={() => void generateCertificate()}
+          >
+            <Award size={16} />
+            {generating
+              ? t("common.saving")
+              : trainee.certificateIssuedAt
+                ? t("trainees.reissueCertificate")
+                : t("trainees.generateCertificate")}
+          </Button>
+          {!allDone && lessons.length > 0 && (
+            <p className="mt-1.5 text-center text-[12px] text-ink-3">{t("trainees.certificateHint")}</p>
+          )}
+        </div>
+      </SidePanelCard>
+    ) : undefined;
+
   return (
     <Modal
       open={open}
@@ -148,6 +270,7 @@ export function TraineeDetailDialog({
       title={trainee?.name ?? t("trainees.title")}
       subtitle={trainee?.phone}
       width="sm:max-w-2xl"
+      stacked={lessonsPanel}
     >
       {!data ? (
         <div className="ac-skeleton h-64 bg-surface" aria-hidden />
@@ -261,99 +384,6 @@ export function TraineeDetailDialog({
             </div>
           )}
 
-          {/* ------------------------------------------------------ lessons */}
-          <div>
-            <div className="mb-2.5 flex items-center justify-between gap-3">
-              <p className="text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">
-                {t("trainees.lessons")}
-              </p>
-              {lessons.length > 0 && (
-                <span className="text-[12px] font-semibold text-ink-3">
-                  {doneCount}/{lessons.length} {t("trainees.completed")}
-                </span>
-              )}
-            </div>
-
-            {lessons.length > 0 && (
-              <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-surface-3">
-                <div
-                  className="h-full rounded-full transition-[width] duration-500 ease-[var(--ease-out)]"
-                  style={{
-                    width: `${(doneCount / lessons.length) * 100}%`,
-                    background: allDone ? "var(--grad-emerald)" : "var(--grad-violet)",
-                  }}
-                />
-              </div>
-            )}
-
-            <ul className="flex flex-col gap-2">
-              {lessons.map((l) => (
-                <li
-                  key={l._id}
-                  className="flex items-center gap-3 rounded-xl border border-line bg-page px-3.5 py-2.5"
-                >
-                  <button
-                    type="button"
-                    onClick={() => void setLessonCompleted({ id: l._id, completed: !l.completed })}
-                    aria-pressed={l.completed}
-                    className={cx(
-                      "flex size-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors",
-                      l.completed ? "border-good bg-good text-white" : "border-line-strong",
-                    )}
-                  >
-                    {l.completed && <Award size={12} />}
-                  </button>
-                  <span
-                    className={cx(
-                      "min-w-0 flex-1 truncate text-[13.5px] font-semibold",
-                      l.completed ? "text-ink-3 line-through" : "text-ink",
-                    )}
-                  >
-                    {l.name}
-                  </span>
-                  <button
-                    onClick={() => setDeletingLesson({ id: l._id, name: l.name })}
-                    aria-label={`${t("common.delete")} ${l.name}`}
-                    className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-
-            <form onSubmit={submitLesson} className="mt-2.5 flex items-center gap-2">
-              <Input
-                value={newLesson}
-                onChange={(e) => setNewLesson(e.target.value)}
-                placeholder={t("trainees.addLessonPlaceholder")}
-                className="h-10"
-              />
-              <Button type="submit" size="sm" variant="secondary" disabled={!newLesson.trim() || addingLesson}>
-                <Plus size={15} />
-                {t("common.add")}
-              </Button>
-            </form>
-
-            <Button
-              type="button"
-              variant="primary"
-              className="mt-3 w-full"
-              disabled={!allDone || generating}
-              onClick={() => void generateCertificate()}
-            >
-              <Award size={16} />
-              {generating
-                ? t("common.saving")
-                : trainee.certificateIssuedAt
-                  ? t("trainees.reissueCertificate")
-                  : t("trainees.generateCertificate")}
-            </Button>
-            {!allDone && lessons.length > 0 && (
-              <p className="mt-1.5 text-center text-[12px] text-ink-3">{t("trainees.certificateHint")}</p>
-            )}
-          </div>
-
           {/* ------------------------------------------------------- gallery */}
           <div>
             <div className="mb-2.5 flex items-center justify-between gap-3">
@@ -432,6 +462,23 @@ export function TraineeDetailDialog({
               )}
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => setLessonsOpen(true)}
+            className={cx(
+              "ac-glow group flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3.5",
+              "border-accent/40 bg-accent-soft/40 text-[13.5px] font-medium tracking-wide text-ink-2",
+              "transition-colors hover:bg-accent-soft hover:text-ink",
+            )}
+          >
+            <GraduationCap size={16} className="text-accent transition-transform group-hover:scale-110" />
+            {t("trainees.lessonsAndCertificate")}
+            {lessons.length > 0 && (
+              <span className={cx("text-[12px] tabular-nums", allDone ? "text-good-ink" : "text-ink-3")}>
+                · {doneCount}/{lessons.length}
+              </span>
+            )}
+          </button>
         </div>
       ) : null}
 

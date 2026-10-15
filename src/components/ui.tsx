@@ -323,6 +323,7 @@ export function Modal({
   width = "sm:max-w-xl",
   aside,
   detail,
+  stacked,
 }: {
   open: boolean;
   onClose: () => void;
@@ -348,6 +349,12 @@ export function Modal({
     screen it slides in over everything, like the side panel does.
   */
   detail?: ReactNode;
+  /*
+    A page opened on top of the dialog: it rises from below into focus while
+    the dialog sinks, shrinks and dims behind it — still there, just not the
+    point. Closing it plays that backwards.
+  */
+  stacked?: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   /*
@@ -365,6 +372,7 @@ export function Modal({
 
   const side = useSlidePanel(aside);
   const detailPanel = useSlidePanel(detail);
+  const stack = useSlidePanel(stacked);
 
   useEffect(() => {
     if (!open) return;
@@ -447,8 +455,11 @@ export function Modal({
           detailPanel.mounted &&
             "xl:justify-end xl:overflow-hidden transition-[max-width,opacity] duration-[800ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
           detailPanel.mounted && (detailPanel.shown ? "xl:max-w-0 xl:opacity-0" : "xl:max-w-[42rem]"),
+          stack.mounted &&
+            "origin-top transition-[translate,scale,opacity,filter] duration-[800ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
+          stack.shown && "pointer-events-none translate-y-[22vh] scale-[0.9] opacity-45 blur-[1px]",
         )}
-        aria-hidden={detailPanel.shown || undefined}
+        aria-hidden={detailPanel.shown || stack.shown || undefined}
       >
       <div
         ref={panelRef}
@@ -502,6 +513,21 @@ export function Modal({
       </div>
       <SlidePanel panel={side} layer="z-10" />
       <SlidePanel panel={detailPanel} layer="z-20" />
+      {stack.mounted && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+          <div
+            className={cx(
+              "flex h-[86%] w-full flex-col justify-center",
+              width,
+              "transition-[translate,opacity] duration-[800ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
+              // Rises from below into focus, a little above centre so the page behind peeks out under it.
+              stack.shown ? "-translate-y-[5vh] opacity-100" : "translate-y-[70vh] opacity-0",
+            )}
+          >
+            <div className="pointer-events-auto flex max-h-full min-h-0 flex-col">{stack.content}</div>
+          </div>
+        </div>
+      )}
       </div>
     </div>,
     document.body,
