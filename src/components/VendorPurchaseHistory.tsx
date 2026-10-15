@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Wallet } from "lucide-react";
+import { CalendarClock, CheckCircle2, Package, ShoppingBag, Wallet } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
 import { AmountInput, Badge, Button, Modal, ModalFooter, cx } from "./ui";
@@ -7,7 +7,7 @@ import { RangePills } from "./RangePills";
 import { DEFAULT_RANGES, useRangeFilter, type RangePreset } from "../lib/dateRange";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
-import { CURRENCY_SYMBOL } from "../lib/format";
+import { CURRENCY_SYMBOL, plural, relativeTime } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation } from "../lib/session";
 
@@ -22,7 +22,7 @@ const RANGES: RangePreset[] = [
 
 const totalOf = (l: Doc<"stockBatches">) => l.quantity * l.unitCost;
 /** What is still owed to the vendor for a lot — nothing unless a part payment was recorded. */
-const dueOf = (l: Doc<"stockBatches">) => (l.vendorPaid !== undefined ? totalOf(l) - l.vendorPaid : 0);
+const dueOf = (l: Doc<"stockBatches">) => (l.vendorPaid !== undefined ? Math.max(0, totalOf(l) - l.vendorPaid) : 0);
 
 /**
  * Everything bought from one vendor: what was spent in the picked range,
@@ -58,6 +58,7 @@ export function VendorPurchaseHistory({ lots }: { lots: Doc<"stockBatches">[] })
 
   // Owed is owed whenever it was bought, so this ignores the range.
   const owed = lots.reduce((sum, l) => sum + dueOf(l), 0);
+  const lastAt = lots.length > 0 ? Math.max(...lots.map((l) => l.purchasedAt)) : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -67,30 +68,91 @@ export function VendorPurchaseHistory({ lots }: { lots: Doc<"stockBatches">[] })
         <RangePills range={range} />
       </div>
 
-      <div className="grid grid-cols-3 gap-2 rounded-xl border border-line bg-page p-3">
-        <Figure label={t("vendors.spent")} value={fmt(summary.spent)} />
-        <Figure
-          label={t("vendors.unitsBought")}
-          value={fmtNum(summary.units)}
-          sub={`${fmtNum(inRange.length)} ${t("vendors.lots")}`}
+      {/* The one number this panel is for, then what it is made of. */}
+      <div
+        className="relative overflow-hidden rounded-2xl p-5 text-white shadow-[var(--shadow-hero)]"
+        style={{ background: "var(--grad-emerald)" }}
+      >
+        <div
+          className="pointer-events-none absolute -top-16 -right-10 size-44 rounded-full opacity-25 blur-2xl"
+          style={{ background: "rgba(255,255,255,0.9)" }}
+          aria-hidden
         />
-        <Figure label={t("vendors.stillOwe")} value={fmt(owed)} critical={owed > 0} />
+        <div className="relative flex items-start justify-between gap-3">
+          <p className="text-[12.5px] font-semibold text-white/80">{t("vendors.spent")}</p>
+          <span className="flex size-8 items-center justify-center rounded-xl bg-white/20" aria-hidden>
+            <ShoppingBag size={16} />
+          </span>
+        </div>
+        <p className="relative mt-2 truncate text-[32px] leading-10 font-bold tracking-tight">
+          {fmt(summary.spent)}
+        </p>
+        <p className="relative mt-1 text-[12.5px] text-white/75">
+          {plural(summary.units, "unit")} · {plural(inRange.length, "lot")} · {range.activeLabel.full}
+        </p>
       </div>
 
-      {summary.groups.length > 1 && (
-        <div>
-          <p className="mb-1.5 text-[11px] font-semibold text-ink-3">{t("vendors.byProduct")}</p>
-          <ul className="flex flex-col divide-y divide-line rounded-xl border border-line bg-page">
-            {summary.groups.map((g) => (
-              <li key={`${g.product}|${g.size}`} className="flex items-center justify-between gap-3 px-3.5 py-2">
-                <span className="min-w-0 truncate text-[12.5px] text-ink-2">
-                  {g.product} <span className="text-ink-3">· {g.size}</span>
-                </span>
-                <span className="shrink-0 text-[12.5px] tabular-nums text-ink">
-                  {fmtNum(g.units)} · <span className="font-semibold">{fmt(g.spent)}</span>
-                </span>
-              </li>
-            ))}
+      <div className="grid grid-cols-2 gap-2.5">
+        {owed > 0 ? (
+          <MiniTile
+            gradient="var(--grad-crimson)"
+            icon={<Wallet size={15} />}
+            label={t("vendors.stillOwe")}
+            value={fmt(owed)}
+            sub={plural(lots.filter((l) => dueOf(l) > 0).length, "lot") + " unpaid"}
+            tone="critical"
+          />
+        ) : (
+          <MiniTile
+            gradient="var(--grad-emerald)"
+            icon={<CheckCircle2 size={15} />}
+            label={t("vendors.stillOwe")}
+            value={fmt(0)}
+            sub="All settled"
+            tone="good"
+          />
+        )}
+        <MiniTile
+          gradient="var(--grad-sky)"
+          icon={<CalendarClock size={15} />}
+          label={t("vendors.lastBought")}
+          value={lastAt ? relativeTime(lastAt) : "—"}
+          sub={summary.units > 0 ? `avg ${fmt(summary.spent / summary.units)} / unit` : "No purchases yet"}
+        />
+      </div>
+
+      {summary.groups.length > 0 && (
+        <div className="rounded-2xl border border-line bg-page p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Package size={14} className="text-ink-3" aria-hidden />
+            <p className="text-[11px] font-bold tracking-[0.08em] text-ink-3 uppercase">{t("vendors.byProduct")}</p>
+          </div>
+          <ul className="flex flex-col gap-3">
+            {summary.groups.map((g) => {
+              const share = summary.spent > 0 ? g.spent / summary.spent : 0;
+              return (
+                <li key={`${g.product}|${g.size}`}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="min-w-0 truncate text-[13px] font-medium text-ink">
+                      {g.product} <span className="font-normal text-ink-3">· {g.size}</span>
+                    </span>
+                    <span className="shrink-0 text-[13px] font-semibold tabular-nums text-ink">{fmt(g.spent)}</span>
+                  </div>
+                  {/* Share of spend in the range, so the big purchases stand out. */}
+                  <div className="mt-1.5 flex items-center gap-2.5">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-3">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${Math.max(3, share * 100)}%`, background: "var(--grad-emerald)" }}
+                      />
+                    </div>
+                    <span className="w-24 shrink-0 text-right text-[11.5px] tabular-nums text-ink-3">
+                      {fmtNum(g.units)} units · {Math.round(share * 100)}%
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -98,6 +160,10 @@ export function VendorPurchaseHistory({ lots }: { lots: Doc<"stockBatches">[] })
       {inRange.length === 0 ? (
         <p className="py-2 text-[13px] text-ink-3">{t("vendors.noPurchases")}</p>
       ) : (
+        <>
+        <p className="mt-1 text-[11px] font-bold tracking-[0.08em] text-ink-3 uppercase">
+          {t("vendors.lotsHeading")} · {inRange.length}
+        </p>
         <ul className="flex flex-col gap-2">
           {inRange.map((l) => {
             const due = dueOf(l);
@@ -141,6 +207,7 @@ export function VendorPurchaseHistory({ lots }: { lots: Doc<"stockBatches">[] })
             );
           })}
         </ul>
+        </>
       )}
 
       <PayVendorDialog lot={paying} onClose={() => setPaying(null)} />
@@ -148,19 +215,47 @@ export function VendorPurchaseHistory({ lots }: { lots: Doc<"stockBatches">[] })
   );
 }
 
-function Figure({ label, value, sub, critical }: { label: string; value: string; sub?: string; critical?: boolean }) {
+function MiniTile({
+  gradient,
+  icon,
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  gradient: string;
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "good" | "critical";
+}) {
   return (
-    <div className="min-w-0">
-      <p className="truncate text-[9.5px] font-bold tracking-wider text-ink-3 uppercase">{label}</p>
+    <div className="relative min-w-0 overflow-hidden rounded-2xl border border-line bg-page p-4">
+      <div
+        className="pointer-events-none absolute -top-14 -right-10 size-32 rounded-full opacity-[0.14] blur-2xl"
+        style={{ background: gradient }}
+        aria-hidden
+      />
+      <div className="relative flex items-center justify-between gap-2">
+        <p className="truncate text-[12px] font-semibold text-ink-2">{label}</p>
+        <span
+          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-white"
+          style={{ background: gradient }}
+          aria-hidden
+        >
+          {icon}
+        </span>
+      </div>
       <p
         className={cx(
-          "mt-0.5 truncate text-[14px] font-bold tabular-nums",
-          critical ? "text-critical-ink" : "text-ink",
+          "relative mt-2 truncate text-[20px] leading-7 font-bold tracking-tight tabular-nums",
+          tone === "critical" ? "text-critical-ink" : tone === "good" ? "text-good-ink" : "text-ink",
         )}
       >
         {value}
       </p>
-      {sub && <p className="truncate text-[10.5px] text-ink-3">{sub}</p>}
+      {sub && <p className="relative mt-0.5 truncate text-[11.5px] text-ink-3">{sub}</p>}
     </div>
   );
 }

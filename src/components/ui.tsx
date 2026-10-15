@@ -521,7 +521,9 @@ export function Modal({
         >
           <div
             className={cx(
-              "flex max-h-full w-full max-w-xl min-w-0 flex-col xl:ml-4 xl:w-[34rem] xl:shrink-0",
+              // A definite height, so the panel's own max-h-full resolves and it
+              // scrolls inside rather than running off the screen.
+              "flex h-full w-full max-w-xl min-w-0 flex-col justify-center xl:ml-4 xl:w-[34rem] xl:shrink-0",
               "transition-transform duration-[850ms] ease-[cubic-bezier(0.65,0,0.35,1)]",
               // Comes out from behind the dialog on a wide screen, in from the edge on a narrow one.
               asideShown ? "translate-x-0" : "translate-x-[110%] xl:-translate-x-10",
