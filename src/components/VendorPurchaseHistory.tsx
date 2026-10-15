@@ -60,9 +60,10 @@ export function VendorPurchaseHistory({ lots }: { lots: Doc<"stockBatches">[] })
   const owed = lots.reduce((sum, l) => sum + dueOf(l), 0);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-3">
       <p className="text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">{t("vendors.lotsBought")}</p>
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Scrolls sideways rather than pushing a narrow panel wider than the screen. */}
+      <div className="-mx-1 flex min-w-0 items-center gap-2 overflow-x-auto px-1 pb-1">
         <RangePills range={range} />
       </div>
 

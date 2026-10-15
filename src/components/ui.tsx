@@ -317,6 +317,7 @@ export function Modal({
   gradient = "var(--grad-violet)",
   children,
   width = "sm:max-w-xl",
+  aside,
 }: {
   open: boolean;
   onClose: () => void;
@@ -329,6 +330,12 @@ export function Modal({
   gradient?: string;
   children: ReactNode;
   width?: string;
+  /*
+    A second panel opened from inside the dialog. On a wide screen it grows in
+    beside the dialog, which glides left to make room; on anything narrower it
+    slides in over the dialog, and is expected to carry its own back control.
+  */
+  aside?: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   /*
@@ -411,6 +418,13 @@ export function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 sm:p-6">
       <div className="ac-fade-in fixed inset-0 bg-scrim" onClick={onClose} />
       <div
+        className="relative flex h-full max-h-full w-full items-center justify-center"
+        // The empty space around the panels is still the backdrop.
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+      <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
@@ -419,6 +433,7 @@ export function Modal({
           "ac-pop-in relative flex max-h-full w-full flex-col rounded-[24px] border border-line",
           "bg-surface shadow-[var(--shadow-pop)]",
           width,
+          aside ? "xl:w-[36rem] xl:flex-none" : null,
         )}
       >
         <div className="relative shrink-0 overflow-hidden rounded-t-[24px] border-b border-line">
@@ -455,6 +470,17 @@ export function Modal({
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      </div>
+      {aside && (
+        <div
+          className={cx(
+            "ac-slide-in-right absolute inset-0 z-10 flex items-center justify-center",
+            "ac-aside-grow xl:relative xl:inset-auto xl:z-auto xl:h-full xl:max-h-full xl:overflow-hidden",
+          )}
+        >
+          <div className="flex max-h-full w-full max-w-xl min-w-0 flex-col xl:ml-4 xl:w-[34rem]">{aside}</div>
+        </div>
+      )}
       </div>
     </div>,
     document.body,
