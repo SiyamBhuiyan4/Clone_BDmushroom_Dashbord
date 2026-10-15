@@ -78,6 +78,21 @@ export function formatDateFull(ts: number, lang: Lang = "en") {
   });
 }
 
+/** When a sale happened, always in Bangladesh time whatever the device's zone. */
+export function formatSaleTime(ts: number, lang: Lang = "en") {
+  const locale = localeFor(lang);
+  const date = new Date(ts).toLocaleDateString(locale, {
+    timeZone: "Asia/Dhaka",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  const time = new Date(ts)
+    .toLocaleTimeString(locale, { timeZone: "Asia/Dhaka", hour: "numeric", minute: "2-digit", hour12: true })
+    .toUpperCase();
+  return `${date}, ${time} BST`;
+}
+
 export function formatDateTime(ts: number, lang: Lang = "en") {
   return new Date(ts).toLocaleString(localeFor(lang), {
     day: "numeric",

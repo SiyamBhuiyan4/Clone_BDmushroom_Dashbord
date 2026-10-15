@@ -92,7 +92,7 @@ const isBooked = (o: Doc<"orders">) =>
   o.orderStatus === "confirmed" || o.orderStatus === "delivered";
 
 export function SalesPage() {
-  const { fmt, fmtNum, fmtPercent, fmtDateFull, lang } = useSettings();
+  const { fmt, fmtNum, fmtPercent, fmtSaleTime, lang } = useSettings();
   const t = useT();
   const toast = useToast();
   const orders = useAuthedQuery(api.orders.list, {});
@@ -442,7 +442,7 @@ export function SalesPage() {
                             {order.customerName}
                           </p>
                           <p className="mt-0.5 text-[12px] text-ink-3">
-                            {order.orderNo} · {fmtDateFull(order.orderedAt)}
+                            {order.orderNo} · {fmtSaleTime(order.orderedAt)}
                             {order.customerPhone ? ` · ${order.customerPhone}` : ""}
                           </p>
                         </div>

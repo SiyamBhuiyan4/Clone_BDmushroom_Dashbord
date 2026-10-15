@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { money, moneyCompact, num, percent, formatDate, formatDateFull, formatDateTime, type Lang } from "./format";
+import { money, moneyCompact, num, percent, formatDate, formatDateFull, formatDateTime, formatSaleTime, type Lang } from "./format";
 
 export type ThemeChoice = "system" | "light" | "dark" | "brand";
 export type { Lang };
@@ -29,6 +29,8 @@ type Settings = {
   fmtDate: (ts: number) => string;
   fmtDateFull: (ts: number) => string;
   fmtDateTime: (ts: number) => string;
+  /** A sale's date and time, in Bangladesh time. */
+  fmtSaleTime: (ts: number) => string;
 };
 
 const SettingsContext = createContext<Settings | null>(null);
@@ -100,6 +102,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       fmtDate: (ts: number) => formatDate(ts, lang),
       fmtDateFull: (ts: number) => formatDateFull(ts, lang),
       fmtDateTime: (ts: number) => formatDateTime(ts, lang),
+      fmtSaleTime: (ts: number) => formatSaleTime(ts, lang),
     }),
     [theme, setTheme, navCollapsed, toggleNav, lang, setLang],
   );

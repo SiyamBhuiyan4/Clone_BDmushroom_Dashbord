@@ -79,7 +79,7 @@ export function CustomerDetailDialog({
   onClose: () => void;
   customerId: Id<"customers"> | null;
 }) {
-  const { fmt, fmtNum, fmtDateFull, lang } = useSettings();
+  const { fmt, fmtNum, fmtSaleTime, lang } = useSettings();
   const t = useT();
   const toast = useToast();
   const data = useAuthedQuery(api.customers.detail, customerId ? { id: customerId } : "skip");
@@ -246,7 +246,7 @@ export function CustomerDetailDialog({
                             </Badge>
                           </p>
                           <p className="mt-0.5 text-[11.5px] text-ink-3">
-                            {fmtDateFull(order.orderedAt)} ·{" "}
+                            {fmtSaleTime(order.orderedAt)} ·{" "}
                             {order.items
                               .map((i) => `${i.productName} ×${fmtNum(i.quantity)}`)
                               .join(", ")}
