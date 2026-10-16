@@ -18,6 +18,7 @@ import {
   Loader2,
   LogOut,
   PlayCircle,
+  Radio,
   MessageSquare,
   Upload,
   UserRound,
@@ -963,21 +964,28 @@ function FileChips({ files, onRemove }: { files: PendingFile[]; onRemove?: (id: 
 /* ----------------------------------------------------------------- notes */
 
 /**
- * The office's broadcast note, shown as one speech bubble, read-only. A
- * trainee's own note is not part of this — it's the same kind of bubble, but
- * only shown when there is one.
+ * The office's broadcast note and/or personal note for this trainee,
+ * displayed in sleek speech bubbles.
  */
 function NotesButton({ token }: { token: string }) {
   const notes = useQuery(api.portal.notes, { token });
   const [open, setOpen] = useState(false);
+  const hasNote = Boolean(notes?.general || notes?.personal);
+
   return (
     <>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-line-strong bg-page px-3 text-[13px] font-semibold text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+        className="relative inline-flex h-9 items-center gap-1.5 rounded-xl border border-line-strong bg-page px-3 text-[13px] font-semibold text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
       >
         <MessageSquare size={15} className="text-accent" />
         Note
+        {hasNote && (
+          <span
+            className="absolute top-1.5 right-1.5 size-2 rounded-full bg-accent"
+            aria-hidden
+          />
+        )}
       </button>
       <NotePanel open={open} onClose={() => setOpen(false)} notes={notes} />
     </>
@@ -1021,9 +1029,27 @@ function NotePanel({ open, onClose, notes }: { open: boolean; onClose: () => voi
   }, [open, onClose]);
 
   if (!mounted) return null;
-  // The broadcast note is the only one a trainee reads here.
-  const text = notes?.general?.text ?? "";
-  const date = notes?.general ? new Date(notes.general.updatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
+
+  const hasPersonal = Boolean(notes?.personal?.text?.trim());
+  const hasGeneral = Boolean(notes?.general?.text?.trim());
+
+  const personalDate =
+    notes?.personal?.updatedAt && notes.personal.updatedAt > 0
+      ? new Date(notes.personal.updatedAt).toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      : "";
+
+  const generalDate =
+    notes?.general?.updatedAt && notes.general.updatedAt > 0
+      ? new Date(notes.general.updatedAt).toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      : "";
 
   return (
     <div className="fixed inset-0 z-50" onClick={onClose}>
@@ -1053,14 +1079,54 @@ function NotePanel({ open, onClose, notes }: { open: boolean; onClose: () => voi
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
           {!notes ? (
             <div className="ac-skeleton h-24 rounded-2xl bg-surface-2" aria-hidden />
-          ) : text ? (
-            <div className="ac-pop-in relative rounded-2xl border border-accent/40 bg-accent-soft/50 px-5 py-4 shadow-[var(--shadow-card)]">
-              <p className="whitespace-pre-wrap text-[15px] leading-7 text-ink">
-                <Linkified text={text} />
-              </p>
-              <p className="mt-3 text-right text-[11.5px] text-ink-3">{date}</p>
-              {/* The bubble's tail, pointing back at the header button. */}
-              <span className="absolute -top-2 right-6 size-4 rotate-45 border-t border-l border-accent/40 bg-accent-soft/50" aria-hidden />
+          ) : hasPersonal || hasGeneral ? (
+            <div className="flex flex-col gap-6">
+              {hasPersonal && (
+                <div className="ac-pop-in relative rounded-2xl border border-accent/40 bg-accent-soft/50 px-5 py-4 shadow-[var(--shadow-card)]">
+                  <div className="mb-2.5 flex items-center justify-between gap-2 border-b border-accent/20 pb-2">
+                    <span className="inline-flex items-center gap-1.5 text-[12px] font-bold tracking-wider text-accent uppercase">
+                      <UserRound size={13} />
+                      For you
+                    </span>
+                  </div>
+                  <p className="whitespace-pre-wrap text-[15px] leading-7 text-ink">
+                    <Linkified text={notes.personal!.text} />
+                  </p>
+                  {personalDate && (
+                    <p className="mt-3 text-right text-[11.5px] text-ink-3">{personalDate}</p>
+                  )}
+                  {/* The bubble's tail, pointing back at the header button. */}
+                  <span
+                    className="absolute -top-2 right-6 size-4 rotate-45 border-t border-l border-accent/40 bg-accent-soft/50"
+                    aria-hidden
+                  />
+                </div>
+              )}
+
+              {hasGeneral && (
+                <div className="ac-pop-in relative rounded-2xl border border-line-strong bg-page px-5 py-4 shadow-[var(--shadow-card)]">
+                  <div className="mb-2.5 flex items-center justify-between gap-2 border-b border-line pb-2">
+                    <span className="inline-flex items-center gap-1.5 text-[12px] font-bold tracking-wider text-ink uppercase">
+                      <Radio size={13} className="text-accent" />
+                      Notice for everyone
+                    </span>
+                    <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-ink-3 uppercase">
+                      Broadcast
+                    </span>
+                  </div>
+                  <p className="whitespace-pre-wrap text-[15px] leading-7 text-ink-2">
+                    <Linkified text={notes.general!.text} />
+                  </p>
+                  {generalDate && (
+                    <p className="mt-3 text-right text-[11.5px] text-ink-3">{generalDate}</p>
+                  )}
+                  {/* The bubble's tail, pointing back at the header button. */}
+                  <span
+                    className="absolute -top-2 right-6 size-4 rotate-45 border-t border-l border-line-strong bg-page"
+                    aria-hidden
+                  />
+                </div>
+              )}
             </div>
           ) : (
             <p className="py-12 text-center text-[13.5px] text-ink-3">No note right now.</p>

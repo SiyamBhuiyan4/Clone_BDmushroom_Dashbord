@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KeyRound, Lock, Pencil, Phone, Radio, StickyNote, Trash2, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
@@ -69,11 +69,24 @@ export function GeneralNoteDialog({ open, onClose }: { open: boolean; onClose: (
   const save = useAuthedMutation(api.trainees.setGeneralNote);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
+  const loadedOnceRef = useRef(false);
+  const isDirtyRef = useRef(false);
 
   useEffect(() => {
-    if (open && note) setText(note.text);
-    // Fill once per opening, not on every refresh of the saved note.
-  }, [open, note === undefined]);
+    if (!open) {
+      loadedOnceRef.current = false;
+      isDirtyRef.current = false;
+      setText("");
+      return;
+    }
+    // Fill once per opening, not on every refresh of the saved note, and never wipe user input.
+    if (!loadedOnceRef.current && note !== undefined) {
+      if (!isDirtyRef.current) {
+        setText(note?.text ?? "");
+      }
+      loadedOnceRef.current = true;
+    }
+  }, [open, note]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -107,7 +120,10 @@ export function GeneralNoteDialog({ open, onClose }: { open: boolean; onClose: (
           <Textarea
             rows={9}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              isDirtyRef.current = true;
+              setText(e.target.value);
+            }}
             placeholder={"Next class: Saturday 10am, Savar office.\nQuestions? WhatsApp 01710-000000."}
             autoFocus
           />

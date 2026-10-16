@@ -298,11 +298,14 @@ export const notes = query({
       .query("appSettings")
       .withIndex("by_key", (q) => q.eq("key", "traineeNote"))
       .unique();
-    const generalText = general?.text ?? null;
-    const personalText = trainee.portalNote ?? null;
+    const generalText = general?.text?.trim() || null;
+    const personalRaw = trainee.portalNote ?? trainee.note ?? null;
+    const personalText = personalRaw?.trim() || null;
     return {
       general: generalText ? { text: generalText, updatedAt: general!.updatedAt } : null,
-      personal: personalText ? { text: personalText, updatedAt: trainee.portalNoteUpdatedAt ?? 0 } : null,
+      personal: personalText
+        ? { text: personalText, updatedAt: trainee.portalNoteUpdatedAt ?? trainee.createdAt ?? 0 }
+        : null,
     };
   },
 });

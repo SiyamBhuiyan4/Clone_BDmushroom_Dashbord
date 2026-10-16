@@ -389,7 +389,8 @@ export const generalNote = query({
       .query("appSettings")
       .withIndex("by_key", (q) => q.eq("key", NOTE_KEY))
       .unique();
-    return { text: row?.text ?? "", updatedAt: row?.updatedAt ?? null };
+    const text = row?.text?.trim() || "";
+    return { text, updatedAt: text ? row!.updatedAt : null };
   },
 });
 
@@ -403,7 +404,7 @@ export const setGeneralNote = mutation({
       .withIndex("by_key", (q) => q.eq("key", NOTE_KEY))
       .unique();
     if (row) await ctx.db.patch(row._id, { text, updatedAt: Date.now() });
-    else await ctx.db.insert("appSettings", { key: NOTE_KEY, text, updatedAt: Date.now() });
+    else if (text) await ctx.db.insert("appSettings", { key: NOTE_KEY, text, updatedAt: Date.now() });
   },
 });
 
