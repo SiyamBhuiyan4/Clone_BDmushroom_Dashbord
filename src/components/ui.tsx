@@ -8,7 +8,6 @@ import {
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
-  type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "../lib/i18n";
@@ -166,7 +165,7 @@ export function Input({ className, ...rest }: ComponentProps<"input">) {
   return <input {...rest} className={cx(CONTROL, "h-11", className)} />;
 }
 
-export function Textarea({ className, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function Textarea({ className, ...rest }: ComponentProps<"textarea">) {
   return <textarea {...rest} className={cx(CONTROL, "resize-y py-3 leading-6", className)} />;
 }
 

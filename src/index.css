@@ -624,3 +624,36 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   
   --scrim: rgba(5, 22, 13, 0.85);
 }
+
+/* Smooth floating speech bubble animations for Admin Trainee Notes */
+@keyframes speechBubbleSlideIn {
+  0% {
+    opacity: 0;
+    transform: translate3d(36px, 0, 0) scale(0.94);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes speechBubbleSlideOut {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(24px, 0, 0) scale(0.96);
+  }
+}
+
+.animate-speech-bubble-in {
+  animation: speechBubbleSlideIn 380ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.animate-speech-bubble-out {
+  animation: speechBubbleSlideOut 220ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  will-change: transform, opacity;
+}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Pencil, Radio, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
@@ -157,36 +158,70 @@ export function AdminTraineeNoteDrawer({
   const toast = useToast();
   const save = useAuthedMutation(api.trainees.setAdminNote);
   const [mounted, setMounted] = useState(open);
-  const [shown, setShown] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (open && trainee) {
+      if (closeTimerRef.current) {
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
       setMounted(true);
+      setClosing(false);
       setText(trainee.note ?? "");
       setEditing(!trainee.note);
-      let inner = 0;
-      const outer = requestAnimationFrame(() => {
-        inner = requestAnimationFrame(() => setShown(true));
-      });
-      return () => {
-        cancelAnimationFrame(outer);
-        cancelAnimationFrame(inner);
-      };
+    } else if (mounted && !closing) {
+      setClosing(true);
+      closeTimerRef.current = window.setTimeout(() => {
+        setMounted(false);
+        setClosing(false);
+      }, 220);
     }
-    setShown(false);
-    const timer = window.setTimeout(() => setMounted(false), 520);
-    return () => window.clearTimeout(timer);
   }, [open, trainee?._id]);
 
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    return () => {
+      if (closeTimerRef.current) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const requestClose = () => {
+    if (closing) return;
+    setClosing(true);
+    closeTimerRef.current = window.setTimeout(() => {
+      setMounted(false);
+      setClosing(false);
+      onClose();
+    }, 220);
+  };
+
+  useEffect(() => {
+    if (!mounted) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        requestClose();
+      }
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [mounted, closing]);
+
+  useEffect(() => {
+    if (editing && !closing) {
+      const timer = window.setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 350);
+      return () => window.clearTimeout(timer);
+    }
+  }, [editing, closing]);
 
   if (!mounted || !trainee) return null;
 
@@ -219,50 +254,55 @@ export function AdminTraineeNoteDrawer({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center sm:justify-end p-4 sm:p-8 sm:pr-14 overflow-hidden" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-start justify-center sm:justify-end p-4 sm:p-8 sm:pr-14 pointer-events-none">
+      {/* 
+        Transparent click catcher:
+        NO blur (backdrop-blur removed completely) and NO dark scrim.
+        The underlying page stays 100% sharp and visible.
+      */}
       <div
-        className={cx(
-          "absolute inset-0 bg-scrim/30 backdrop-blur-[2px] transition-opacity duration-300",
-          shown ? "opacity-100" : "opacity-0",
-        )}
+        className="fixed inset-0 pointer-events-auto bg-transparent"
+        onClick={requestClose}
+        aria-hidden
       />
       <div
         role="dialog"
         aria-label={`Note for ${trainee.name}`}
         onClick={(e) => e.stopPropagation()}
         className={cx(
-          "relative z-10 w-full max-w-sm sm:max-w-md mt-16 sm:mt-24",
-          "transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
-          shown ? "translate-x-0 opacity-100 scale-100" : "translate-x-8 opacity-0 scale-95",
+          "pointer-events-auto relative z-50 w-full max-w-sm sm:max-w-md mt-16 sm:mt-24",
+          closing ? "animate-speech-bubble-out" : "animate-speech-bubble-in",
         )}
       >
         <SpeechBubble className="w-full">
           {editing ? (
             <div className="flex flex-col">
               <Textarea
+                ref={textareaRef}
                 rows={4}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder="Write note..."
-                autoFocus
                 className="border-none bg-transparent p-0 text-[15px] leading-7 text-ink placeholder:text-ink-3 focus:ring-0 focus:outline-none resize-none"
               />
               <div className="mt-3 flex items-center justify-end gap-2 border-t border-line/40 pt-2.5">
-                {trainee.note && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setText(trainee.note ?? "");
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    if (trainee.note) {
+                      setText(trainee.note);
                       setEditing(false);
-                    }}
-                    disabled={saving}
-                  >
-                    Cancel
-                  </Button>
-                )}
+                    } else {
+                      requestClose();
+                    }
+                  }}
+                  disabled={saving}
+                >
+                  Cancel
+                </Button>
                 <Button
                   type="button"
                   size="sm"
@@ -312,7 +352,8 @@ export function AdminTraineeNoteDrawer({
           )}
         </SpeechBubble>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

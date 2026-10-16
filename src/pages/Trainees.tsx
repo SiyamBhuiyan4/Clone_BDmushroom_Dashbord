@@ -198,12 +198,14 @@ export function TraineesPage() {
                   <div className="flex shrink-0 items-center gap-0.5">
                     <button
                       type="button"
-                      onClick={() => setNoteTraineeId(tr._id)}
+                      onClick={() => setNoteTraineeId((curr) => (curr === tr._id ? null : tr._id))}
                       aria-label={`Note for ${tr.name}`}
                       title={tr.note ? `Admin note: ${tr.note.slice(0, 45)}...` : `Write admin note for ${tr.name}`}
                       className={cx(
                         "relative rounded-lg p-2 transition-colors",
-                        tr.note
+                        noteTraineeId === tr._id
+                          ? "bg-accent-soft text-accent ring-2 ring-accent/40"
+                          : tr.note
                           ? "bg-accent-soft text-accent hover:bg-accent-soft/80"
                           : "text-ink-3 hover:bg-surface-2 hover:text-ink",
                       )}
