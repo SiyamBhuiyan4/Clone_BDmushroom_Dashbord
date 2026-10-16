@@ -479,6 +479,7 @@ export const summary = query({
         unitPrice: b.unitPrice,
         projectedPrice: unitPrice,
         note: b.note,
+        vendorId: b.vendorId,
         unitProfit,
         totalCost: b.unitCost * b.quantity,
         totalRevenue: unitPrice * b.quantity,

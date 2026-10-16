@@ -9,6 +9,7 @@ import {
   MapPin,
   MessageCircle,
   Phone,
+  Plus,
   Trash2,
   Truck,
   Upload,
@@ -20,6 +21,7 @@ import { Button, Input, Modal, cx } from "./ui";
 import { ContactPhotoAvatar } from "./ContactPhotoAvatar";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { VendorPurchaseHistory } from "./VendorPurchaseHistory";
+import { VendorAddLotPanel } from "./VendorAddLotPanel";
 import { SidePanelCard } from "./SidePanelCard";
 import { useVendorCategories } from "../lib/vendorCategories";
 import { useT } from "../lib/i18n";
@@ -66,8 +68,12 @@ export function VendorDetailDialog({
     the profile stays short and the numbers get a panel of their own.
   */
   const [dashboardOpen, setDashboardOpen] = useState(false);
+  const [addLotOpen, setAddLotOpen] = useState(false);
   useEffect(() => {
-    if (!open) setDashboardOpen(false);
+    if (!open) {
+      setDashboardOpen(false);
+      setAddLotOpen(false);
+    }
   }, [open, vendorId]);
 
   const name = data?.vendor.name ?? "";
@@ -123,7 +129,32 @@ export function VendorDetailDialog({
         setOpenFolderId(null);
         onClose();
       }}
-      onBack={() => setDashboardOpen(false)}
+      onBack={() => {
+        setDashboardOpen(false);
+        setAddLotOpen(false);
+      }}
+      headerActions={
+        <Button
+          size="sm"
+          variant="primary"
+          className="h-8 gap-1.5 text-[12.5px] px-3 font-semibold shadow-sm"
+          onClick={() => {
+            setDashboardOpen(false);
+            setAddLotOpen((prev) => !prev);
+          }}
+        >
+          <Plus size={14} /> Add lot
+        </Button>
+      }
+      asideLeft={
+        addLotOpen && data ? (
+          <VendorAddLotPanel
+            vendorId={data.vendor._id}
+            vendorName={data.vendor.name}
+            onClose={() => setAddLotOpen(false)}
+          />
+        ) : undefined
+      }
       aside={
         dashboardOpen && data ? (
           <VendorDashboardPanel
@@ -384,7 +415,10 @@ export function VendorDetailDialog({
 
           <button
             type="button"
-            onClick={() => setDashboardOpen((v) => !v)}
+            onClick={() => {
+              setAddLotOpen(false);
+              setDashboardOpen((prev) => !prev);
+            }}
             aria-expanded={dashboardOpen}
             className={cx(
               "ac-glow group flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3.5",

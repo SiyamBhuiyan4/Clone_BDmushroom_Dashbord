@@ -321,6 +321,8 @@ export function Modal({
   gradient = "var(--grad-violet)",
   children,
   width = "sm:max-w-xl",
+  headerActions,
+  asideLeft,
   aside,
   detail,
   stacked,
@@ -338,6 +340,11 @@ export function Modal({
   gradient?: string;
   children: ReactNode;
   width?: string;
+  headerActions?: ReactNode;
+  /*
+    A left-side sliding panel, mirroring how `aside` works on the right.
+  */
+  asideLeft?: ReactNode;
   /*
     A second panel opened from inside the dialog. On a wide screen it grows in
     beside the dialog, which glides left to make room; on anything narrower it
@@ -358,7 +365,7 @@ export function Modal({
   */
   stacked?: ReactNode;
   /*
-    Steps back one layer — closes whichever of `aside`, `detail` or `stacked`
+    Steps back one layer — closes whichever of `aside`, `asideLeft`, `detail` or `stacked`
     is on top. While one is open, a click outside the panels or Escape calls
     this instead of closing the whole dialog, so each one backs out a step.
   */
@@ -375,6 +382,7 @@ export function Modal({
   /** Identity for the stack below; the object itself is never read. */
   const idRef = useRef({});
 
+  const leftSide = useSlidePanel(asideLeft);
   const side = useSlidePanel(aside);
   const detailPanel = useSlidePanel(detail);
   const stack = useSlidePanel(stacked);
@@ -399,7 +407,7 @@ export function Modal({
   };
   /** One step back: the top side panel if one is open, else the dialog itself. */
   const dismiss = () => {
-    if ((aside || detail || stacked) && onBack) onBack();
+    if ((aside || asideLeft || detail || stacked) && onBack) onBack();
     else requestClose();
   };
   /*
@@ -414,7 +422,7 @@ export function Modal({
   dismissRef.current = dismiss;
 
   /** Which panel is in focus — the one a click anywhere else steps back from. */
-  const topLayer = detail ? "detail" : stacked ? "stacked" : aside ? "aside" : "main";
+  const topLayer = detail ? "detail" : stacked ? "stacked" : aside ? "aside" : asideLeft ? "asideLeft" : "main";
   /**
    * True when the event's DOM target is in a panel of this dialog that is
    * not the one in focus — the profile beside an open dashboard, say.
@@ -530,11 +538,12 @@ export function Modal({
     >
       <div className="ac-fade-in fixed inset-0 bg-scrim" />
       <div className="relative flex h-full max-h-full w-full items-center justify-center">
+      <SlidePanel panel={leftSide} layer="z-10" name="asideLeft" position="left" />
       {/* Collapses on a wide screen to make way for `detail`, clipping from the left. */}
       <div
         className={cx(
           "flex h-full max-h-full w-full items-center justify-center",
-          side.mounted && "xl:w-auto xl:flex-none",
+          (side.mounted || leftSide.mounted) && "xl:w-auto xl:flex-none",
           detailPanel.mounted &&
             "xl:justify-end xl:overflow-hidden transition-[max-width,opacity] duration-[800ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
           detailPanel.mounted && (detailPanel.shown ? "xl:max-w-0 xl:opacity-0" : "xl:max-w-[42rem]"),
@@ -557,7 +566,7 @@ export function Modal({
           width,
           // Its own width held fixed (the max-width above still caps it), so
           // making room for the panel moves the dialog rather than squeezing it.
-          side.mounted ? "xl:w-[42rem] xl:flex-none xl:shrink-0" : null,
+          (side.mounted || leftSide.mounted) ? "xl:w-[42rem] xl:flex-none xl:shrink-0" : null,
         )}
       >
         <div className="relative shrink-0 overflow-hidden rounded-t-[24px] border-b border-line">
@@ -584,6 +593,7 @@ export function Modal({
               <h2 className="text-[19px] leading-7 font-bold tracking-tight text-ink">{title}</h2>
               {subtitle && <p className="mt-1 text-[13px] leading-5 text-ink-3">{subtitle}</p>}
             </div>
+            {headerActions && <div className="shrink-0 flex items-center gap-2">{headerActions}</div>}
             <button
               onClick={requestClose}
               aria-label="Close"
@@ -680,8 +690,19 @@ function useSlidePanel(node: ReactNode): SlideState {
 }
 
 /** A dialog's side panel: beside it on a wide screen, over it on a narrow one. */
-function SlidePanel({ panel, layer, name }: { panel: SlideState; layer: string; name: string }) {
+function SlidePanel({
+  panel,
+  layer,
+  name,
+  position = "right",
+}: {
+  panel: SlideState;
+  layer: string;
+  name: string;
+  position?: "left" | "right";
+}) {
   if (!panel.mounted) return null;
+  const isLeft = position === "left";
   return (
     <div
       aria-hidden={!panel.shown}
@@ -700,10 +721,15 @@ function SlidePanel({ panel, layer, name }: { panel: SlideState; layer: string; 
         className={cx(
           // A definite height, so the panel's own max-h-full resolves and it
           // scrolls inside rather than running off the screen.
-          "flex h-full w-full max-w-xl min-w-0 flex-col justify-center xl:ml-4 xl:w-[34rem] xl:shrink-0",
+          "flex h-full w-full max-w-xl min-w-0 flex-col justify-center xl:w-[34rem] xl:shrink-0",
+          isLeft ? "xl:mr-4" : "xl:ml-4",
           "transition-transform duration-[800ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
           // Comes out from behind on a wide screen, in from the edge on a narrow one.
-          panel.shown ? "translate-x-0" : "translate-x-[110%] xl:-translate-x-10",
+          panel.shown
+            ? "translate-x-0"
+            : isLeft
+              ? "-translate-x-[110%]"
+              : "translate-x-[110%] xl:-translate-x-10",
         )}
       >
         {panel.content}
