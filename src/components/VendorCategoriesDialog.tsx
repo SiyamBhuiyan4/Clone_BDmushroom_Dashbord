@@ -11,7 +11,9 @@ import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { useVendorCategories } from "../lib/vendorCategories";
 
 /** How long a row has to be held before it can be dragged. */
-const HOLD_MS = 1600;
+const HOLD_MS = 300;
+/** How long rows take to slide out of the way, and the dropped row to settle. */
+const SETTLE_MS = 220;
 
 /**
  * The shop's own list of vendor categories: add one, rename one in place,
@@ -37,19 +39,25 @@ export function VendorCategoriesDialog({
   const reorder = useAuthedMutation(api.vendorCategories.reorder);
 
   /*
-    Press and hold a row to pick it up, then drag it to reorder. The row
-    grows slowly while held, so it's clear something is about to happen;
-    once picked up, rows swap as the pointer passes their middle, and
-    letting go saves the new order. Letting go early, or moving off before
-    it's picked up (scrolling the list, say), does nothing. Pointer events
-    rather than HTML drag-and-drop, so it works the same by touch.
+    Press and hold a row to pick it up, then drag it to reorder.
+
+    Holding grows the row and turns it green; after HOLD_MS it lifts and
+    follows the pointer exactly, while the rows it passes slide out of its
+    way. Letting go glides it into its slot and saves the new order. Letting
+    go early, or moving off first (a scroll), does nothing. The DOM order
+    never changes mid-drag — rows only move by transform, which is what
+    keeps it smooth — and is committed once the drop has settled.
   */
+  type Drag = { id: string; from: number; to: number; dy: number; step: number; startY: number };
   const [order, setOrder] = useState<Id<"vendorCategories">[] | null>(null);
-  const [dragId, setDragId] = useState<string | null>(null);
   const [pressId, setPressId] = useState<string | null>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const [settling, setSettling] = useState(false);
+  /** One frame with transitions off, while the new order is committed in place. */
+  const [frozen, setFrozen] = useState(false);
   const pressRef = useRef<{ id: string; x: number; y: number; timer: number } | null>(null);
-  const dragIdRef = useRef<string | null>(null);
-  dragIdRef.current = dragId;
+  const dragRef = useRef<Drag | null>(null);
+  dragRef.current = drag;
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
   const rows = order
     ? order.map((id) => categories.find((c) => c._id === id)).filter((c): c is Doc<"vendorCategories"> => Boolean(c))
@@ -58,7 +66,7 @@ export function VendorCategoriesDialog({
   // Once a row is picked up, a finger moving it must not scroll the page too.
   useEffect(() => {
     const stopScroll = (e: TouchEvent) => {
-      if (dragIdRef.current) e.preventDefault();
+      if (dragRef.current) e.preventDefault();
     };
     document.addEventListener("touchmove", stopScroll, { passive: false });
     return () => document.removeEventListener("touchmove", stopScroll);
@@ -74,6 +82,7 @@ export function VendorCategoriesDialog({
     // The row's own buttons and the rename field keep working as before.
     if ((e.target as Element).closest("button, input, form")) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (drag || settling) return;
     // So the moves keep coming to this row even once the pointer leaves it.
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -81,51 +90,66 @@ export function VendorCategoriesDialog({
       // A pointer the browser no longer tracks; the hold still works without it.
     }
     const timer = window.setTimeout(() => {
+      const press = pressRef.current;
       pressRef.current = null;
       setPressId(null);
-      setDragId(id);
-      setOrder(categories.map((c) => c._id));
+      if (!press) return;
+      const tops = rows.map((r) => rowRefs.current.get(r._id)?.getBoundingClientRect().top ?? 0);
+      const from = rows.findIndex((r) => r._id === id);
+      const height = rowRefs.current.get(id)?.getBoundingClientRect().height ?? 56;
+      // The distance from one row to the next, gap included.
+      const step = tops.length > 1 ? tops[1] - tops[0] : height;
+      setDrag({ id, from, to: from, dy: 0, step, startY: press.y });
       navigator.vibrate?.(12);
     }, HOLD_MS);
     pressRef.current = { id, x: e.clientX, y: e.clientY, timer };
     setPressId(id);
   }
 
-  /** The order with the dragged row placed where the pointer is now. */
-  function orderAt(clientY: number) {
-    if (!dragId || !order) return null;
-    const others = order.filter((id) => id !== dragId);
-    // How many of the other rows sit above the pointer is where this one goes.
-    const index = others.filter((id) => {
-      const rect = rowRefs.current.get(id)?.getBoundingClientRect();
-      return rect ? rect.top + rect.height / 2 < clientY : false;
-    }).length;
-    return [...others.slice(0, index), dragId as Id<"vendorCategories">, ...others.slice(index)];
-  }
-
   function moveDrag(e: React.PointerEvent) {
     const press = pressRef.current;
     // Moving off before it's picked up means this was a scroll, not a hold.
     if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) cancelPress();
-    const next = orderAt(e.clientY);
-    if (next && order && next.some((id, i) => id !== order[i])) setOrder(next);
+    const d = dragRef.current;
+    if (!d || settling) return;
+    const dy = e.clientY - d.startY;
+    const to = Math.max(0, Math.min(rows.length - 1, Math.round(d.from + dy / d.step)));
+    setDrag({ ...d, dy, to });
   }
 
-  async function endDrag(e: React.PointerEvent) {
+  function endDrag() {
     cancelPress();
-    // Where it was let go counts, even if no move event landed there first.
-    const final = orderAt(e.clientY) ?? order;
-    if (!dragId || !final) return;
-    setDragId(null);
-    setOrder(final);
-    const changed = final.some((id, i) => id !== categories[i]?._id);
-    try {
-      if (changed) await reorder({ ids: final });
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setOrder(null);
-    }
+    const d = dragRef.current;
+    if (!d || settling) return;
+    const ids = rows.map((r) => r._id);
+    const final = [...ids];
+    final.splice(d.from, 1);
+    final.splice(d.to, 0, d.id as Id<"vendorCategories">);
+    // Glide into the slot, then commit the order with nothing animating.
+    setSettling(true);
+    window.setTimeout(() => {
+      setFrozen(true);
+      setOrder(final);
+      setDrag(null);
+      setSettling(false);
+      requestAnimationFrame(() => requestAnimationFrame(() => setFrozen(false)));
+      if (d.to === d.from) {
+        setOrder(null);
+        return;
+      }
+      reorder({ ids: final })
+        .catch((err) => toast.error(errorMessage(err)))
+        .finally(() => setOrder(null));
+    }, SETTLE_MS);
+  }
+
+  /** Where a row sits right now, relative to its place in the list. */
+  function offsetOf(index: number, id: string) {
+    if (!drag) return 0;
+    if (id === drag.id) return settling ? (drag.to - drag.from) * drag.step : drag.dy;
+    if (drag.from < drag.to && index > drag.from && index <= drag.to) return -drag.step;
+    if (drag.to < drag.from && index >= drag.to && index < drag.from) return drag.step;
+    return 0;
   }
 
   const [newName, setNewName] = useState("");
@@ -177,7 +201,11 @@ export function VendorCategoriesDialog({
     >
       <div className="flex flex-col gap-4 px-6 py-6">
         <ul className="flex flex-col gap-2">
-          {rows.map((c) => (
+          {rows.map((c, index) => {
+            // Back to its own colours while it glides into place, so nothing jumps on commit.
+            const lifted = pressId === c._id || (drag?.id === c._id && !settling);
+            const following = drag?.id === c._id && !settling;
+            return (
             <li
               key={c._id}
               ref={(el) => {
@@ -186,20 +214,30 @@ export function VendorCategoriesDialog({
               }}
               onPointerDown={(e) => startPress(e, c._id)}
               onPointerMove={moveDrag}
-              onPointerUp={(e) => void endDrag(e)}
-              onPointerCancel={(e) => void endDrag(e)}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
               onContextMenu={(e) => {
-                if (pressId || dragId) e.preventDefault();
+                if (pressId || drag) e.preventDefault();
+              }}
+              style={{
+                translate: `0 ${offsetOf(index, c._id)}px`,
+                transitionProperty: "translate, scale, background-color, border-color, box-shadow",
+                transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
+                // The row under the pointer follows it exactly; everything else eases.
+                transitionDuration: frozen
+                  ? "0ms"
+                  : following
+                    ? `0ms, ${HOLD_MS}ms, ${HOLD_MS}ms, ${HOLD_MS}ms, ${HOLD_MS}ms`
+                    : pressId === c._id
+                      ? `0ms, ${HOLD_MS}ms, ${HOLD_MS}ms, ${HOLD_MS}ms, ${HOLD_MS}ms`
+                      : `${SETTLE_MS}ms`,
               }}
               className={cx(
-                "flex items-center gap-2 rounded-xl border bg-page px-3.5 py-2.5 select-none [-webkit-touch-callout:none]",
-                "transition-[scale,box-shadow,border-color]",
-                dragId === c._id
-                  ? "relative z-10 scale-[1.04] cursor-grabbing border-accent shadow-[var(--shadow-pop)] duration-200"
-                  : pressId === c._id
-                    ? // Grows for as long as the hold takes, so it lifts right as it's picked up.
-                      "scale-[1.04] border-accent/60 shadow-[var(--shadow-pop)] duration-[1600ms] ease-linear"
-                    : "border-line duration-200",
+                "relative flex items-center gap-2 rounded-xl border px-3.5 py-2.5 select-none [-webkit-touch-callout:none]",
+                lifted
+                  ? "z-10 scale-[1.04] border-accent bg-accent shadow-[var(--shadow-pop)]"
+                  : "border-line bg-page",
+                drag?.id === c._id && "cursor-grabbing",
               )}
             >
               {editingId === c._id ? (
@@ -236,8 +274,21 @@ export function VendorCategoriesDialog({
               ) : (
                 <>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13.5px] font-semibold text-ink">{label(c)}</p>
-                    <p className="text-[11.5px] text-ink-3">{plural(countIn(c._id), "vendor")}</p>
+                    <p
+                      className={cx(
+                        "truncate text-[13.5px] font-semibold transition-colors",
+                        lifted ? "text-white" : "text-ink",
+                      )}
+                      style={{ transitionDuration: `${HOLD_MS}ms` }}
+                    >
+                      {label(c)}
+                    </p>
+                    <p
+                      className={cx("text-[11.5px] transition-colors", lifted ? "text-white/80" : "text-ink-3")}
+                      style={{ transitionDuration: `${HOLD_MS}ms` }}
+                    >
+                      {plural(countIn(c._id), "vendor")}
+                    </p>
                   </div>
                   <button
                     onClick={() => {
@@ -245,21 +296,22 @@ export function VendorCategoriesDialog({
                       setEditName(label(c));
                     }}
                     aria-label={`${t("common.edit")} ${label(c)}`}
-                    className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-ink"
+                    className={cx("rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-ink transition-colors", lifted && "text-white/80")}
                   >
                     <Pencil size={14} />
                   </button>
                   <button
                     onClick={() => setDeleting(c)}
                     aria-label={`${t("common.delete")} ${label(c)}`}
-                    className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical"
+                    className={cx("rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical transition-colors", lifted && "text-white/80")}
                   >
                     <Trash2 size={14} />
                   </button>
                 </>
               )}
             </li>
-          ))}
+            );
+          })}
         </ul>
 
         <form onSubmit={add} className="flex items-center gap-2">
