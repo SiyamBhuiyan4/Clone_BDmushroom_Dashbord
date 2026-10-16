@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, GripVertical, Pencil, Plus, Tags, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, Tags, Trash2, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Button, Input, Modal, cx } from "./ui";
@@ -9,6 +9,9 @@ import { plural } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { useVendorCategories } from "../lib/vendorCategories";
+
+/** How long a row has to be held before it can be dragged. */
+const HOLD_MS = 1600;
 
 /**
  * The shop's own list of vendor categories: add one, rename one in place,
@@ -34,23 +37,58 @@ export function VendorCategoriesDialog({
   const reorder = useAuthedMutation(api.vendorCategories.reorder);
 
   /*
-    Drag to reorder, by the grip on each row. While dragging, the list is
-    held locally (`order`) and rows swap as the pointer passes their middle;
-    letting go saves it. Pointer events rather than HTML drag-and-drop, so
-    it works the same with a finger as with a mouse.
+    Press and hold a row to pick it up, then drag it to reorder. The row
+    grows slowly while held, so it's clear something is about to happen;
+    once picked up, rows swap as the pointer passes their middle, and
+    letting go saves the new order. Letting go early, or moving off before
+    it's picked up (scrolling the list, say), does nothing. Pointer events
+    rather than HTML drag-and-drop, so it works the same by touch.
   */
   const [order, setOrder] = useState<Id<"vendorCategories">[] | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [pressId, setPressId] = useState<string | null>(null);
+  const pressRef = useRef<{ id: string; x: number; y: number; timer: number } | null>(null);
+  const dragIdRef = useRef<string | null>(null);
+  dragIdRef.current = dragId;
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
   const rows = order
     ? order.map((id) => categories.find((c) => c._id === id)).filter((c): c is Doc<"vendorCategories"> => Boolean(c))
     : categories;
 
-  function startDrag(e: React.PointerEvent, id: string) {
-    e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    setDragId(id);
-    setOrder(categories.map((c) => c._id));
+  // Once a row is picked up, a finger moving it must not scroll the page too.
+  useEffect(() => {
+    const stopScroll = (e: TouchEvent) => {
+      if (dragIdRef.current) e.preventDefault();
+    };
+    document.addEventListener("touchmove", stopScroll, { passive: false });
+    return () => document.removeEventListener("touchmove", stopScroll);
+  }, []);
+
+  function cancelPress() {
+    if (pressRef.current) window.clearTimeout(pressRef.current.timer);
+    pressRef.current = null;
+    setPressId(null);
+  }
+
+  function startPress(e: React.PointerEvent<HTMLLIElement>, id: string) {
+    // The row's own buttons and the rename field keep working as before.
+    if ((e.target as Element).closest("button, input, form")) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    // So the moves keep coming to this row even once the pointer leaves it.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // A pointer the browser no longer tracks; the hold still works without it.
+    }
+    const timer = window.setTimeout(() => {
+      pressRef.current = null;
+      setPressId(null);
+      setDragId(id);
+      setOrder(categories.map((c) => c._id));
+      navigator.vibrate?.(12);
+    }, HOLD_MS);
+    pressRef.current = { id, x: e.clientX, y: e.clientY, timer };
+    setPressId(id);
   }
 
   /** The order with the dragged row placed where the pointer is now. */
@@ -66,11 +104,15 @@ export function VendorCategoriesDialog({
   }
 
   function moveDrag(e: React.PointerEvent) {
+    const press = pressRef.current;
+    // Moving off before it's picked up means this was a scroll, not a hold.
+    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) cancelPress();
     const next = orderAt(e.clientY);
     if (next && order && next.some((id, i) => id !== order[i])) setOrder(next);
   }
 
   async function endDrag(e: React.PointerEvent) {
+    cancelPress();
     // Where it was let go counts, even if no move event landed there first.
     const final = orderAt(e.clientY) ?? order;
     if (!dragId || !final) return;
@@ -142,28 +184,24 @@ export function VendorCategoriesDialog({
                 if (el) rowRefs.current.set(c._id, el);
                 else rowRefs.current.delete(c._id);
               }}
+              onPointerDown={(e) => startPress(e, c._id)}
+              onPointerMove={moveDrag}
+              onPointerUp={(e) => void endDrag(e)}
+              onPointerCancel={(e) => void endDrag(e)}
+              onContextMenu={(e) => {
+                if (pressId || dragId) e.preventDefault();
+              }}
               className={cx(
-                "flex items-center gap-2 rounded-xl border bg-page py-2.5 pr-3.5 pl-1.5 transition-[box-shadow,transform,border-color] duration-150",
+                "flex items-center gap-2 rounded-xl border bg-page px-3.5 py-2.5 select-none [-webkit-touch-callout:none]",
+                "transition-[scale,box-shadow,border-color]",
                 dragId === c._id
-                  ? "relative z-10 scale-[1.02] border-accent shadow-[var(--shadow-pop)]"
-                  : "border-line",
+                  ? "relative z-10 scale-[1.04] cursor-grabbing border-accent shadow-[var(--shadow-pop)] duration-200"
+                  : pressId === c._id
+                    ? // Grows for as long as the hold takes, so it lifts right as it's picked up.
+                      "scale-[1.04] border-accent/60 shadow-[var(--shadow-pop)] duration-[1600ms] ease-linear"
+                    : "border-line duration-200",
               )}
             >
-              <button
-                type="button"
-                onPointerDown={(e) => startDrag(e, c._id)}
-                onPointerMove={moveDrag}
-                onPointerUp={(e) => void endDrag(e)}
-                onPointerCancel={(e) => void endDrag(e)}
-                aria-label={`Drag to reorder ${label(c)}`}
-                title="Drag to reorder"
-                className={cx(
-                  "shrink-0 touch-none rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-ink",
-                  dragId === c._id ? "cursor-grabbing text-accent" : "cursor-grab",
-                )}
-              >
-                <GripVertical size={16} />
-              </button>
               {editingId === c._id ? (
                 <form
                   className="flex flex-1 items-center gap-2"
