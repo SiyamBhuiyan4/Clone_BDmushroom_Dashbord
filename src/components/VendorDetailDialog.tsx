@@ -252,17 +252,17 @@ export function VendorDetailDialog({
                     </Button>
                   </form>
                 )}
-                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                <div className="flex flex-wrap justify-center gap-2.5">
                   {data.folders.map((f) => {
                     const count = data.media.filter((m) => m.folderId === f._id).length;
                     return (
                       <button
                         key={f._id}
                         onClick={() => setOpenFolderId(f._id)}
-                        className="flex flex-col items-start gap-2 rounded-xl border border-line bg-page px-3.5 py-3 text-left transition-colors hover:bg-surface-2"
+                        className="flex min-w-0 w-[calc(50%-0.3125rem)] sm:w-[calc((100%-1.25rem)/3)] shrink-0 flex-col items-start gap-2 rounded-xl border border-line bg-page px-3.5 py-3 text-left transition-colors hover:bg-surface-2"
                       >
                         <Folder size={20} className="text-accent" aria-hidden />
-                        <span className="min-w-0 truncate text-[13px] font-semibold text-ink">
+                        <span className="w-full truncate text-[13px] font-semibold text-ink">
                           {f.name}
                         </span>
                         <span className="text-[11px] text-ink-3">{plural(count, "file")}</span>
@@ -274,10 +274,10 @@ export function VendorDetailDialog({
                   {unfiledMedia.length > 0 && (
                     <button
                       onClick={() => setOpenFolderId("unfiled")}
-                      className="flex flex-col items-start gap-2 rounded-xl border border-line bg-page px-3.5 py-3 text-left transition-colors hover:bg-surface-2"
+                      className="flex min-w-0 w-[calc(50%-0.3125rem)] sm:w-[calc((100%-1.25rem)/3)] shrink-0 flex-col items-start gap-2 rounded-xl border border-line bg-page px-3.5 py-3 text-left transition-colors hover:bg-surface-2"
                     >
                       <Folder size={20} className="text-ink-3" aria-hidden />
-                      <span className="min-w-0 truncate text-[13px] font-semibold text-ink">
+                      <span className="w-full truncate text-[13px] font-semibold text-ink">
                         {t("vendors.unfiled")}
                       </span>
                       <span className="text-[11px] text-ink-3">{plural(unfiledMedia.length, "file")}</span>
