@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { ArrowRight, Globe, Truck } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Doc } from "../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Button, Field, Input, Modal, ModalFooter, Select, Textarea } from "./ui";
 import { PhoneListField } from "./PhoneListField";
 import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation } from "../lib/session";
-import { VENDOR_CATEGORIES, type VendorCategory } from "../../convex/shared";
+import { useVendorCategories } from "../lib/vendorCategories";
 
 /** What the dialog needs to edit a vendor — the list query's shape, not the row's. */
 export type EditableVendor = Doc<"vendors"> & { photoUrl?: string | null };
@@ -28,7 +28,9 @@ export function VendorDialog({
   const update = useAuthedMutation(api.vendors.update);
 
   const [name, setName] = useState("");
-  const [category, setCategory] = useState<VendorCategory>("spawn");
+  const { categories, label, categoryOf } = useVendorCategories();
+  // A category id, or "" for none.
+  const [category, setCategory] = useState("");
   const [phone, setPhone] = useState("");
   const [extraPhones, setExtraPhones] = useState<string[]>([]);
   const [whatsapp, setWhatsapp] = useState("");
@@ -42,7 +44,7 @@ export function VendorDialog({
   useEffect(() => {
     if (!open) return;
     setName(vendor?.name ?? "");
-    setCategory(vendor?.category ?? "spawn");
+    setCategory(vendor ? (categoryOf(vendor)?._id ?? "") : (categories[0]?._id ?? ""));
     setPhone(vendor?.phone ?? "");
     setExtraPhones(vendor?.extraPhones ?? []);
     setWhatsapp(vendor?.whatsapp ?? "");
@@ -62,7 +64,7 @@ export function VendorDialog({
     try {
       const payload = {
         name,
-        category,
+        categoryId: category ? (category as Id<"vendorCategories">) : undefined,
         phone,
         extraPhones,
         whatsapp,
@@ -116,13 +118,14 @@ export function VendorDialog({
               <Select
                 id={id}
                 value={category}
-                onChange={(e) => setCategory(e.target.value as VendorCategory)}
+                onChange={(e) => setCategory(e.target.value)}
               >
-                {VENDOR_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {t(`vendors.category${c[0].toUpperCase()}${c.slice(1)}` as never)}
+                {categories.map((c) => (
+                  <option key={c._id} value={c._id}>
+                    {label(c)}
                   </option>
                 ))}
+                <option value="">{t("vendors.noCategory")}</option>
               </Select>
             )}
           </Field>

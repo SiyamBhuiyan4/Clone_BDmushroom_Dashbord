@@ -6,14 +6,8 @@ import { LotMediaManager } from "./LotMediaManager";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { useAuthedQuery } from "../lib/session";
+import { useVendorCategories } from "../lib/vendorCategories";
 
-const CATEGORY_KEY = {
-  spawn: "vendors.categorySpawn",
-  materials: "vendors.categoryMaterials",
-  equipment: "vendors.categoryEquipment",
-  packaging: "vendors.categoryPackaging",
-  other: "vendors.categoryOther",
-} as const;
 
 /**
  * One lot, in full: its numbers, who it was bought from, and the
@@ -33,6 +27,7 @@ export function LotDetailDialog({
 }) {
   const { fmt, fmtDateFull, fmtNum } = useSettings();
   const t = useT();
+  const { label, categoryOf } = useVendorCategories();
   const data = useAuthedQuery(api.profit.lotDetail, lotId ? { id: lotId } : "skip");
 
   const lot = data?.lot;
@@ -93,7 +88,7 @@ export function LotDetailDialog({
                     </span>
                   </span>
                 </span>
-                <Badge tone="accent">{t(CATEGORY_KEY[vendor.category])}</Badge>
+                {categoryOf(vendor) && <Badge tone="accent">{label(categoryOf(vendor)!)}</Badge>}
               </button>
             ) : (
               <p className="text-[13px] text-ink-3">{t("lot.noVendor")}</p>

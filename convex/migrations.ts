@@ -1,6 +1,7 @@
 import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { syncProduct } from "./stock";
+import { ensureStarterCategories } from "./vendorCategories";
 
 /*
   One-time move to lot-only stock, run by hand from the CLI
@@ -52,5 +53,28 @@ export const lotsOnly = internalMutation({
       });
     }
     return report;
+  },
+});
+
+/*
+  One-time move from the old fixed vendor categories to the editable list
+  (`npx convex run migrations:vendorCategories`): creates the starter
+  categories and files every vendor under the one matching its old category.
+*/
+export const vendorCategories = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const categories = await ensureStarterCategories(ctx);
+    let moved = 0;
+    for (const vendor of await ctx.db.query("vendors").collect()) {
+      if (!vendor.category) continue;
+      const match = categories.find((c) => c.key === vendor.category);
+      await ctx.db.patch(vendor._id, {
+        categoryId: vendor.categoryId ?? match?._id,
+        category: undefined,
+      });
+      moved++;
+    }
+    return { categories: categories.length, moved };
   },
 });

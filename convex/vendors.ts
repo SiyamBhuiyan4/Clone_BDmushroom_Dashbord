@@ -2,7 +2,6 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import { v, ConvexError } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { requireSession, verifyPasscode } from "./auth";
-import { VENDOR_CATEGORIES, type VendorCategory } from "./shared";
 
 /** Attaches a signed, short-lived photo URL — the stored `photoId` is never useful to the browser on its own. */
 async function withPhoto<T extends { photoId?: Id<"_storage"> }>(ctx: QueryCtx, p: T) {
@@ -26,15 +25,10 @@ function cleanPhones(phones: string[] | undefined) {
 const STARTER_FOLDERS = ["TIN & Trade License", "Receipts", "Video"];
 
 export const list = query({
-  args: { token: v.string(), category: v.optional(v.string()) },
+  args: { token: v.string() },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
-    const rows = args.category
-      ? await ctx.db
-          .query("vendors")
-          .withIndex("by_category", (q) => q.eq("category", args.category as VendorCategory))
-          .collect()
-      : await ctx.db.query("vendors").collect();
+    const rows = await ctx.db.query("vendors").collect();
     const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
     return await Promise.all(
       sorted.map(async (vendor) => {
@@ -115,10 +109,10 @@ export const detail = query({
   },
 });
 
-function validate(name: string, category: string) {
+async function validate(ctx: MutationCtx, name: string, categoryId: Id<"vendorCategories"> | undefined) {
   if (!name.trim()) throw new ConvexError("A vendor needs a name.");
-  if (!(VENDOR_CATEGORIES as readonly string[]).includes(category)) {
-    throw new ConvexError("Not a known vendor category.");
+  if (categoryId && !(await ctx.db.get(categoryId))) {
+    throw new ConvexError("That category no longer exists.");
   }
 }
 
@@ -126,7 +120,7 @@ export const create = mutation({
   args: {
     token: v.string(),
     name: v.string(),
-    category: v.string(),
+    categoryId: v.optional(v.id("vendorCategories")),
     phone: v.optional(v.string()),
     extraPhones: v.optional(v.array(v.string())),
     whatsapp: v.optional(v.string()),
@@ -138,11 +132,11 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
-    validate(args.name, args.category);
+    await validate(ctx, args.name, args.categoryId);
     const now = Date.now();
     const id = await ctx.db.insert("vendors", {
       name: args.name.trim(),
-      category: args.category as VendorCategory,
+      categoryId: args.categoryId,
       phone: args.phone?.trim() || undefined,
       extraPhones: cleanPhones(args.extraPhones),
       whatsapp: args.whatsapp?.trim() || undefined,
@@ -165,7 +159,7 @@ export const update = mutation({
     token: v.string(),
     id: v.id("vendors"),
     name: v.string(),
-    category: v.string(),
+    categoryId: v.optional(v.id("vendorCategories")),
     phone: v.optional(v.string()),
     extraPhones: v.optional(v.array(v.string())),
     whatsapp: v.optional(v.string()),
@@ -179,10 +173,12 @@ export const update = mutation({
     await requireSession(ctx, args.token);
     const row = await ctx.db.get(args.id);
     if (!row) throw new ConvexError("That vendor no longer exists.");
-    validate(args.name, args.category);
+    await validate(ctx, args.name, args.categoryId);
     await ctx.db.patch(args.id, {
       name: args.name.trim(),
-      category: args.category as VendorCategory,
+      categoryId: args.categoryId,
+      // Picked from the editable list now, so the old fixed one goes.
+      category: undefined,
       phone: args.phone?.trim() || undefined,
       extraPhones: cleanPhones(args.extraPhones),
       whatsapp: args.whatsapp?.trim() || undefined,

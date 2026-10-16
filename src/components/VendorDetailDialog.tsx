@@ -21,6 +21,7 @@ import { ContactPhotoAvatar } from "./ContactPhotoAvatar";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { VendorPurchaseHistory } from "./VendorPurchaseHistory";
 import { SidePanelCard } from "./SidePanelCard";
+import { useVendorCategories } from "../lib/vendorCategories";
 import { useT } from "../lib/i18n";
 import { gradientFor } from "../lib/avatar";
 import { plural } from "../lib/format";
@@ -29,13 +30,6 @@ import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { mediaKindOf, uploadFile, useFileDrop, useUploadProgress } from "../lib/upload";
 
-const CATEGORY_KEY = {
-  spawn: "vendors.categorySpawn",
-  materials: "vendors.categoryMaterials",
-  equipment: "vendors.categoryEquipment",
-  packaging: "vendors.categoryPackaging",
-  other: "vendors.categoryOther",
-} as const;
 
 export function VendorDetailDialog({
   open,
@@ -49,6 +43,7 @@ export function VendorDetailDialog({
   const t = useT();
   const toast = useToast();
   const data = useAuthedQuery(api.vendors.detail, vendorId ? { id: vendorId } : "skip");
+  const { label, categoryOf } = useVendorCategories();
   const createFolder = useAuthedMutation(api.vendors.createFolder);
   const removeFolder = useAuthedMutation(api.vendors.removeFolder);
   const generateUploadUrl = useAuthedMutation(api.vendors.generateUploadUrl);
@@ -155,7 +150,7 @@ export function VendorDetailDialog({
       iconInteractive={Boolean(data?.vendor)}
       gradient={name ? gradientFor(name) : undefined}
       title={name || t("vendors.title")}
-      subtitle={data ? t(CATEGORY_KEY[data.vendor.category]) : undefined}
+      subtitle={data ? (categoryOf(data.vendor) ? label(categoryOf(data.vendor)!) : undefined) : undefined}
       width="sm:max-w-2xl"
     >
       {!data ? (

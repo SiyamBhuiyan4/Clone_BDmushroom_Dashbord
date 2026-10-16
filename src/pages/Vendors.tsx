@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { MessageCircle, Pencil, Phone, Plus, Search, Trash2, Truck } from "lucide-react";
+import { MessageCircle, Pencil, Phone, Plus, Search, Settings2, Trash2, Truck } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Card, EmptyState, Input, cx } from "../components/ui";
@@ -9,19 +9,14 @@ import { VendorDetailDialog } from "../components/VendorDetailDialog";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useT } from "../lib/i18n";
 import { gradientFor, initialOf } from "../lib/avatar";
-import { normalisePhone, whatsappUrl, VENDOR_CATEGORIES, type VendorCategory } from "../../convex/shared";
+import { normalisePhone, whatsappUrl } from "../../convex/shared";
+import { useVendorCategories } from "../lib/vendorCategories";
+import { VendorCategoriesDialog } from "../components/VendorCategoriesDialog";
 import { useToast } from "../lib/toast";
 import { useSettings } from "../lib/settings";
 import { relativeTime } from "../lib/format";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 
-const CATEGORY_KEY: Record<VendorCategory, "vendors.categorySpawn" | "vendors.categoryMaterials" | "vendors.categoryEquipment" | "vendors.categoryPackaging" | "vendors.categoryOther"> = {
-  spawn: "vendors.categorySpawn",
-  materials: "vendors.categoryMaterials",
-  equipment: "vendors.categoryEquipment",
-  packaging: "vendors.categoryPackaging",
-  other: "vendors.categoryOther",
-};
 
 export function VendorsPage() {
   const t = useT();
@@ -36,7 +31,10 @@ export function VendorsPage() {
   const removeVendor = useAuthedMutation(api.vendors.remove);
 
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<VendorCategory | "">("");
+  const { categories, label, categoryOf } = useVendorCategories();
+  /** A category id, "" for all, or "none" for vendors filed under nothing. */
+  const [category, setCategory] = useState("");
+  const [managing, setManaging] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<EditableVendor | null>(null);
   const [deleting, setDeleting] = useState<{ id: Id<"vendors">; name: string } | null>(null);
@@ -45,7 +43,7 @@ export function VendorsPage() {
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return (vendors ?? []).filter((v) => {
-      if (category && v.category !== category) return false;
+      if (category === "none" ? categoryOf(v) !== null : category && categoryOf(v)?._id !== category) return false;
       if (!term) return true;
       const digits = normalisePhone(term);
       return (
@@ -53,7 +51,8 @@ export function VendorsPage() {
         (digits.length > 2 && normalisePhone(v.phone).includes(digits))
       );
     });
-  }, [vendors, search, category]);
+    // `categoryOf` reads `categories`, so a change to the list refilters.
+  }, [vendors, search, category, categories]);
 
   const pager = usePagination(rows, `${search}|${category}`, 25);
 
@@ -89,7 +88,7 @@ export function VendorsPage() {
         </div>
       </div>
 
-      {/* Category tabs — fixed set, so a row of pills beats a dropdown. */}
+      {/* Category tabs — a short list, so a row of pills beats a dropdown. */}
       <div
         className="flex flex-wrap items-center gap-1.5 rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow-sm)]"
         role="group"
@@ -106,12 +105,12 @@ export function VendorsPage() {
         >
           {t("vendors.allCategories")}
         </button>
-        {VENDOR_CATEGORIES.map((c) => {
-          const active = category === c;
+        {categories.map((c) => {
+          const active = category === c._id;
           return (
             <button
-              key={c}
-              onClick={() => setCategory(c)}
+              key={c._id}
+              onClick={() => setCategory(c._id)}
               aria-pressed={active}
               style={active ? { background: "var(--grad-violet)" } : undefined}
               className={cx(
@@ -119,10 +118,31 @@ export function VendorsPage() {
                 active ? "text-white" : "text-ink-3 hover:text-ink",
               )}
             >
-              {t(CATEGORY_KEY[c])}
+              {label(c)}
             </button>
           );
         })}
+        {/* Only offered once something is actually uncategorised. */}
+        {(vendors ?? []).some((v) => categoryOf(v) === null) && (
+          <button
+            onClick={() => setCategory("none")}
+            aria-pressed={category === "none"}
+            style={category === "none" ? { background: "var(--grad-violet)" } : undefined}
+            className={cx(
+              "h-8 rounded-lg px-3.5 text-[12.5px] font-bold tracking-wide transition-all",
+              category === "none" ? "text-white" : "text-ink-3 hover:text-ink",
+            )}
+          >
+            {t("vendors.noCategory")}
+          </button>
+        )}
+        <button
+          onClick={() => setManaging(true)}
+          className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-semibold text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+        >
+          <Settings2 size={14} />
+          {t("vendors.manageCategories")}
+        </button>
       </div>
 
       <Card>
@@ -169,7 +189,7 @@ export function VendorsPage() {
                             {v.phone}
                           </span>
                         )}
-                        <Badge tone="accent">{t(CATEGORY_KEY[v.category])}</Badge>
+                        {categoryOf(v) && <Badge tone="accent">{label(categoryOf(v)!)}</Badge>}
                       </p>
                       {/* What this vendor has been to the shop lately, at a glance. */}
                       {v.lastPurchaseAt !== null && (
@@ -247,6 +267,13 @@ export function VendorsPage() {
 
       <VendorDetailDialog open={viewing !== null} onClose={() => setViewing(null)} vendorId={viewing} />
       <VendorDialog open={addOpen} onClose={() => setAddOpen(false)} />
+      <VendorCategoriesDialog
+        open={managing}
+        onClose={() => setManaging(false)}
+        onDeleted={(id) => {
+          if (category === id) setCategory("");
+        }}
+      />
       <VendorDialog open={editing !== null} onClose={() => setEditing(null)} vendor={editing} />
       <PasscodeConfirmDialog
         open={deleting !== null}

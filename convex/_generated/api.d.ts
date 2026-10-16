@@ -26,6 +26,7 @@ import type * as seed from "../seed.js";
 import type * as shared from "../shared.js";
 import type * as stock from "../stock.js";
 import type * as trainees from "../trainees.js";
+import type * as vendorCategories from "../vendorCategories.js";
 import type * as vendors from "../vendors.js";
 
 import type {
@@ -53,6 +54,7 @@ declare const fullApi: ApiFromModules<{
   shared: typeof shared;
   stock: typeof stock;
   trainees: typeof trainees;
+  vendorCategories: typeof vendorCategories;
   vendors: typeof vendors;
 }>;
 

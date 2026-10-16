@@ -253,22 +253,42 @@ export default defineSchema({
     .index("by_vendor", ["vendorId"]),
 
   /*
+    The categories vendors are filed under — the shop's own list, added to,
+    renamed and removed from the Vendors page. `key` marks the five it
+    started with, so vendors filed under the old fixed set find theirs.
+  */
+  vendorCategories: defineTable({
+    name: v.string(),
+    /** Shown instead of `name` in Bangla, when there is one. */
+    nameBn: v.optional(v.string()),
+    key: v.optional(v.string()),
+    order: v.number(),
+    createdAt: v.number(),
+  }).index("by_order", ["order"]),
+
+  /*
     A supplier — who the shop buys stock from, as distinct from `customers`,
-    who buy from the shop. `category` is a fixed set rather than free text
-    like a product's category: there are only a handful of real supplier
-    roles in this business, and a fixed set is what makes the Vendors page
-    worth filtering by.
+    who buy from the shop. Filed under one of `vendorCategories`, which is
+    what makes the Vendors page worth filtering by.
   */
   vendors: defineTable({
     name: v.string(),
     /** The vendor's profile picture, stored in Convex file storage. */
     photoId: v.optional(v.id("_storage")),
-    category: v.union(
-      v.literal("spawn"),
-      v.literal("materials"),
-      v.literal("equipment"),
-      v.literal("packaging"),
-      v.literal("other"),
+    /** Absent when uncategorised — including after its category was deleted. */
+    categoryId: v.optional(v.id("vendorCategories")),
+    /*
+      Legacy: the old fixed category, before categories could be edited.
+      `migrations:vendorCategories` moves it to `categoryId`.
+    */
+    category: v.optional(
+      v.union(
+        v.literal("spawn"),
+        v.literal("materials"),
+        v.literal("equipment"),
+        v.literal("packaging"),
+        v.literal("other"),
+      ),
     ),
     phone: v.optional(v.string()),
     /** Further numbers beyond the main one — a vendor is often reachable on more than one line. */
@@ -282,7 +302,7 @@ export default defineSchema({
     note: v.optional(v.string()),
     createdAt: v.number(),
   })
-    .index("by_category", ["category"])
+    .index("by_categoryId", ["categoryId"])
     .index("by_createdAt", ["createdAt"]),
 
   /*
