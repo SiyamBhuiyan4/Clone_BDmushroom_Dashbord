@@ -555,8 +555,87 @@ export default defineSchema({
     note: v.optional(v.string()),
     /** Set the first time a certificate is generated for this trainee. */
     certificateIssuedAt: v.optional(v.number()),
+    /*
+      The trainee's own login, handed to them at the office — there is no
+      sign-up. Lowercased; the password is stored only as a PBKDF2 hash
+      (see auth.ts), and both are absent until the shop sets them.
+    */
+    username: v.optional(v.string()),
+    passwordHash: v.optional(v.string()),
+    passwordSalt: v.optional(v.string()),
+    /** Wrong passwords in a row, and when a run of them locks the login. */
+    loginFailures: v.optional(v.number()),
+    lockedUntil: v.optional(v.number()),
     createdAt: v.number(),
-  }).index("by_createdAt", ["createdAt"]),
+  })
+    .index("by_createdAt", ["createdAt"])
+    .index("by_username", ["username"]),
+
+  /*
+    A trainee's signed-in session — kept apart from `sessions`, the owner's,
+    so a trainee's token can never pass `requireSession` and reach anything
+    but their own courses.
+  */
+  traineeSessions: defineTable({
+    traineeId: v.id("trainees"),
+    tokenHash: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_tokenHash", ["tokenHash"])
+    .index("by_trainee", ["traineeId"]),
+
+  /* A course the shop teaches — lessons in order, assigned to trainees. */
+  courses: defineTable({
+    name: v.string(),
+    description: v.optional(v.string()),
+    order: v.number(),
+    createdAt: v.number(),
+  }).index("by_order", ["order"]),
+
+  courseLessons: defineTable({
+    courseId: v.id("courses"),
+    title: v.string(),
+    /** Plain text, shown as written. */
+    body: v.optional(v.string()),
+    /** A YouTube link, embedded on the lesson. */
+    videoUrl: v.optional(v.string()),
+    files: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          fileName: v.string(),
+          kind: v.union(v.literal("image"), v.literal("pdf")),
+        }),
+      ),
+    ),
+    order: v.number(),
+    createdAt: v.number(),
+  }).index("by_course", ["courseId"]),
+
+  /*
+    A course assigned to a trainee. The certificate for it is the shop's to
+    approve once every lesson is done; only then can the trainee download it.
+  */
+  enrollments: defineTable({
+    traineeId: v.id("trainees"),
+    courseId: v.id("courses"),
+    assignedAt: v.number(),
+    certificateApprovedAt: v.optional(v.number()),
+  })
+    .index("by_trainee", ["traineeId"])
+    .index("by_course", ["courseId"]),
+
+  /** One lesson a trainee has finished. Its absence means not done yet. */
+  lessonProgress: defineTable({
+    traineeId: v.id("trainees"),
+    courseId: v.id("courses"),
+    lessonId: v.id("courseLessons"),
+    completedAt: v.number(),
+  })
+    .index("by_trainee", ["traineeId"])
+    .index("by_trainee_lesson", ["traineeId", "lessonId"])
+    .index("by_lesson", ["lessonId"]),
 
   /*
     One lesson allocated to one trainee. Per-trainee rather than a shared

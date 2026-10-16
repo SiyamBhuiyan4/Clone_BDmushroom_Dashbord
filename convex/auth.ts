@@ -24,7 +24,7 @@ import { v, ConvexError } from "convex/values";
 */
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // one day
-const PBKDF2_ITERATIONS = 210_000; // OWASP guidance for PBKDF2-SHA256
+export const PBKDF2_ITERATIONS = 210_000; // OWASP guidance for PBKDF2-SHA256
 const MIN_PASSCODE_LENGTH = 6;
 
 /*
@@ -113,7 +113,7 @@ function fromHex(hex: string): ArrayBuffer {
   return buffer;
 }
 
-async function derive(passcode: string, saltHex: string, iterations: number): Promise<string> {
+export async function derive(passcode: string, saltHex: string, iterations: number): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(passcode),

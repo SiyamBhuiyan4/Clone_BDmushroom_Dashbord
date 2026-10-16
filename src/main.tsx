@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ConvexProvider, ConvexReactClient } from "convex/react";
 import App from "./App";
@@ -6,6 +6,7 @@ import { SettingsProvider } from "./lib/settings";
 import { SessionProvider } from "./lib/session";
 import { PasscodeGate } from "./components/PasscodeGate";
 import { ToastProvider } from "./lib/toast";
+import { TraineePortal } from "./portal/TraineePortal";
 import "./index.css";
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL as string | undefined;
@@ -23,15 +24,35 @@ if (!convexUrl) {
       <ConvexProvider client={convex}>
         <SettingsProvider>
           <ToastProvider>
-            <SessionProvider>
-              <PasscodeGate>
-                <App />
-              </PasscodeGate>
-            </SessionProvider>
+            <Root />
           </ToastProvider>
         </SettingsProvider>
       </ConvexProvider>
     </StrictMode>,
+  );
+}
+
+const isPortal = () => window.location.hash.startsWith("#/learn");
+
+/*
+  Two apps on one site: the shop's, behind the owner's passcode, and the
+  trainees', at #/learn with its own sign-in. Neither mounts the other's
+  session, so a trainee never so much as loads the passcode gate.
+*/
+function Root() {
+  const [portal, setPortal] = useState(isPortal);
+  useEffect(() => {
+    const sync = () => setPortal(isPortal());
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+  if (portal) return <TraineePortal />;
+  return (
+    <SessionProvider>
+      <PasscodeGate>
+        <App />
+      </PasscodeGate>
+    </SessionProvider>
   );
 }
 

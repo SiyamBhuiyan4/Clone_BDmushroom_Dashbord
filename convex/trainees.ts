@@ -2,11 +2,28 @@ import { mutation, query, type QueryCtx } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { requireSession, verifyPasscode } from "./auth";
+import { endTraineeSessions, hashPassword, normaliseUsername, validateUsername } from "./traineeAuth";
 
-/** Attaches a signed, short-lived photo URL — the stored `photoId` is never useful to the browser on its own. */
+/**
+ * Attaches a signed, short-lived photo URL — the stored `photoId` is never
+ * useful to the browser on its own — and leaves the password hash and lock
+ * state behind: nothing on screen needs them, so they never leave the server.
+ */
 async function withPhoto<T extends { photoId?: Id<"_storage"> }>(ctx: QueryCtx, p: T) {
   const photoUrl = p.photoId ? await ctx.storage.getUrl(p.photoId) : null;
-  return { ...p, photoUrl };
+  const { passwordHash, passwordSalt, loginFailures, lockedUntil, ...rest } = p as T & {
+    passwordHash?: string;
+    passwordSalt?: string;
+    loginFailures?: number;
+    lockedUntil?: number;
+  };
+  void passwordHash;
+  void passwordSalt;
+  void loginFailures;
+  void lockedUntil;
+  return { ...rest, photoUrl } as Omit<T, "passwordHash" | "passwordSalt" | "loginFailures" | "lockedUntil"> & {
+    photoUrl: string | null;
+  };
 }
 
 export const list = query({
@@ -178,6 +195,20 @@ export const remove = mutation({
       await ctx.storage.delete(m.storageId);
       await ctx.db.delete(m._id);
     }
+    // Their courses, progress and sign-ins go with them.
+    for (const e of await ctx.db
+      .query("enrollments")
+      .withIndex("by_trainee", (q) => q.eq("traineeId", args.id))
+      .collect()) {
+      await ctx.db.delete(e._id);
+    }
+    for (const p of await ctx.db
+      .query("lessonProgress")
+      .withIndex("by_trainee", (q) => q.eq("traineeId", args.id))
+      .collect()) {
+      await ctx.db.delete(p._id);
+    }
+    await endTraineeSessions(ctx, args.id);
     await ctx.db.delete(args.id);
   },
 });
@@ -282,5 +313,51 @@ export const markCertificateIssued = mutation({
     const row = await ctx.db.get(args.id);
     if (!row || row.certificateIssuedAt) return;
     await ctx.db.patch(args.id, { certificateIssuedAt: Date.now() });
+  },
+});
+
+/* ------------------------------------------------------------------ login */
+
+/**
+ * Gives a trainee a login, or changes it — the username and password the
+ * shop hands them at the office. A new password signs them out everywhere.
+ */
+export const setLogin = mutation({
+  args: { token: v.string(), id: v.id("trainees"), username: v.string(), password: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const trainee = await ctx.db.get(args.id);
+    if (!trainee) throw new ConvexError("That trainee no longer exists.");
+    const username = normaliseUsername(args.username);
+    validateUsername(username);
+    const taken = await ctx.db
+      .query("trainees")
+      .withIndex("by_username", (q) => q.eq("username", username))
+      .unique();
+    if (taken && taken._id !== args.id) throw new ConvexError("That username is already taken.");
+    await ctx.db.patch(args.id, {
+      username,
+      ...(await hashPassword(args.password)),
+      loginFailures: 0,
+      lockedUntil: undefined,
+    });
+    await endTraineeSessions(ctx, args.id);
+  },
+});
+
+/** Takes a trainee's login away and signs them out. Their courses and progress stay. */
+export const removeLogin = mutation({
+  args: { token: v.string(), id: v.id("trainees"), passcode: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
+    await ctx.db.patch(args.id, {
+      username: undefined,
+      passwordHash: undefined,
+      passwordSalt: undefined,
+      loginFailures: undefined,
+      lockedUntil: undefined,
+    });
+    await endTraineeSessions(ctx, args.id);
   },
 });

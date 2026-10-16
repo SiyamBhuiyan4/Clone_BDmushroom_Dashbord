@@ -386,6 +386,12 @@ function SignInScreen({
           <ShieldCheck size={14} className="mt-0.5 shrink-0" aria-hidden />
           <span>Sessions last one day, then you sign in again.</span>
         </p>
+        <a
+          href="#/learn"
+          className="mt-3 block text-center text-[12.5px] font-semibold text-accent hover:underline"
+        >
+          Trainee? Sign in here →
+        </a>
       </div>
     </div>
   );

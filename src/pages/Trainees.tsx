@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Award, GraduationCap, Globe, Pencil, Phone, Plus, Search, Trash2 } from "lucide-react";
+import { Award, BookOpen, GraduationCap, KeyRound, Link2, Pencil, Phone, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Badge, Button, Card, EmptyState, Input } from "../components/ui";
+import { Badge, Button, Card, EmptyState, Input, cx } from "../components/ui";
+import { CoursesSection } from "../components/CoursesSection";
 import { Pagination, usePagination } from "../components/Pagination";
 import { TraineeDialog } from "../components/TraineeDialog";
 import { TraineeDetailDialog } from "../components/TraineeDetailDialog";
@@ -24,6 +25,9 @@ export function TraineesPage() {
   const [editing, setEditing] = useState<Doc<"trainees"> | null>(null);
   const [deleting, setDeleting] = useState<{ id: Id<"trainees">; name: string } | null>(null);
   const [viewing, setViewing] = useState<Id<"trainees"> | null>(null);
+  const [tab, setTab] = useState<"trainees" | "courses">("trainees");
+  const [courseAddOpen, setCourseAddOpen] = useState(false);
+  const portalUrl = `${window.location.origin}/#/learn`;
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -47,12 +51,52 @@ export function TraineesPage() {
           </h1>
           <p className="mt-1 text-[13.5px] text-ink-3 sm:text-[14px]">{t("trainees.subtitle")}</p>
         </div>
-        <Button variant="primary" onClick={() => setAddOpen(true)} className="w-full sm:w-auto">
+        <Button
+          variant="primary"
+          onClick={() => (tab === "trainees" ? setAddOpen(true) : setCourseAddOpen(true))}
+          className="w-full sm:w-auto"
+        >
           <Plus size={17} />
-          {t("trainees.add")}
+          {tab === "trainees" ? t("trainees.add") : "New course"}
         </Button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-1.5 rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow-sm)]" role="tablist">
+          {(["trainees", "courses"] as const).map((key) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => setTab(key)}
+              style={tab === key ? { background: "var(--grad-violet)" } : undefined}
+              className={cx(
+                "inline-flex h-8 items-center gap-1.5 rounded-lg px-3.5 text-[12.5px] font-bold tracking-wide transition-all",
+                tab === key ? "text-white" : "text-ink-3 hover:text-ink",
+              )}
+            >
+              {key === "trainees" ? <GraduationCap size={14} /> : <BookOpen size={14} />}
+              {key === "trainees" ? t("trainees.title") : "Courses"}
+            </button>
+          ))}
+        </div>
+        {/* Where trainees sign in — handed out with their username and password. */}
+        <button
+          onClick={() => {
+            void navigator.clipboard?.writeText(portalUrl);
+            toast.ok("Trainee login link copied.");
+          }}
+          className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line-strong bg-page px-3.5 text-[12.5px] font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink"
+          title={portalUrl}
+        >
+          <Link2 size={14} /> Copy trainee login link
+        </button>
+      </div>
+
+      {tab === "courses" ? (
+        <CoursesSection addOpen={courseAddOpen} onAddClose={() => setCourseAddOpen(false)} />
+      ) : (
+      <>
       <div className="relative w-full min-w-0 sm:max-w-md">
         <Search
           size={17}
@@ -126,19 +170,16 @@ export function TraineesPage() {
                             {t("trainees.certified")}
                           </Badge>
                         )}
+                        {tr.username && (
+                          <Badge tone="accent">
+                            <KeyRound size={11} />
+                            {tr.username}
+                          </Badge>
+                        )}
                       </p>
                     </div>
                   </button>
                   <div className="flex shrink-0 items-center gap-0.5">
-                    {/* Placeholder: a trainee's own public web page — nothing wired up yet. */}
-                    <button
-                      onClick={() => {}}
-                      aria-label={`${t("trainees.webPage")} — ${tr.name}`}
-                      title={t("trainees.webPage")}
-                      className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
-                    >
-                      <Globe size={15} />
-                    </button>
                     <button
                       onClick={() => setEditing(tr)}
                       aria-label={`${t("common.edit")} ${tr.name}`}
@@ -170,6 +211,8 @@ export function TraineesPage() {
           </>
         )}
       </Card>
+      </>
+      )}
 
       <TraineeDetailDialog open={viewing !== null} onClose={() => setViewing(null)} traineeId={viewing} />
       <TraineeDialog open={addOpen} onClose={() => setAddOpen(false)} />
