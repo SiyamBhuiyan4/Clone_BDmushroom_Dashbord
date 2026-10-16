@@ -563,6 +563,12 @@ export default defineSchema({
     username: v.optional(v.string()),
     passwordHash: v.optional(v.string()),
     passwordSalt: v.optional(v.string()),
+    /*
+      A note for this trainee alone, shown in their portal — kept apart
+      from `note`, which is the shop's private note and never leaves it.
+    */
+    portalNote: v.optional(v.string()),
+    portalNoteUpdatedAt: v.optional(v.number()),
     /** Wrong passwords in a row, and when a run of them locks the login. */
     loginFailures: v.optional(v.number()),
     lockedUntil: v.optional(v.number()),
@@ -584,6 +590,16 @@ export default defineSchema({
   })
     .index("by_tokenHash", ["tokenHash"])
     .index("by_trainee", ["traineeId"]),
+
+  /*
+    Small settings kept by name. "traineeNote" is the note every trainee
+    sees in their portal.
+  */
+  appSettings: defineTable({
+    key: v.string(),
+    text: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
 
   /* A course the shop teaches — lessons in order, assigned to trainees. */
   courses: defineTable({

@@ -286,3 +286,23 @@ export const submit = mutation({
     }
   },
 });
+
+/* ------------------------------------------------------------------ notes */
+
+/** The office's note for everyone, and the one for this trainee, if any. */
+export const notes = query({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    const trainee = await requireTrainee(ctx, args.token);
+    const general = await ctx.db
+      .query("appSettings")
+      .withIndex("by_key", (q) => q.eq("key", "traineeNote"))
+      .unique();
+    const generalText = general?.text ?? null;
+    const personalText = trainee.portalNote ?? null;
+    return {
+      general: generalText ? { text: generalText, updatedAt: general!.updatedAt } : null,
+      personal: personalText ? { text: personalText, updatedAt: trainee.portalNoteUpdatedAt ?? 0 } : null,
+    };
+  },
+});

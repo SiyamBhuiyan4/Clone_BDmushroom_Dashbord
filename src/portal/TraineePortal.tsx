@@ -18,6 +18,7 @@ import {
   Loader2,
   LogOut,
   PlayCircle,
+  StickyNote,
   Upload,
   UserRound,
   X,
@@ -119,6 +120,7 @@ export function TraineePortal() {
             </span>
           </button>
           <div className="ml-auto flex items-center gap-2.5">
+            <NotesButton token={token} />
             <span className="flex size-8 items-center justify-center overflow-hidden rounded-full bg-surface-2 text-ink-3">
               {me.photoUrl ? <img src={me.photoUrl} alt="" className="size-full object-cover" /> : <UserRound size={16} />}
             </span>
@@ -955,5 +957,178 @@ function FileChips({ files, onRemove }: { files: PendingFile[]; onRemove?: (id: 
         </li>
       ))}
     </ul>
+  );
+}
+
+/* ----------------------------------------------------------------- notes */
+
+const NOTES_SEEN_KEY = "ac.traineeNotesSeen";
+
+/** Opens the office's notes; a dot says one changed since they last looked. */
+function NotesButton({ token }: { token: string }) {
+  const notes = useQuery(api.portal.notes, { token });
+  const [open, setOpen] = useState(false);
+  const [seen, setSeen] = useState(() => {
+    try {
+      return Number(localStorage.getItem(NOTES_SEEN_KEY) ?? 0);
+    } catch {
+      return 0;
+    }
+  });
+  const latest = Math.max(notes?.general?.updatedAt ?? 0, notes?.personal?.updatedAt ?? 0);
+  const fresh = latest > seen;
+
+  function show() {
+    setOpen(true);
+    setSeen(latest);
+    try {
+      localStorage.setItem(NOTES_SEEN_KEY, String(latest));
+    } catch {
+      // Private mode — the dot just comes back next visit.
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={show}
+        className="relative inline-flex h-9 items-center gap-1.5 rounded-xl border border-line-strong bg-page px-3 text-[13px] font-semibold text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+      >
+        <StickyNote size={15} className="text-accent" />
+        <span className="hidden sm:inline">Notes</span>
+        {fresh && <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-critical-solid ring-2 ring-surface" aria-label="New note" />}
+      </button>
+      <NotesPanel open={open} onClose={() => setOpen(false)} notes={notes} />
+    </>
+  );
+}
+
+type Notes = {
+  general: { text: string; updatedAt: number } | null;
+  personal: { text: string; updatedAt: number } | null;
+};
+
+/**
+ * The notes, sliding in from the right. Stays mounted for the slide out, so
+ * closing plays the same motion backwards.
+ */
+function NotesPanel({ open, onClose, notes }: { open: boolean; onClose: () => void; notes: Notes | undefined }) {
+  const [mounted, setMounted] = useState(open);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      let inner = 0;
+      const outer = requestAnimationFrame(() => {
+        inner = requestAnimationFrame(() => setShown(true));
+      });
+      return () => {
+        cancelAnimationFrame(outer);
+        cancelAnimationFrame(inner);
+      };
+    }
+    setShown(false);
+    const timer = window.setTimeout(() => setMounted(false), 520);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!mounted) return null;
+  const empty = notes && !notes.general && !notes.personal;
+  const fmt = (ts: number) => new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-hidden">
+      <div
+        onClick={onClose}
+        className={cx(
+          "absolute inset-0 bg-scrim transition-opacity duration-500",
+          shown ? "opacity-100" : "opacity-0",
+        )}
+      />
+      <aside
+        role="dialog"
+        aria-label="Notes"
+        className={cx(
+          "absolute top-0 right-0 flex h-[100dvh] w-full max-w-md flex-col border-l border-line bg-surface shadow-[var(--shadow-pop)]",
+          "transition-[translate] duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
+          shown ? "translate-x-0" : "translate-x-full",
+        )}
+      >
+        <div className="relative shrink-0 overflow-hidden border-b border-line">
+          <div
+            className="pointer-events-none absolute -top-24 -right-16 size-56 rounded-full opacity-[0.13] blur-3xl"
+            style={{ background: "var(--grad-violet)" }}
+            aria-hidden
+          />
+          <div className="relative flex items-center gap-3 px-5 py-4">
+            <span
+              className="flex size-10 shrink-0 items-center justify-center rounded-2xl text-white shadow-[var(--shadow-hero)]"
+              style={{ background: "var(--grad-violet)" }}
+            >
+              <StickyNote size={18} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-[17px] leading-6 font-bold tracking-tight text-ink">Notes</h2>
+              <p className="text-[12.5px] text-ink-3">From BD Mushroom</p>
+            </div>
+            <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 text-ink-3 hover:bg-surface-2 hover:text-ink">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          {!notes ? (
+            <div className="ac-skeleton h-32 rounded-2xl bg-surface-2" aria-hidden />
+          ) : empty ? (
+            <p className="py-10 text-center text-[13.5px] text-ink-3">No notes from the office right now.</p>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {notes.personal && (
+                <NoteCard title="For you" date={fmt(notes.personal.updatedAt)} text={notes.personal.text} highlight />
+              )}
+              {notes.general && <NoteCard title="For everyone" date={fmt(notes.general.updatedAt)} text={notes.general.text} />}
+            </div>
+          )}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+/** Note text with its links made clickable — an address or a form link is the usual thing in one. */
+function Linkified({ text }: { text: string }) {
+  const parts = text.split(/(https?:\/\/[^\s]+)/g);
+  return (
+    <>
+      {parts.map((part, i) =>
+        /^https?:\/\//.test(part) ? (
+          <a key={i} href={part} target="_blank" rel="noreferrer noopener" className="break-all font-semibold text-accent hover:underline">
+            {part}
+          </a>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+function NoteCard({ title, date, text, highlight }: { title: string; date: string; text: string; highlight?: boolean }) {
+  return (
+    <div className={cx("rounded-2xl border p-4", highlight ? "border-accent/50 bg-accent-soft/40" : "border-line bg-page")}>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className={cx("text-[11px] font-bold tracking-[0.08em] uppercase", highlight ? "text-accent" : "text-ink-3")}>{title}</p>
+        <p className="text-[11px] text-ink-3">{date}</p>
+      </div>
+      <p className="text-[14.5px] leading-7 whitespace-pre-wrap text-ink">
+        <Linkified text={text} />
+      </p>
+    </div>
   );
 }

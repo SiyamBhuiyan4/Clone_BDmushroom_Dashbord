@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { Award, BookOpen, GraduationCap, KeyRound, Link2, Pencil, Phone, Plus, Search, Trash2 } from "lucide-react";
+import { Award, BookOpen, GraduationCap, KeyRound, Link2, Pencil, Phone, Plus, Search, StickyNote, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Card, EmptyState, Input, cx } from "../components/ui";
 import { CoursesSection } from "../components/CoursesSection";
+import { GeneralNoteDialog } from "../components/TraineeNotes";
 import { Pagination, usePagination } from "../components/Pagination";
 import { TraineeDialog } from "../components/TraineeDialog";
 import { TraineeDetailDialog } from "../components/TraineeDetailDialog";
@@ -27,6 +28,7 @@ export function TraineesPage() {
   const [viewing, setViewing] = useState<Id<"trainees"> | null>(null);
   const [tab, setTab] = useState<"trainees" | "courses">("trainees");
   const [courseAddOpen, setCourseAddOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
   const portalUrl = `${window.location.origin}/#/learn`;
 
   const rows = useMemo(() => {
@@ -90,6 +92,12 @@ export function TraineesPage() {
           title={portalUrl}
         >
           <Link2 size={14} /> Copy trainee login link
+        </button>
+        <button
+          onClick={() => setNoteOpen(true)}
+          className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line-strong bg-page px-3.5 text-[12.5px] font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink"
+        >
+          <StickyNote size={14} /> Note for trainees
         </button>
       </div>
 
@@ -214,6 +222,7 @@ export function TraineesPage() {
       </>
       )}
 
+      <GeneralNoteDialog open={noteOpen} onClose={() => setNoteOpen(false)} />
       <TraineeDetailDialog open={viewing !== null} onClose={() => setViewing(null)} traineeId={viewing} />
       <TraineeDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <TraineeDialog open={editing !== null} onClose={() => setEditing(null)} trainee={editing} />

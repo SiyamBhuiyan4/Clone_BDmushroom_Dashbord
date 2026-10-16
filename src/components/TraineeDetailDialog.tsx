@@ -18,6 +18,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Modal, cx } from "./ui";
 import { ContactPhotoAvatar } from "./ContactPhotoAvatar";
 import { TraineeCoursesPanel, TraineeLoginCard } from "./TraineeCourses";
+import { PortalNoteCard } from "./TraineeNotes";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -309,6 +310,7 @@ export function TraineeDetailDialog({
             </div>
           </div>
           <TraineeLoginCard traineeId={trainee._id} traineeName={trainee.name} username={trainee.username} />
+          <PortalNoteCard traineeId={trainee._id} note={trainee.portalNote} />
 
           <button
             type="button"

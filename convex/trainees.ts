@@ -368,3 +368,52 @@ export const removeLogin = mutation({
     await endTraineeSessions(ctx, args.id);
   },
 });
+
+/* ------------------------------------------------------------ portal notes */
+
+const NOTE_KEY = "traineeNote";
+const MAX_NOTE = 5000;
+
+function cleanNote(text: string) {
+  const note = text.trim();
+  if (note.length > MAX_NOTE) throw new ConvexError(`Keep the note under ${MAX_NOTE} characters.`);
+  return note || undefined;
+}
+
+/** The note every trainee sees. */
+export const generalNote = query({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const row = await ctx.db
+      .query("appSettings")
+      .withIndex("by_key", (q) => q.eq("key", NOTE_KEY))
+      .unique();
+    return { text: row?.text ?? "", updatedAt: row?.updatedAt ?? null };
+  },
+});
+
+export const setGeneralNote = mutation({
+  args: { token: v.string(), text: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const text = cleanNote(args.text);
+    const row = await ctx.db
+      .query("appSettings")
+      .withIndex("by_key", (q) => q.eq("key", NOTE_KEY))
+      .unique();
+    if (row) await ctx.db.patch(row._id, { text, updatedAt: Date.now() });
+    else await ctx.db.insert("appSettings", { key: NOTE_KEY, text, updatedAt: Date.now() });
+  },
+});
+
+/** The note for one trainee only, shown in their portal. */
+export const setPortalNote = mutation({
+  args: { token: v.string(), id: v.id("trainees"), text: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    if (!(await ctx.db.get(args.id))) throw new ConvexError("That trainee no longer exists.");
+    const text = cleanNote(args.text);
+    await ctx.db.patch(args.id, { portalNote: text, portalNoteUpdatedAt: text ? Date.now() : undefined });
+  },
+});
