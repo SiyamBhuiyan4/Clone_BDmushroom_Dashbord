@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { Award, BookOpen, GraduationCap, KeyRound, Link2, Pencil, Phone, Plus, Search, StickyNote, Trash2 } from "lucide-react";
+import { Award, BookOpen, GraduationCap, KeyRound, Link2, MessageSquare, Pencil, Phone, Plus, Radio, Search, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Badge, Button, Card, EmptyState, Input, cx } from "../components/ui";
 import { CoursesSection } from "../components/CoursesSection";
-import { GeneralNoteDialog } from "../components/TraineeNotes";
+import { AdminTraineeNoteDrawer, GeneralNoteDialog } from "../components/TraineeNotes";
 import { Pagination, usePagination } from "../components/Pagination";
 import { TraineeDialog } from "../components/TraineeDialog";
 import { TraineeDetailDialog } from "../components/TraineeDetailDialog";
@@ -28,7 +28,14 @@ export function TraineesPage() {
   const [viewing, setViewing] = useState<Id<"trainees"> | null>(null);
   const [tab, setTab] = useState<"trainees" | "courses">("trainees");
   const [courseAddOpen, setCourseAddOpen] = useState(false);
-  const [noteOpen, setNoteOpen] = useState(false);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [noteTraineeId, setNoteTraineeId] = useState<Id<"trainees"> | null>(null);
+
+  const noteTrainee = useMemo(
+    () => (noteTraineeId ? (trainees ?? []).find((tr) => tr._id === noteTraineeId) ?? null : null),
+    [trainees, noteTraineeId],
+  );
+
   const portalUrl = `${window.location.origin}/#/learn`;
 
   const rows = useMemo(() => {
@@ -94,10 +101,11 @@ export function TraineesPage() {
           <Link2 size={14} /> Copy trainee login link
         </button>
         <button
-          onClick={() => setNoteOpen(true)}
+          onClick={() => setBroadcastOpen(true)}
           className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line-strong bg-page px-3.5 text-[12.5px] font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink"
+          title="Send a broadcast message to all trainees"
         >
-          <StickyNote size={14} /> Note for trainees
+          <Radio size={14} className="text-accent" /> Broadcast
         </button>
       </div>
 
@@ -189,6 +197,26 @@ export function TraineesPage() {
                   </button>
                   <div className="flex shrink-0 items-center gap-0.5">
                     <button
+                      type="button"
+                      onClick={() => setNoteTraineeId(tr._id)}
+                      aria-label={`Note for ${tr.name}`}
+                      title={tr.note ? `Admin note: ${tr.note.slice(0, 45)}...` : `Write admin note for ${tr.name}`}
+                      className={cx(
+                        "relative rounded-lg p-2 transition-colors",
+                        tr.note
+                          ? "bg-accent-soft text-accent hover:bg-accent-soft/80"
+                          : "text-ink-3 hover:bg-surface-2 hover:text-ink",
+                      )}
+                    >
+                      <MessageSquare size={15} />
+                      {tr.note && (
+                        <span
+                          className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-accent"
+                          aria-hidden
+                        />
+                      )}
+                    </button>
+                    <button
                       onClick={() => setEditing(tr)}
                       aria-label={`${t("common.edit")} ${tr.name}`}
                       className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
@@ -222,7 +250,12 @@ export function TraineesPage() {
       </>
       )}
 
-      <GeneralNoteDialog open={noteOpen} onClose={() => setNoteOpen(false)} />
+      <GeneralNoteDialog open={broadcastOpen} onClose={() => setBroadcastOpen(false)} />
+      <AdminTraineeNoteDrawer
+        open={noteTraineeId !== null}
+        onClose={() => setNoteTraineeId(null)}
+        trainee={noteTrainee}
+      />
       <TraineeDetailDialog open={viewing !== null} onClose={() => setViewing(null)} traineeId={viewing} />
       <TraineeDialog open={addOpen} onClose={() => setAddOpen(false)} />
       <TraineeDialog open={editing !== null} onClose={() => setEditing(null)} trainee={editing} />

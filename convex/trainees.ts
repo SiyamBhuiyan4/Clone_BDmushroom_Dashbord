@@ -417,3 +417,15 @@ export const setPortalNote = mutation({
     await ctx.db.patch(args.id, { portalNote: text, portalNoteUpdatedAt: text ? Date.now() : undefined });
   },
 });
+
+/** The shop's private note for this trainee, kept for admin use. */
+export const setAdminNote = mutation({
+  args: { token: v.string(), id: v.id("trainees"), text: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    if (!(await ctx.db.get(args.id))) throw new ConvexError("That trainee no longer exists.");
+    const text = cleanNote(args.text);
+    await ctx.db.patch(args.id, { note: text });
+  },
+});
+
