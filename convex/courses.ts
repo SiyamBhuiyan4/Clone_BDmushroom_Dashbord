@@ -467,7 +467,10 @@ export const setCertificate = mutation({
     if (args.approved) {
       const lessons = await lessonsOf(ctx, e.courseId);
       const done = await doneLessonIds(ctx, e.traineeId);
-      if (lessons.length > 0 && lessons.some((l) => !done.has(l._id))) {
+      if (lessons.length === 0) {
+        throw new ConvexError("Add lessons to this course and mark them done before approving a certificate.");
+      }
+      if (lessons.some((l) => !done.has(l._id))) {
         throw new ConvexError("Every lesson has to be done first.");
       }
       const score = await scoreOf(ctx, e);

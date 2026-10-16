@@ -338,7 +338,7 @@ function CourseView({ token, courseId }: { token: string; courseId: Id<"courses"
   const done = course.lessons.filter((l) => l.done).length;
   const total = course.lessons.length;
   const isFailed = course.graded && course.grade === "F";
-  const complete = (total === 0 || done === total) && !isFailed;
+  const complete = total > 0 && done === total && !isFailed;
   const next = course.lessons.find((l) => !l.done);
 
   return (
@@ -484,6 +484,8 @@ function CourseView({ token, courseId }: { token: string; courseId: Id<"courses"
                 <span className="text-critical font-semibold">Course status: Failed (Grade F) — certificate is not available.</span>
               ) : cert ? (
                 "Approved by BD Mushroom — download it below."
+              ) : total === 0 ? (
+                "No lessons have been added to this course yet."
               ) : complete ? (
                 "All lessons done! The office will approve your certificate soon."
               ) : (

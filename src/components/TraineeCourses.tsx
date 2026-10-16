@@ -113,7 +113,7 @@ export function TraineeCoursesPanel({
           rows.map(({ enrollment, course, lessons, assignments, score }) => {
             const done = lessons.filter((l) => l.completedAt).length;
             const isFailed = score.graded && score.grade === "F";
-            const complete = (lessons.length === 0 || done === lessons.length) && !isFailed;
+            const complete = lessons.length > 0 && done === lessons.length && !isFailed;
             const approved = Boolean(enrollment.certificateApprovedAt);
             const currentTitle = newLessonTitle[course._id] ?? "";
             return (
@@ -315,6 +315,8 @@ export function TraineeCoursesPanel({
                       <p className="text-[12px] text-ink-3">
                         {isFailed ? (
                           <span className="font-semibold text-critical">Failed (Grade F) — certificate cannot be approved.</span>
+                        ) : lessons.length === 0 ? (
+                          "Add lessons above and mark them done to unlock certificate."
                         ) : !complete ? (
                           `Unlocks once every lesson is done (${done}/${lessons.length} done).`
                         ) : score.graded && !score.allMarked ? (
