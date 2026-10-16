@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
-import { Check, Pencil, Plus, Tags, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, GripVertical, Pencil, Plus, Tags, Trash2, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Button, Input, Modal } from "./ui";
+import { Button, Input, Modal, cx } from "./ui";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useT } from "../lib/i18n";
-import { useSettings } from "../lib/settings";
+import { plural } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { useVendorCategories } from "../lib/vendorCategories";
@@ -26,12 +26,65 @@ export function VendorCategoriesDialog({
 }) {
   const t = useT();
   const toast = useToast();
-  const { fmtNum } = useSettings();
   const { categories, label, categoryOf } = useVendorCategories();
   const vendors = useAuthedQuery(api.vendors.list, {}) ?? [];
   const create = useAuthedMutation(api.vendorCategories.create);
   const rename = useAuthedMutation(api.vendorCategories.rename);
   const remove = useAuthedMutation(api.vendorCategories.remove);
+  const reorder = useAuthedMutation(api.vendorCategories.reorder);
+
+  /*
+    Drag to reorder, by the grip on each row. While dragging, the list is
+    held locally (`order`) and rows swap as the pointer passes their middle;
+    letting go saves it. Pointer events rather than HTML drag-and-drop, so
+    it works the same with a finger as with a mouse.
+  */
+  const [order, setOrder] = useState<Id<"vendorCategories">[] | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  const rows = order
+    ? order.map((id) => categories.find((c) => c._id === id)).filter((c): c is Doc<"vendorCategories"> => Boolean(c))
+    : categories;
+
+  function startDrag(e: React.PointerEvent, id: string) {
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    setDragId(id);
+    setOrder(categories.map((c) => c._id));
+  }
+
+  /** The order with the dragged row placed where the pointer is now. */
+  function orderAt(clientY: number) {
+    if (!dragId || !order) return null;
+    const others = order.filter((id) => id !== dragId);
+    // How many of the other rows sit above the pointer is where this one goes.
+    const index = others.filter((id) => {
+      const rect = rowRefs.current.get(id)?.getBoundingClientRect();
+      return rect ? rect.top + rect.height / 2 < clientY : false;
+    }).length;
+    return [...others.slice(0, index), dragId as Id<"vendorCategories">, ...others.slice(index)];
+  }
+
+  function moveDrag(e: React.PointerEvent) {
+    const next = orderAt(e.clientY);
+    if (next && order && next.some((id, i) => id !== order[i])) setOrder(next);
+  }
+
+  async function endDrag(e: React.PointerEvent) {
+    // Where it was let go counts, even if no move event landed there first.
+    const final = orderAt(e.clientY) ?? order;
+    if (!dragId || !final) return;
+    setDragId(null);
+    setOrder(final);
+    const changed = final.some((id, i) => id !== categories[i]?._id);
+    try {
+      if (changed) await reorder({ ids: final });
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setOrder(null);
+    }
+  }
 
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
@@ -82,8 +135,35 @@ export function VendorCategoriesDialog({
     >
       <div className="flex flex-col gap-4 px-6 py-6">
         <ul className="flex flex-col gap-2">
-          {categories.map((c) => (
-            <li key={c._id} className="flex items-center gap-2 rounded-xl border border-line bg-page px-3.5 py-2.5">
+          {rows.map((c) => (
+            <li
+              key={c._id}
+              ref={(el) => {
+                if (el) rowRefs.current.set(c._id, el);
+                else rowRefs.current.delete(c._id);
+              }}
+              className={cx(
+                "flex items-center gap-2 rounded-xl border bg-page py-2.5 pr-3.5 pl-1.5 transition-[box-shadow,transform,border-color] duration-150",
+                dragId === c._id
+                  ? "relative z-10 scale-[1.02] border-accent shadow-[var(--shadow-pop)]"
+                  : "border-line",
+              )}
+            >
+              <button
+                type="button"
+                onPointerDown={(e) => startDrag(e, c._id)}
+                onPointerMove={moveDrag}
+                onPointerUp={(e) => void endDrag(e)}
+                onPointerCancel={(e) => void endDrag(e)}
+                aria-label={`Drag to reorder ${label(c)}`}
+                title="Drag to reorder"
+                className={cx(
+                  "shrink-0 touch-none rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-ink",
+                  dragId === c._id ? "cursor-grabbing text-accent" : "cursor-grab",
+                )}
+              >
+                <GripVertical size={16} />
+              </button>
               {editingId === c._id ? (
                 <form
                   className="flex flex-1 items-center gap-2"
@@ -119,9 +199,7 @@ export function VendorCategoriesDialog({
                 <>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13.5px] font-semibold text-ink">{label(c)}</p>
-                    <p className="text-[11.5px] text-ink-3">
-                      {fmtNum(countIn(c._id))} {t("vendors.vendorsIn")}
-                    </p>
+                    <p className="text-[11.5px] text-ink-3">{plural(countIn(c._id), "vendor")}</p>
                   </div>
                   <button
                     onClick={() => {
@@ -167,7 +245,7 @@ export function VendorCategoriesDialog({
         confirmLabel={t("common.delete")}
         body={
           deleting
-            ? `${label(deleting)} · ${fmtNum(countIn(deleting._id))} ${t("vendors.vendorsIn")}\n${t("vendors.deleteCategoryBody")}`
+            ? `${label(deleting)} · ${plural(countIn(deleting._id), "vendor")}\n${t("vendors.deleteCategoryBody")}`
             : ""
         }
         onConfirm={async (passcode) => {

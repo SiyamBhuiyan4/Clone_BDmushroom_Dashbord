@@ -89,3 +89,20 @@ export const remove = mutation({
     return { uncategorised: vendors.length };
   },
 });
+
+/** Saves a new order for the list, as dragged on the Vendors page. */
+export const reorder = mutation({
+  args: { token: v.string(), ids: v.array(v.id("vendorCategories")) },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const all = await ctx.db.query("vendorCategories").collect();
+    // The whole list, each once — a partial or stale one would scramble it.
+    if (args.ids.length !== all.length || new Set(args.ids).size !== all.length) {
+      throw new ConvexError("The category list changed — reopen it and try again.");
+    }
+    for (const [order, id] of args.ids.entries()) {
+      if (!all.some((c) => c._id === id)) throw new ConvexError("That category no longer exists.");
+      await ctx.db.patch(id, { order });
+    }
+  },
+});
