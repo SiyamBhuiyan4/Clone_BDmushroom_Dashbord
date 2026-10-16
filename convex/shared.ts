@@ -66,3 +66,20 @@ export function externalUrl(raw?: string) {
  */
 export const VENDOR_CATEGORIES = ["spawn", "materials", "equipment", "packaging", "other"] as const;
 export type VendorCategory = (typeof VENDOR_CATEGORIES)[number];
+
+/*
+  Grades, Bangladesh-style, from a percentage. Trainees see the letter;
+  the marks behind it stay with the shop.
+*/
+export const GRADE_SCALE = [
+  { min: 80, grade: "A+" },
+  { min: 70, grade: "A" },
+  { min: 60, grade: "A-" },
+  { min: 50, grade: "B" },
+  { min: 40, grade: "C" },
+  { min: 0, grade: "F" },
+] as const;
+
+export function gradeFor(percent: number) {
+  return GRADE_SCALE.find((g) => percent >= g.min)?.grade ?? "F";
+}

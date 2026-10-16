@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowUp,
   BookOpen,
+  ClipboardList,
   FileText,
   Image as ImageIcon,
   Pencil,
@@ -16,6 +17,7 @@ import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Button, Card, EmptyState, Field, Input, Modal, ModalFooter, Textarea } from "./ui";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
+import { parseDateInput } from "../lib/dateRange";
 import { plural } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
@@ -171,8 +173,12 @@ function CourseEditor({ courseId, onClose }: { courseId: Id<"courses"> | null; o
   const [lessonOpen, setLessonOpen] = useState<"new" | Id<"courseLessons"> | null>(null);
   const [deletingLesson, setDeletingLesson] = useState<Doc<"courseLessons"> | null>(null);
   const [deletingCourse, setDeletingCourse] = useState(false);
+  const [assignmentOpen, setAssignmentOpen] = useState<"new" | Doc<"assignments"> | null>(null);
+  const [deletingAssignment, setDeletingAssignment] = useState<Doc<"assignments"> | null>(null);
+  const removeAssignment = useAuthedMutation(api.courses.removeAssignment);
 
   const lessons = data?.lessons ?? [];
+  const assignments = data?.assignments ?? [];
   const editingLesson = lessonOpen && lessonOpen !== "new" ? (lessons.find((l) => l._id === lessonOpen) ?? null) : null;
 
   return (
@@ -263,8 +269,66 @@ function CourseEditor({ courseId, onClose }: { courseId: Id<"courses"> | null; o
               </ol>
             )}
           </div>
+
+          <div>
+            <div className="mb-2.5 flex items-center justify-between gap-3">
+              <p className="text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">
+                Assignments · {assignments.length}
+              </p>
+              <Button size="sm" variant="secondary" onClick={() => setAssignmentOpen("new")}>
+                <Plus size={15} /> Add assignment
+              </Button>
+            </div>
+            {assignments.length === 0 ? (
+              <p className="text-[12.5px] text-ink-3">
+                No assignments. Add one to grade this course — trainees hand in a YouTube link, a note, photos or PDFs.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {assignments.map((a) => (
+                  <li key={a._id} className="flex items-center gap-2 rounded-xl border border-line bg-page px-3 py-2.5">
+                    <ClipboardList size={16} className="shrink-0 text-accent" />
+                    <button onClick={() => setAssignmentOpen(a)} className="min-w-0 flex-1 text-left">
+                      <p className="truncate text-[13.5px] font-semibold text-ink hover:text-accent">{a.title}</p>
+                      <p className="text-[11.5px] text-ink-3">
+                        Out of {a.maxMarks}
+                        {a.dueAt ? ` · due ${new Date(a.dueAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : ""}
+                      </p>
+                    </button>
+                    <button
+                      onClick={() => setDeletingAssignment(a)}
+                      aria-label={`Delete ${a.title}`}
+                      className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
+
+      {courseId && (
+        <AssignmentDialog
+          open={assignmentOpen !== null}
+          onClose={() => setAssignmentOpen(null)}
+          courseId={courseId}
+          assignment={assignmentOpen && assignmentOpen !== "new" ? assignmentOpen : null}
+        />
+      )}
+      <PasscodeConfirmDialog
+        open={deletingAssignment !== null}
+        onClose={() => setDeletingAssignment(null)}
+        title="Delete assignment"
+        body={deletingAssignment ? `${deletingAssignment.title}\nEveryone's hand-ins and marks for it go too.` : ""}
+        onConfirm={async (passcode) => {
+          if (!deletingAssignment) return;
+          await removeAssignment({ id: deletingAssignment._id, passcode });
+          toast.ok("Assignment deleted.");
+        }}
+      />
 
       <CourseFormDialog open={editingCourse} onClose={() => setEditingCourse(false)} course={data?.course} />
       {courseId && (
@@ -471,6 +535,105 @@ function LessonDialog({
           </Button>
           <Button type="submit" variant="primary" disabled={!title.trim() || saving}>
             {saving ? "Saving…" : lesson ? "Save lesson" : "Add lesson"}
+          </Button>
+        </ModalFooter>
+      </form>
+    </Modal>
+  );
+}
+
+/** Adds or edits one assignment: what to do, what it's out of, and when it's due. */
+function AssignmentDialog({
+  open,
+  onClose,
+  courseId,
+  assignment,
+}: {
+  open: boolean;
+  onClose: () => void;
+  courseId: Id<"courses">;
+  assignment: Doc<"assignments"> | null;
+}) {
+  const toast = useToast();
+  const add = useAuthedMutation(api.courses.addAssignment);
+  const update = useAuthedMutation(api.courses.updateAssignment);
+  const [title, setTitle] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [maxMarks, setMaxMarks] = useState("");
+  const [due, setDue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle(assignment?.title ?? "");
+    setInstructions(assignment?.instructions ?? "");
+    setMaxMarks(assignment ? String(assignment.maxMarks) : "10");
+    setDue(assignment?.dueAt ? new Date(assignment.dueAt).toISOString().slice(0, 10) : "");
+  }, [open, assignment]);
+
+  const max = Number(maxMarks);
+  const valid = title.trim() !== "" && Number.isFinite(max) && max > 0;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!valid || saving) return;
+    setSaving(true);
+    try {
+      // The end of the chosen day, so "due the 20th" still takes work on the 20th.
+      const start = due ? parseDateInput(due) : null;
+      const dueAt = start !== null ? start + 24 * 60 * 60 * 1000 - 1 : undefined;
+      const payload = { title, instructions, maxMarks: max, dueAt };
+      if (assignment) await update({ id: assignment._id, ...payload });
+      else await add({ courseId, ...payload });
+      toast.ok(assignment ? "Assignment saved." : "Assignment added.");
+      onClose();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      guardChanges
+      open={open}
+      onClose={onClose}
+      icon={<ClipboardList size={19} />}
+      title={assignment ? "Edit assignment" : "New assignment"}
+      subtitle="Trainees see only their grade — the marks stay with you."
+    >
+      <form onSubmit={submit}>
+        <div className="flex flex-col gap-5 px-6 py-6">
+          <Field label="Title">
+            {(id) => <Input id={id} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Grow your first bag" required />}
+          </Field>
+          <Field label="What to do" hint="Optional — instructions the trainee reads.">
+            {(id) => (
+              <Textarea
+                id={id}
+                rows={5}
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                placeholder="Film your bag from inoculation to first harvest, upload to YouTube and send the link."
+              />
+            )}
+          </Field>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <Field label="Out of (marks)">
+              {(id) => <Input id={id} type="number" min={1} step="any" value={maxMarks} onChange={(e) => setMaxMarks(e.target.value)} className="tabular-nums" />}
+            </Field>
+            <Field label="Due date" hint="Optional.">
+              {(id) => <Input id={id} type="date" value={due} onChange={(e) => setDue(e.target.value)} />}
+            </Field>
+          </div>
+        </div>
+        <ModalFooter>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" disabled={!valid || saving}>
+            {saving ? "Saving…" : assignment ? "Save" : "Add assignment"}
           </Button>
         </ModalFooter>
       </form>

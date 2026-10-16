@@ -2,6 +2,7 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import type { Doc, Id } from "./_generated/dataModel";
 import { v, ConvexError } from "convex/values";
 import { requireSession, verifyPasscode } from "./auth";
+import { gradeFor } from "./shared";
 
 /*
   Courses, from the shop's side: build them, assign them to trainees, and
@@ -23,6 +24,80 @@ export async function lessonsOf(ctx: QueryCtx, courseId: Id<"courses">) {
     .withIndex("by_course", (q) => q.eq("courseId", courseId))
     .collect();
   return rows.sort((a, b) => a.order - b.order);
+}
+
+export async function assignmentsOf(ctx: QueryCtx, courseId: Id<"courses">) {
+  const rows = await ctx.db
+    .query("assignments")
+    .withIndex("by_course", (q) => q.eq("courseId", courseId))
+    .collect();
+  return rows.sort((a, b) => a.order - b.order);
+}
+
+/** This trainee's submissions in one course, by assignment id. */
+export async function submissionsIn(ctx: QueryCtx, traineeId: Id<"trainees">, courseId: Id<"courses">) {
+  const rows = await ctx.db
+    .query("submissions")
+    .withIndex("by_trainee", (q) => q.eq("traineeId", traineeId))
+    .collect();
+  return new Map(rows.filter((r) => r.courseId === courseId).map((r) => [r.assignmentId as string, r]));
+}
+
+/**
+ * A trainee's score in a course: assignment marks plus the final exam, if
+ * there is one. `grade` only exists once everything is marked — a grade
+ * from half the work would be a guess presented as a result — while
+ * `gradeSoFar` reflects just what has been marked.
+ */
+export async function scoreOf(ctx: QueryCtx, enrollment: Doc<"enrollments">) {
+  const assignments = await assignmentsOf(ctx, enrollment.courseId);
+  const subs = await submissionsIn(ctx, enrollment.traineeId, enrollment.courseId);
+  let earned = 0;
+  let max = 0;
+  let markedMax = 0;
+  let allMarked = true;
+  for (const a of assignments) {
+    max += a.maxMarks;
+    const sub = subs.get(a._id);
+    if (sub?.marks !== undefined) {
+      earned += sub.marks;
+      markedMax += a.maxMarks;
+    } else {
+      allMarked = false;
+    }
+  }
+  if (enrollment.finalMax) {
+    max += enrollment.finalMax;
+    if (enrollment.finalMarks !== undefined) {
+      earned += enrollment.finalMarks;
+      markedMax += enrollment.finalMax;
+    } else {
+      allMarked = false;
+    }
+  }
+  const graded = max > 0;
+  const percent = graded && allMarked ? (earned / max) * 100 : null;
+  return {
+    graded,
+    earned,
+    max,
+    allMarked,
+    percent,
+    grade: percent !== null ? gradeFor(percent) : null,
+    gradeSoFar: markedMax > 0 ? gradeFor((earned / markedMax) * 100) : null,
+  };
+}
+
+/** Deletes a submission and the files the trainee attached to it. */
+export async function deleteSubmission(ctx: MutationCtx, sub: Doc<"submissions">) {
+  for (const f of sub.files ?? []) {
+    try {
+      await ctx.storage.delete(f.storageId);
+    } catch {
+      // Already gone.
+    }
+  }
+  await ctx.db.delete(sub._id);
 }
 
 /** Lesson ids this trainee has finished. */
@@ -73,7 +148,7 @@ export const detail = query({
     const course = await ctx.db.get(args.id);
     if (!course) return null;
     const lessons = await Promise.all((await lessonsOf(ctx, args.id)).map((l) => withFileUrls(ctx, l)));
-    return { course, lessons };
+    return { course, lessons, assignments: await assignmentsOf(ctx, args.id) };
   },
 });
 
@@ -132,6 +207,15 @@ export const remove = mutation({
     await requireSession(ctx, args.token);
     await verifyPasscode(ctx, args.passcode);
     for (const lesson of await lessonsOf(ctx, args.id)) await deleteLesson(ctx, lesson);
+    for (const a of await assignmentsOf(ctx, args.id)) {
+      for (const sub of await ctx.db
+        .query("submissions")
+        .withIndex("by_assignment", (q) => q.eq("assignmentId", a._id))
+        .collect()) {
+        await deleteSubmission(ctx, sub);
+      }
+      await ctx.db.delete(a._id);
+    }
     const enrollments = await ctx.db
       .query("enrollments")
       .withIndex("by_course", (q) => q.eq("courseId", args.id))
@@ -271,10 +355,29 @@ export const ofTrainee = query({
         const course = await ctx.db.get(e.courseId);
         if (!course) return null;
         const lessons = await lessonsOf(ctx, e.courseId);
+        const subs = await submissionsIn(ctx, args.traineeId, e.courseId);
+        const assignments = await Promise.all(
+          (await assignmentsOf(ctx, e.courseId)).map(async (a) => {
+            const sub = subs.get(a._id);
+            return {
+              ...a,
+              submission: sub
+                ? {
+                    ...sub,
+                    files: await Promise.all(
+                      (sub.files ?? []).map(async (f) => ({ ...f, url: await ctx.storage.getUrl(f.storageId) })),
+                    ),
+                  }
+                : null,
+            };
+          }),
+        );
         return {
           enrollment: e,
           course,
           lessons: lessons.map((l) => ({ _id: l._id, title: l.title, completedAt: doneAt.get(l._id) ?? null })),
+          assignments,
+          score: await scoreOf(ctx, e),
         };
       }),
     );
@@ -316,6 +419,7 @@ export const unassign = mutation({
       .withIndex("by_trainee", (q) => q.eq("traineeId", e.traineeId))
       .collect();
     for (const p of progress) if (p.courseId === e.courseId) await ctx.db.delete(p._id);
+    for (const sub of (await submissionsIn(ctx, e.traineeId, e.courseId)).values()) await deleteSubmission(ctx, sub);
     await ctx.db.delete(e._id);
   },
 });
@@ -366,7 +470,134 @@ export const setCertificate = mutation({
       if (lessons.length === 0 || lessons.some((l) => !done.has(l._id))) {
         throw new ConvexError("Every lesson has to be done first.");
       }
+      const score = await scoreOf(ctx, e);
+      if (score.graded && !score.allMarked) {
+        throw new ConvexError("Every assignment (and the final exam, if set) has to be marked first.");
+      }
     }
     await ctx.db.patch(args.id, { certificateApprovedAt: args.approved ? Date.now() : undefined });
+  },
+});
+
+/* ------------------------------------------------------------ assignments */
+
+const assignmentFields = {
+  title: v.string(),
+  instructions: v.optional(v.string()),
+  maxMarks: v.number(),
+  dueAt: v.optional(v.number()),
+};
+
+function checkAssignment(args: { title: string; maxMarks: number }) {
+  if (!args.title.trim()) throw new ConvexError("An assignment needs a title.");
+  if (!Number.isFinite(args.maxMarks) || args.maxMarks <= 0) {
+    throw new ConvexError("Total marks must be more than zero.");
+  }
+}
+
+export const addAssignment = mutation({
+  args: { token: v.string(), courseId: v.id("courses"), ...assignmentFields },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    if (!(await ctx.db.get(args.courseId))) throw new ConvexError("That course no longer exists.");
+    checkAssignment(args);
+    const existing = await assignmentsOf(ctx, args.courseId);
+    return await ctx.db.insert("assignments", {
+      courseId: args.courseId,
+      title: args.title.trim(),
+      instructions: args.instructions?.trim() || undefined,
+      maxMarks: args.maxMarks,
+      dueAt: args.dueAt,
+      order: existing.reduce((max, a) => Math.max(max, a.order), -1) + 1,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const updateAssignment = mutation({
+  args: { token: v.string(), id: v.id("assignments"), ...assignmentFields },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const row = await ctx.db.get(args.id);
+    if (!row) throw new ConvexError("That assignment no longer exists.");
+    checkAssignment(args);
+    // Lowering the total can't leave marks above it.
+    const subs = await ctx.db
+      .query("submissions")
+      .withIndex("by_assignment", (q) => q.eq("assignmentId", args.id))
+      .collect();
+    if (subs.some((sub) => (sub.marks ?? 0) > args.maxMarks)) {
+      throw new ConvexError("Someone already has more marks than that — lower their marks first.");
+    }
+    await ctx.db.patch(args.id, {
+      title: args.title.trim(),
+      instructions: args.instructions?.trim() || undefined,
+      maxMarks: args.maxMarks,
+      dueAt: args.dueAt,
+    });
+  },
+});
+
+export const removeAssignment = mutation({
+  args: { token: v.string(), id: v.id("assignments"), passcode: v.string() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    await verifyPasscode(ctx, args.passcode);
+    for (const sub of await ctx.db
+      .query("submissions")
+      .withIndex("by_assignment", (q) => q.eq("assignmentId", args.id))
+      .collect()) {
+      await deleteSubmission(ctx, sub);
+    }
+    await ctx.db.delete(args.id);
+  },
+});
+
+/** Marks a submission. Clearing the marks (undefined) un-grades it. */
+export const gradeSubmission = mutation({
+  args: {
+    token: v.string(),
+    id: v.id("submissions"),
+    marks: v.optional(v.number()),
+    feedback: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const sub = await ctx.db.get(args.id);
+    if (!sub) throw new ConvexError("That submission no longer exists.");
+    const assignment = await ctx.db.get(sub.assignmentId);
+    if (!assignment) throw new ConvexError("That assignment no longer exists.");
+    if (args.marks !== undefined && (!Number.isFinite(args.marks) || args.marks < 0 || args.marks > assignment.maxMarks)) {
+      throw new ConvexError(`Marks must be between 0 and ${assignment.maxMarks}.`);
+    }
+    await ctx.db.patch(args.id, {
+      marks: args.marks,
+      feedback: args.feedback?.trim() || undefined,
+      gradedAt: args.marks !== undefined ? Date.now() : undefined,
+    });
+  },
+});
+
+/** The final exam or practical: out of `max`, with `marks` once it's marked. Both empty removes it. */
+export const setFinal = mutation({
+  args: {
+    token: v.string(),
+    id: v.id("enrollments"),
+    marks: v.optional(v.number()),
+    max: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    if (!(await ctx.db.get(args.id))) throw new ConvexError("That course is no longer assigned.");
+    if (args.max !== undefined && (!Number.isFinite(args.max) || args.max <= 0)) {
+      throw new ConvexError("Total marks must be more than zero.");
+    }
+    if (args.marks !== undefined) {
+      if (args.max === undefined) throw new ConvexError("Set the total marks first.");
+      if (!Number.isFinite(args.marks) || args.marks < 0 || args.marks > args.max) {
+        throw new ConvexError(`Marks must be between 0 and ${args.max}.`);
+      }
+    }
+    await ctx.db.patch(args.id, { finalMarks: args.marks, finalMax: args.max });
   },
 });

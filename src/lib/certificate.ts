@@ -11,6 +11,10 @@ import type { ShopInfo } from "./receipt";
 
 export type CertificateTrainee = {
   name: string;
+  /** The course finished, when the certificate is for one. */
+  courseName?: string;
+  /** The grade earned (A+, A, …), when the course was marked. */
+  grade?: string;
   lessonNames: string[];
   issuedAt: number;
 };
@@ -112,11 +116,15 @@ export function drawCertificate(doc: Doc, trainee: CertificateTrainee, shop: Sho
     .font(REGULAR)
     .fontSize(12)
     .fillColor(MUTED)
-    .text("has successfully completed training at BD Mushroom, covering:", margin, y, {
-      width: width - margin * 2,
-      align: "center",
-    });
-  y += 26;
+    .text(
+      trainee.courseName
+        ? `has successfully completed the course “${trainee.courseName}” at BD Mushroom, covering:`
+        : "has successfully completed training at BD Mushroom, covering:",
+      margin,
+      y,
+      { width: width - margin * 2, align: "center" },
+    );
+  y = doc.y + 10;
 
   const lessonsText = trainee.lessonNames.join("  •  ");
   doc
@@ -124,7 +132,16 @@ export function drawCertificate(doc: Doc, trainee: CertificateTrainee, shop: Sho
     .fontSize(13)
     .fillColor(GREEN)
     .text(lessonsText, margin + 60, y, { width: width - (margin + 60) * 2, align: "center" });
-  y += doc.heightOfString(lessonsText, { width: width - (margin + 60) * 2, align: "center" }) + 34;
+  y += doc.heightOfString(lessonsText, { width: width - (margin + 60) * 2, align: "center" }) + 18;
+
+  if (trainee.grade) {
+    doc
+      .font(BOLD)
+      .fontSize(16)
+      .fillColor(INK)
+      .text(`Grade: ${trainee.grade}`, margin, y, { width: width - margin * 2, align: "center" });
+    y = doc.y + 16;
+  }
 
   const footerY = height - margin - 70;
   doc

@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import {
   ArrowLeft,
   ArrowRight,
   Award,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
   BookOpen,
   CheckCircle2,
   Circle,
@@ -15,11 +18,14 @@ import {
   Loader2,
   LogOut,
   PlayCircle,
+  Upload,
   UserRound,
+  X,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { Button, Input, cx } from "../components/ui";
+import { Button, Input, Textarea, cx } from "../components/ui";
+import { uploadFile } from "../lib/upload";
 import { errorMessage, useToast } from "../lib/toast";
 import { downloadCertificate } from "../lib/pdf";
 
@@ -32,13 +38,18 @@ import { downloadCertificate } from "../lib/pdf";
 
 const TOKEN_KEY = "ac.traineeSession";
 
-type View = { kind: "home" } | { kind: "course"; id: Id<"courses"> } | { kind: "lesson"; id: Id<"courseLessons"> };
+type View =
+  | { kind: "home" }
+  | { kind: "course"; id: Id<"courses"> }
+  | { kind: "lesson"; id: Id<"courseLessons"> }
+  | { kind: "assignment"; id: Id<"assignments"> };
 
 function viewFromHash(): View {
   const parts = window.location.hash.replace(/^#\/?/, "").split("/");
   // learn / c / <id>   or   learn / l / <id>
   if (parts[1] === "c" && parts[2]) return { kind: "course", id: parts[2] as Id<"courses"> };
   if (parts[1] === "l" && parts[2]) return { kind: "lesson", id: parts[2] as Id<"courseLessons"> };
+  if (parts[1] === "a" && parts[2]) return { kind: "assignment", id: parts[2] as Id<"assignments"> };
   return { kind: "home" };
 }
 
@@ -128,6 +139,7 @@ export function TraineePortal() {
         {view.kind === "home" && <MyCourses token={token} name={me.name} />}
         {view.kind === "course" && <CourseView token={token} courseId={view.id} />}
         {view.kind === "lesson" && <LessonView token={token} lessonId={view.id} />}
+        {view.kind === "assignment" && <AssignmentView token={token} assignmentId={view.id} />}
       </main>
     </div>
   );
@@ -351,6 +363,12 @@ function CourseView({ token, courseId }: { token: string; courseId: Id<"courses"
         <div className="relative mt-3">
           <ProgressBar done={done} total={total} light />
         </div>
+        {course.graded && (course.grade || course.gradeSoFar) && (
+          <p className="relative mt-4 inline-flex items-center gap-2 rounded-xl bg-white/15 px-3 py-1.5 text-[13px] font-semibold">
+            <Award size={15} />
+            {course.grade ? `Course grade: ${course.grade}` : `Grade so far: ${course.gradeSoFar}`}
+          </p>
+        )}
         {next && (
           <Button
             variant="secondary"
@@ -385,6 +403,35 @@ function CourseView({ token, courseId }: { token: string; courseId: Id<"courses"
           </li>
         ))}
       </ol>
+
+      {course.assignments.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="mt-1 text-[11px] font-bold tracking-[0.08em] text-ink-3 uppercase">Assignments</p>
+          {course.assignments.map((a) => (
+            <button
+              key={a._id}
+              onClick={() => go(`/a/${a._id}`)}
+              className="flex w-full items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3.5 text-left transition-colors hover:bg-surface-2"
+            >
+              <ClipboardList size={19} className="shrink-0 text-accent" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[14px] font-semibold text-ink">{a.title}</span>
+                {a.dueAt && (
+                  <span className="block text-[12px] text-ink-3">Due {new Date(a.dueAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span>
+                )}
+              </span>
+              {a.status === "graded" ? (
+                <span className="rounded-lg bg-good-soft px-2.5 py-1 text-[13px] font-bold text-good-ink">{a.grade}</span>
+              ) : a.status === "submitted" ? (
+                <span className="rounded-lg bg-warning-soft px-2 py-1 text-[11px] font-bold text-warning-ink">Submitted</span>
+              ) : (
+                <span className="rounded-lg bg-surface-2 px-2 py-1 text-[11px] font-bold text-ink-3">To do</span>
+              )}
+              <ArrowRight size={15} className="shrink-0 text-ink-3" />
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* The certificate: earned by finishing, given by the office. */}
       <div className="rounded-card border border-line bg-surface p-5">
@@ -450,6 +497,7 @@ function LessonView({ token, lessonId }: { token: string; lessonId: Id<"courseLe
   const lesson = useQuery(api.portal.lesson, { token, lessonId });
   const setDone = useMutation(api.portal.setDone);
   const [busy, setBusy] = useState(false);
+  const [viewing, setViewing] = useState<number | null>(null);
 
   if (lesson === undefined) {
     return <div className="ac-skeleton h-80 rounded-card border border-line bg-surface" aria-hidden />;
@@ -511,32 +559,45 @@ function LessonView({ token, lessonId }: { token: string; lessonId: Id<"courseLe
       )}
 
       {images.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {images.map((f) => (
-            <a key={f.url!} href={f.url!} target="_blank" rel="noreferrer noopener" className="overflow-hidden rounded-xl border border-line bg-surface">
-              <img src={f.url!} alt={f.fileName} className="w-full object-cover" loading="lazy" />
-            </a>
-          ))}
-        </div>
+        <section>
+          <p className="mb-2 text-[11px] font-bold tracking-[0.08em] text-ink-3 uppercase">Photos · {images.length}</p>
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+            {images.map((f, i) => (
+              <button
+                key={f.url!}
+                onClick={() => setViewing(i)}
+                className="group overflow-hidden rounded-xl border border-line bg-surface"
+              >
+                <img
+                  src={f.url!}
+                  alt={f.fileName}
+                  loading="lazy"
+                  className="aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                />
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
       {pdfs.length > 0 && (
-        <ul className="flex flex-col gap-2">
-          {pdfs.map((f) => (
-            <li key={f.url!}>
-              <a
-                href={f.url!}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:bg-surface-2"
-              >
-                <FileText size={18} className="shrink-0 text-critical-ink" />
-                <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">{f.fileName}</span>
-                <span className="text-[12px] font-semibold text-accent">Open</span>
-              </a>
-            </li>
-          ))}
-        </ul>
+        <section>
+          <p className="mb-2 text-[11px] font-bold tracking-[0.08em] text-ink-3 uppercase">Documents · {pdfs.length}</p>
+          <ul className="flex flex-col gap-2.5">
+            {pdfs.map((f) => (
+              <PdfCard key={f.url!} name={f.fileName} url={f.url!} />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {viewing !== null && images[viewing] && (
+        <Lightbox
+          images={images.map((f) => ({ url: f.url!, name: f.fileName }))}
+          index={viewing}
+          onIndex={setViewing}
+          onClose={() => setViewing(null)}
+        />
       )}
 
       <Button
@@ -575,5 +636,324 @@ function LessonView({ token, lessonId }: { token: string; lessonId: Id<"courseLe
         )}
       </div>
     </div>
+  );
+}
+
+/* --------------------------------------------------------- files, viewers */
+
+/** A PDF as a card: open it right here in the page, or download it. */
+function PdfCard({ name, url }: { name: string; url: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="overflow-hidden rounded-xl border border-line bg-surface">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-critical-soft text-critical-ink">
+          <FileText size={18} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[14px] font-semibold text-ink">{name}</span>
+          <span className="block text-[12px] text-ink-3">PDF document</span>
+        </span>
+        <Button size="sm" variant="secondary" onClick={() => setOpen((v) => !v)}>
+          {open ? "Close" : "View"}
+        </Button>
+        <a
+          href={url}
+          download={name}
+          target="_blank"
+          rel="noreferrer noopener"
+          aria-label={`Download ${name}`}
+          className="rounded-lg p-2 text-ink-3 hover:bg-surface-2 hover:text-ink"
+        >
+          <Download size={16} />
+        </a>
+      </div>
+      {open && <iframe src={url} title={name} className="h-[70vh] w-full border-t border-line bg-white" />}
+    </li>
+  );
+}
+
+/** Photos full screen, one at a time — arrows, swipe, or the keyboard to move. */
+function Lightbox({
+  images,
+  index,
+  onIndex,
+  onClose,
+}: {
+  images: { url: string; name: string }[];
+  index: number;
+  onIndex: (i: number) => void;
+  onClose: () => void;
+}) {
+  const startX = useRef<number | null>(null);
+  const go = useCallback(
+    (step: number) => onIndex((index + step + images.length) % images.length),
+    [index, images.length, onIndex],
+  );
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowRight") go(1);
+      if (e.key === "ArrowLeft") go(-1);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [go, onClose]);
+
+  return (
+    <div
+      className="ac-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
+      onClick={onClose}
+      onTouchStart={(e) => (startX.current = e.touches[0].clientX)}
+      onTouchEnd={(e) => {
+        if (startX.current === null) return;
+        const dx = e.changedTouches[0].clientX - startX.current;
+        if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1);
+        startX.current = null;
+      }}
+    >
+      <img
+        src={images[index].url}
+        alt={images[index].name}
+        className="max-h-full max-w-full rounded-lg object-contain"
+        onClick={(e) => e.stopPropagation()}
+      />
+      <button onClick={onClose} aria-label="Close" className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20">
+        <X size={20} />
+      </button>
+      {images.length > 1 && (
+        <>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              go(-1);
+            }}
+            aria-label="Previous photo"
+            className="absolute left-3 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+          >
+            <ChevronLeft size={22} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              go(1);
+            }}
+            aria-label="Next photo"
+            className="absolute right-3 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+          >
+            <ChevronRight size={22} />
+          </button>
+          <p className="absolute bottom-4 text-[13px] text-white/70">
+            {index + 1} / {images.length}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ assignment */
+
+type PendingFile = { storageId: Id<"_storage">; fileName: string; kind: "image" | "pdf"; url?: string | null };
+
+function AssignmentView({ token, assignmentId }: { token: string; assignmentId: Id<"assignments"> }) {
+  const toast = useToast();
+  const a = useQuery(api.portal.assignment, { token, assignmentId });
+  const submit = useMutation(api.portal.submit);
+  const generateUploadUrl = useMutation(api.portal.generateUploadUrl);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const [videoUrl, setVideoUrl] = useState("");
+  const [note, setNote] = useState("");
+  const [files, setFiles] = useState<PendingFile[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Fill the form from what was handed in, whenever a different one loads.
+  useEffect(() => {
+    if (!a) return;
+    setVideoUrl(a.submission?.videoUrl ?? "");
+    setNote(a.submission?.note ?? "");
+    setFiles(a.submission?.files ?? []);
+    setEditing(!a.submission);
+  }, [a?._id, a?.submission?.submittedAt]);
+
+  if (a === undefined) return <div className="ac-skeleton h-72 rounded-card border border-line bg-surface" aria-hidden />;
+
+  const sub = a.submission;
+  const locked = Boolean(sub?.graded);
+
+  async function upload(file: File) {
+    const kind = file.type === "application/pdf" ? "pdf" : file.type.startsWith("image/") ? "image" : null;
+    if (!kind) {
+      toast.error("Only photos and PDFs can be attached.");
+      return;
+    }
+    setUploading(true);
+    try {
+      const url = await generateUploadUrl({ token });
+      const storageId = await uploadFile(url, file);
+      setFiles((prev) => [...prev, { storageId, fileName: file.name, kind, url: URL.createObjectURL(file) }]);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handIn(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await submit({
+        token,
+        assignmentId,
+        videoUrl,
+        note,
+        files: files.map(({ storageId, fileName, kind }) => ({ storageId, fileName, kind })),
+      });
+      toast.ok("Handed in! The office will mark it.");
+      setEditing(false);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const video = sub?.videoUrl ? youtubeId(sub.videoUrl) : null;
+
+  return (
+    <div className="flex flex-col gap-5">
+      <button
+        onClick={() => go(`/c/${a.courseId}`)}
+        className="inline-flex items-center gap-1.5 self-start text-[13px] font-semibold text-ink-3 hover:text-ink"
+      >
+        <ArrowLeft size={15} /> Back to course
+      </button>
+
+      <div>
+        <p className="text-[12px] font-bold tracking-[0.08em] text-accent uppercase">Assignment</p>
+        <h1 className="mt-1 text-[24px] leading-8 font-bold tracking-tight text-ink">{a.title}</h1>
+        {a.dueAt && (
+          <p className="mt-1 text-[13px] text-ink-3">
+            Due {new Date(a.dueAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
+          </p>
+        )}
+      </div>
+
+      {a.instructions && (
+        <div className="rounded-card border border-line bg-surface p-5">
+          <p className="text-[15px] leading-7 whitespace-pre-wrap text-ink-2">{a.instructions}</p>
+        </div>
+      )}
+
+      {/* The result, once marked: the grade and what the office said. */}
+      {sub?.graded && (
+        <div
+          className="relative overflow-hidden rounded-card p-5 text-white shadow-[var(--shadow-hero)]"
+          style={{ background: "var(--grad-emerald)" }}
+        >
+          <p className="text-[12.5px] font-semibold text-white/80">Your grade</p>
+          <p className="mt-1 text-[40px] leading-[48px] font-bold">{sub.grade}</p>
+          {sub.feedback && <p className="mt-2 text-[14px] leading-6 whitespace-pre-wrap text-white/90">{sub.feedback}</p>}
+        </div>
+      )}
+
+      {sub && !editing ? (
+        <div className="flex flex-col gap-3 rounded-card border border-line bg-surface p-5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[14px] font-bold text-ink">What you handed in</p>
+            {!locked && (
+              <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+                Change
+              </Button>
+            )}
+          </div>
+          <p className="text-[12px] text-ink-3">
+            {locked ? "Marked — this can't be changed now." : "Waiting for the office to mark it. You can still change it."}
+          </p>
+          {video && (
+            <iframe
+              className="aspect-video w-full rounded-xl"
+              src={`https://www.youtube-nocookie.com/embed/${video}?rel=0`}
+              title="Your video"
+              allowFullScreen
+            />
+          )}
+          {sub.note && <p className="text-[14px] leading-6 whitespace-pre-wrap text-ink-2">{sub.note}</p>}
+          <FileChips files={sub.files} />
+        </div>
+      ) : (
+        <form onSubmit={handIn} className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5">
+          <p className="text-[14px] font-bold text-ink">Hand in your work</p>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-semibold text-ink-2">YouTube link to your video</span>
+            <Input value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="https://youtu.be/…" inputMode="url" />
+            <span className="text-[12px] text-ink-3">Upload your video to YouTube (Unlisted is fine), then paste its link here.</span>
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-semibold text-ink-2">Note</span>
+            <Textarea rows={4} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything you want to tell the office." />
+          </label>
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <span className="text-[13px] font-semibold text-ink-2">Photos & PDFs</span>
+              <Button type="button" size="sm" variant="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                <Upload size={14} /> {uploading ? "Uploading…" : "Add file"}
+              </Button>
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*,application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void upload(file);
+              }}
+            />
+            <FileChips files={files} onRemove={(id) => setFiles((prev) => prev.filter((f) => f.storageId !== id))} />
+          </div>
+          <div className="flex gap-2">
+            {sub && (
+              <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
+                Cancel
+              </Button>
+            )}
+            <Button type="submit" variant="primary" className="flex-1" disabled={saving || uploading}>
+              {saving ? "Handing in…" : sub ? "Hand in again" : "Hand in"}
+            </Button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function FileChips({ files, onRemove }: { files: PendingFile[]; onRemove?: (id: Id<"_storage">) => void }) {
+  if (files.length === 0) return null;
+  return (
+    <ul className="flex flex-wrap gap-2">
+      {files.map((f) => (
+        <li key={f.storageId} className="flex items-center gap-2 rounded-xl border border-line bg-page py-1.5 pr-1.5 pl-2">
+          {f.kind === "image" && f.url ? (
+            <img src={f.url} alt="" className="size-8 rounded-md object-cover" />
+          ) : (
+            <FileText size={16} className="text-critical-ink" />
+          )}
+          <a href={f.url ?? undefined} target="_blank" rel="noreferrer noopener" className="max-w-40 truncate text-[12.5px] font-medium text-ink hover:text-accent">
+            {f.fileName}
+          </a>
+          {onRemove && (
+            <button type="button" onClick={() => onRemove(f.storageId)} aria-label={`Remove ${f.fileName}`} className="rounded-md p-1 text-ink-3 hover:text-critical">
+              <X size={14} />
+            </button>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

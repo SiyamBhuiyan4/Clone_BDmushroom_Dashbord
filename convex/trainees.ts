@@ -3,6 +3,7 @@ import { v, ConvexError } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { requireSession, verifyPasscode } from "./auth";
 import { endTraineeSessions, hashPassword, normaliseUsername, validateUsername } from "./traineeAuth";
+import { deleteSubmission } from "./courses";
 
 /**
  * Attaches a signed, short-lived photo URL — the stored `photoId` is never
@@ -207,6 +208,12 @@ export const remove = mutation({
       .withIndex("by_trainee", (q) => q.eq("traineeId", args.id))
       .collect()) {
       await ctx.db.delete(p._id);
+    }
+    for (const sub of await ctx.db
+      .query("submissions")
+      .withIndex("by_trainee", (q) => q.eq("traineeId", args.id))
+      .collect()) {
+      await deleteSubmission(ctx, sub);
     }
     await endTraineeSessions(ctx, args.id);
     await ctx.db.delete(args.id);

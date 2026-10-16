@@ -1,8 +1,23 @@
 import { useEffect, useState } from "react";
-import { Award, BookOpen, CheckCircle2, Copy, Download, GraduationCap, KeyRound, Plus, RefreshCw, Trash2, UserX } from "lucide-react";
+import {
+  Award,
+  BookOpen,
+  CheckCircle2,
+  ClipboardList,
+  Copy,
+  Download,
+  FileText,
+  GraduationCap,
+  KeyRound,
+  Plus,
+  RefreshCw,
+  Trash2,
+  UserX,
+} from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
-import { Badge, Button, Input, Select, cx } from "./ui";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
+import { Badge, Button, Input, Modal, ModalFooter, Select, Textarea, cx } from "./ui";
+import { gradeFor } from "../../convex/shared";
 import { SidePanelCard } from "./SidePanelCard";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
@@ -32,6 +47,8 @@ export function TraineeCoursesPanel({
   const unassign = useAuthedMutation(api.courses.unassign);
   const setProgress = useAuthedMutation(api.courses.setProgress);
   const setCertificate = useAuthedMutation(api.courses.setCertificate);
+  const setFinal = useAuthedMutation(api.courses.setFinal);
+  const [grading, setGrading] = useState<{ assignment: Doc<"assignments">; submission: Submission } | null>(null);
 
   const [picked, setPicked] = useState("");
   const [removing, setRemoving] = useState<{ id: Id<"enrollments">; name: string } | null>(null);
@@ -82,7 +99,7 @@ export function TraineeCoursesPanel({
             No courses assigned yet.
           </p>
         ) : (
-          rows.map(({ enrollment, course, lessons }) => {
+          rows.map(({ enrollment, course, lessons, assignments, score }) => {
             const done = lessons.filter((l) => l.completedAt).length;
             const complete = lessons.length > 0 && done === lessons.length;
             const approved = Boolean(enrollment.certificateApprovedAt);
@@ -139,6 +156,58 @@ export function TraineeCoursesPanel({
                   ))}
                 </ul>
 
+                {assignments.length > 0 && (
+                  <div className="border-t border-line">
+                    <p className="px-4 pt-3 text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">Assignments</p>
+                    <ul className="flex flex-col divide-y divide-line">
+                      {assignments.map((a) => {
+                        const sub = a.submission;
+                        return (
+                          <li key={a._id} className="flex items-center gap-3 px-4 py-2.5">
+                            <ClipboardList size={15} className="shrink-0 text-ink-3" />
+                            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{a.title}</span>
+                            {!sub ? (
+                              <span className="text-[11.5px] text-ink-3">Not handed in</span>
+                            ) : sub.marks !== undefined ? (
+                              <button
+                                onClick={() => setGrading({ assignment: a, submission: sub })}
+                                className="rounded-lg px-2 py-1 text-[12px] font-bold tabular-nums text-good-ink hover:bg-surface-2"
+                              >
+                                {sub.marks}/{a.maxMarks} · {gradeFor((sub.marks / a.maxMarks) * 100)}
+                              </button>
+                            ) : (
+                              <Button size="sm" variant="primary" onClick={() => setGrading({ assignment: a, submission: sub })}>
+                                Mark
+                              </Button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+
+                <FinalExamRow
+                  marks={enrollment.finalMarks}
+                  max={enrollment.finalMax}
+                  onSave={(marks, max) => run(() => setFinal({ id: enrollment._id, marks, max }), "Saved.")}
+                />
+
+                {score.graded && (
+                  <div className="flex items-center justify-between gap-3 border-t border-line bg-surface-2/40 px-4 py-3">
+                    <span className="text-[12.5px] text-ink-3">
+                      Score{" "}
+                      <span className="font-semibold tabular-nums text-ink">
+                        {score.earned}/{score.max}
+                        {score.percent !== null ? ` (${Math.round(score.percent)}%)` : ""}
+                      </span>
+                    </span>
+                    <span className="text-[13px] font-bold text-ink">
+                      {score.grade ? `Grade ${score.grade}` : score.gradeSoFar ? `So far ${score.gradeSoFar}` : "Not marked yet"}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
                   {approved ? (
                     <>
@@ -153,6 +222,8 @@ export function TraineeCoursesPanel({
                           void run(() =>
                             downloadCertificate({
                               name: traineeName,
+                              courseName: course.name,
+                              grade: score.grade ?? undefined,
                               lessonNames: lessons.map((l) => l.title),
                               issuedAt: enrollment.certificateApprovedAt!,
                             }),
@@ -172,13 +243,17 @@ export function TraineeCoursesPanel({
                   ) : (
                     <>
                       <p className="text-[12px] text-ink-3">
-                        {complete ? "All done — approve to let them download it." : "Unlocks once every lesson is done."}
+                        {!complete
+                          ? "Unlocks once every lesson is done."
+                          : score.graded && !score.allMarked
+                            ? "Lessons done — mark everything to unlock it."
+                            : "All done — approve to let them download it."}
                       </p>
                       <Button
                         size="sm"
                         variant="primary"
                         className="ml-auto"
-                        disabled={!complete}
+                        disabled={!complete || (score.graded && !score.allMarked)}
                         onClick={() =>
                           void run(() => setCertificate({ id: enrollment._id, approved: true }), "Certificate approved.")
                         }
@@ -193,6 +268,8 @@ export function TraineeCoursesPanel({
           })
         )}
       </div>
+
+      <GradeDialog item={grading} onClose={() => setGrading(null)} />
 
       <PasscodeConfirmDialog
         open={removing !== null}
@@ -388,5 +465,216 @@ export function TraineeLoginCard({
         }}
       />
     </div>
+  );
+}
+
+type Submission = Omit<Doc<"submissions">, "files"> & {
+  files: { storageId: Id<"_storage">; fileName: string; kind: "image" | "pdf"; url: string | null }[];
+};
+
+function youtubeId(url: string) {
+  const m =
+    url.match(/youtu\.be\/([\w-]{6,})/) ??
+    url.match(/[?&]v=([\w-]{6,})/) ??
+    url.match(/youtube\.com\/(?:shorts|embed|live)\/([\w-]{6,})/);
+  return m?.[1] ?? null;
+}
+
+/** A trainee's hand-in, and the marks and feedback for it. */
+function GradeDialog({
+  item,
+  onClose,
+}: {
+  item: { assignment: Doc<"assignments">; submission: Submission } | null;
+  onClose: () => void;
+}) {
+  const toast = useToast();
+  const { fmtSaleTime } = useSettings();
+  const grade = useAuthedMutation(api.courses.gradeSubmission);
+  const [marks, setMarks] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!item) return;
+    setMarks(item.submission.marks !== undefined ? String(item.submission.marks) : "");
+    setFeedback(item.submission.feedback ?? "");
+  }, [item]);
+
+  const max = item?.assignment.maxMarks ?? 0;
+  const value = Number(marks);
+  const valid = marks.trim() !== "" && Number.isFinite(value) && value >= 0 && value <= max;
+  const sub = item?.submission;
+  const video = sub?.videoUrl ? youtubeId(sub.videoUrl) : null;
+
+  async function save(clear = false) {
+    if (!item) return;
+    setSaving(true);
+    try {
+      await grade({ id: item.submission._id, marks: clear ? undefined : value, feedback });
+      toast.ok(clear ? "Marks cleared." : "Marked.");
+      onClose();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      guardChanges
+      open={item !== null}
+      onClose={onClose}
+      icon={<ClipboardList size={19} />}
+      title={item?.assignment.title ?? "Assignment"}
+      subtitle={sub ? `Handed in ${fmtSaleTime(sub.submittedAt)}` : undefined}
+      width="sm:max-w-2xl"
+    >
+      {item && sub && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (valid) void save();
+          }}
+        >
+          <div className="flex flex-col gap-4 px-6 py-6">
+            {video ? (
+              <iframe
+                className="aspect-video w-full rounded-xl border border-line"
+                src={`https://www.youtube-nocookie.com/embed/${video}?rel=0`}
+                title="Trainee's video"
+                allowFullScreen
+              />
+            ) : sub.videoUrl ? (
+              <a href={sub.videoUrl} target="_blank" rel="noreferrer noopener" className="text-[13.5px] font-semibold text-accent hover:underline">
+                Open their video
+              </a>
+            ) : null}
+            {sub.note && (
+              <p className="rounded-xl border border-line bg-page px-4 py-3 text-[13.5px] leading-6 whitespace-pre-wrap text-ink-2">
+                {sub.note}
+              </p>
+            )}
+            {sub.files.length > 0 && (
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                {sub.files.map((f) =>
+                  f.kind === "image" && f.url ? (
+                    <a key={f.storageId} href={f.url} target="_blank" rel="noreferrer noopener" className="overflow-hidden rounded-xl border border-line">
+                      <img src={f.url} alt={f.fileName} className="aspect-square w-full object-cover" />
+                    </a>
+                  ) : (
+                    <a
+                      key={f.storageId}
+                      href={f.url ?? undefined}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border border-line bg-page p-2 text-center"
+                    >
+                      <FileText size={20} className="text-critical-ink" />
+                      <span className="line-clamp-2 text-[11px] text-ink-2">{f.fileName}</span>
+                    </a>
+                  ),
+                )}
+              </div>
+            )}
+
+            <div className="grid gap-4 border-t border-line pt-4 sm:grid-cols-[10rem_1fr]">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[12.5px] font-semibold text-ink-2">Marks (out of {max})</span>
+                <Input
+                  type="number"
+                  min={0}
+                  max={max}
+                  step="any"
+                  value={marks}
+                  onChange={(e) => setMarks(e.target.value)}
+                  className="tabular-nums"
+                  autoFocus
+                />
+                {valid && <span className="text-[12px] font-semibold text-good-ink">Grade {gradeFor((value / max) * 100)}</span>}
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[12.5px] font-semibold text-ink-2">Feedback</span>
+                <Textarea rows={3} value={feedback} onChange={(e) => setFeedback(e.target.value)} placeholder="Shown to the trainee with their grade." />
+              </label>
+            </div>
+          </div>
+          <ModalFooter>
+            {sub.marks !== undefined && (
+              <Button type="button" variant="ghost" className="mr-auto" disabled={saving} onClick={() => void save(true)}>
+                Clear marks
+              </Button>
+            )}
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" disabled={!valid || saving}>
+              {saving ? "Saving…" : "Save marks"}
+            </Button>
+          </ModalFooter>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+/** The final exam or practical, marked outside the app: marks out of a total. */
+function FinalExamRow({
+  marks,
+  max,
+  onSave,
+}: {
+  marks?: number;
+  max?: number;
+  onSave: (marks: number | undefined, max: number | undefined) => Promise<void> | void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [m, setM] = useState("");
+  const [t, setT] = useState("");
+  useEffect(() => {
+    setM(marks !== undefined ? String(marks) : "");
+    setT(max !== undefined ? String(max) : "");
+  }, [marks, max, editing]);
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-3 border-t border-line px-4 py-2.5">
+        <Award size={15} className="shrink-0 text-ink-3" />
+        <span className="min-w-0 flex-1 text-[13px] font-medium text-ink">Final exam / practical</span>
+        {max ? (
+          <button onClick={() => setEditing(true)} className="rounded-lg px-2 py-1 text-[12px] font-bold tabular-nums text-ink-2 hover:bg-surface-2">
+            {marks !== undefined ? `${marks}/${max} · ${gradeFor((marks / max) * 100)}` : `—/${max}`}
+          </button>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+            <Plus size={14} /> Add
+          </Button>
+        )}
+      </div>
+    );
+  }
+  const total = t.trim() === "" ? undefined : Number(t);
+  const got = m.trim() === "" ? undefined : Number(m);
+  return (
+    <form
+      className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-2.5"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        await onSave(got, total);
+        setEditing(false);
+      }}
+    >
+      <span className="text-[12.5px] font-medium text-ink">Final exam</span>
+      <Input type="number" min={0} step="any" value={m} onChange={(e) => setM(e.target.value)} placeholder="marks" className="h-9 w-20 tabular-nums" />
+      <span className="text-ink-3">/</span>
+      <Input type="number" min={1} step="any" value={t} onChange={(e) => setT(e.target.value)} placeholder="total" className="h-9 w-20 tabular-nums" />
+      <Button type="submit" size="sm" variant="primary">
+        Save
+      </Button>
+      <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
+        Cancel
+      </Button>
+    </form>
   );
 }

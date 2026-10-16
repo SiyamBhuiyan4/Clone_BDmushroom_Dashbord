@@ -622,9 +622,55 @@ export default defineSchema({
     courseId: v.id("courses"),
     assignedAt: v.number(),
     certificateApprovedAt: v.optional(v.number()),
+    /*
+      A final exam or practical, marked by the shop outside the app. Counts
+      toward the course score alongside the assignments; absent if there was
+      none.
+    */
+    finalMarks: v.optional(v.number()),
+    finalMax: v.optional(v.number()),
   })
     .index("by_trainee", ["traineeId"])
     .index("by_course", ["courseId"]),
+
+  /*
+    Work a course sets — the trainee hands it in from the portal (a YouTube
+    link to their own video, a note, photos or PDFs) and the shop marks it
+    out of `maxMarks`. Trainees only ever see the grade, never the number.
+  */
+  assignments: defineTable({
+    courseId: v.id("courses"),
+    title: v.string(),
+    instructions: v.optional(v.string()),
+    maxMarks: v.number(),
+    dueAt: v.optional(v.number()),
+    order: v.number(),
+    createdAt: v.number(),
+  }).index("by_course", ["courseId"]),
+
+  submissions: defineTable({
+    assignmentId: v.id("assignments"),
+    courseId: v.id("courses"),
+    traineeId: v.id("trainees"),
+    videoUrl: v.optional(v.string()),
+    note: v.optional(v.string()),
+    files: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          fileName: v.string(),
+          kind: v.union(v.literal("image"), v.literal("pdf")),
+        }),
+      ),
+    ),
+    submittedAt: v.number(),
+    /** Set by the shop; the trainee sees only the grade it makes. */
+    marks: v.optional(v.number()),
+    feedback: v.optional(v.string()),
+    gradedAt: v.optional(v.number()),
+  })
+    .index("by_trainee", ["traineeId"])
+    .index("by_assignment", ["assignmentId"]),
 
   /** One lesson a trainee has finished. Its absence means not done yet. */
   lessonProgress: defineTable({

@@ -2,7 +2,16 @@ import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v, ConvexError } from "convex/values";
 import { requireTrainee } from "./traineeAuth";
-import { doneLessonIds, lessonsOf, setLessonDone, withFileUrls } from "./courses";
+import {
+  assignmentsOf,
+  doneLessonIds,
+  lessonsOf,
+  scoreOf,
+  setLessonDone,
+  submissionsIn,
+  withFileUrls,
+} from "./courses";
+import { gradeFor } from "./shared";
 
 /*
   What a signed-in trainee can reach: the courses assigned to them, their
@@ -67,11 +76,27 @@ export const course = query({
     if (!course) throw new ConvexError("That course no longer exists.");
     const done = await doneLessonIds(ctx, trainee._id);
     const lessons = await lessonsOf(ctx, args.courseId);
+    const subs = await submissionsIn(ctx, trainee._id, args.courseId);
+    const score = await scoreOf(ctx, e);
     return {
       name: course.name,
       description: course.description,
       certificateApproved: Boolean(e.certificateApprovedAt),
       lessons: lessons.map((l) => ({ _id: l._id, title: l.title, done: done.has(l._id), hasVideo: Boolean(l.videoUrl) })),
+      // Grades only — the marks behind them stay with the shop.
+      assignments: (await assignmentsOf(ctx, args.courseId)).map((a) => {
+        const sub = subs.get(a._id);
+        return {
+          _id: a._id,
+          title: a.title,
+          dueAt: a.dueAt,
+          status: !sub ? ("todo" as const) : sub.marks === undefined ? ("submitted" as const) : ("graded" as const),
+          grade: sub?.marks !== undefined ? gradeFor((sub.marks / a.maxMarks) * 100) : null,
+        };
+      }),
+      grade: score.grade,
+      gradeSoFar: score.gradeSoFar,
+      graded: score.graded,
     };
   },
 });
@@ -118,6 +143,146 @@ export const certificate = query({
     const e = await enrollmentFor(ctx, trainee._id, args.courseId);
     if (!e.certificateApprovedAt) return null;
     const lessons = await lessonsOf(ctx, args.courseId);
-    return { name: trainee.name, lessonNames: lessons.map((l) => l.title), issuedAt: e.certificateApprovedAt };
+    const course = await ctx.db.get(args.courseId);
+    const score = await scoreOf(ctx, e);
+    return {
+      name: trainee.name,
+      courseName: course?.name,
+      grade: score.grade ?? undefined,
+      lessonNames: lessons.map((l) => l.title),
+      issuedAt: e.certificateApprovedAt,
+    };
+  },
+});
+
+/* ------------------------------------------------------------ assignments */
+
+async function assignmentFor(ctx: QueryCtx, trainee: Doc<"trainees">, assignmentId: Id<"assignments">) {
+  const a = await ctx.db.get(assignmentId);
+  if (!a) throw new ConvexError("That assignment no longer exists.");
+  await enrollmentFor(ctx, trainee._id, a.courseId);
+  return a;
+}
+
+export const assignment = query({
+  args: { token: v.string(), assignmentId: v.id("assignments") },
+  handler: async (ctx, args) => {
+    const trainee = await requireTrainee(ctx, args.token);
+    const a = await assignmentFor(ctx, trainee, args.assignmentId);
+    const sub = (await submissionsIn(ctx, trainee._id, a.courseId)).get(a._id);
+    return {
+      _id: a._id,
+      courseId: a.courseId,
+      title: a.title,
+      instructions: a.instructions,
+      dueAt: a.dueAt,
+      submission: sub
+        ? {
+            videoUrl: sub.videoUrl,
+            note: sub.note,
+            submittedAt: sub.submittedAt,
+            files: await Promise.all(
+              (sub.files ?? []).map(async (f) => ({
+                storageId: f.storageId,
+                fileName: f.fileName,
+                kind: f.kind,
+                url: await ctx.storage.getUrl(f.storageId),
+              })),
+            ),
+            graded: sub.marks !== undefined,
+            grade: sub.marks !== undefined ? gradeFor((sub.marks / a.maxMarks) * 100) : null,
+            feedback: sub.feedback,
+          }
+        : null,
+    };
+  },
+});
+
+/** For a trainee attaching photos or PDFs to their submission. */
+export const generateUploadUrl = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    await requireTrainee(ctx, args.token);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+const MAX_FILES = 10;
+/** How recently a file must have been uploaded to be attached to a hand-in. */
+const FRESH_UPLOAD_MS = 60 * 60 * 1000;
+
+/**
+ * Hands in (or re-hands-in) an assignment. Open until it's marked; after
+ * that it's locked, so the work that was graded is the work on record.
+ */
+export const submit = mutation({
+  args: {
+    token: v.string(),
+    assignmentId: v.id("assignments"),
+    videoUrl: v.optional(v.string()),
+    note: v.optional(v.string()),
+    files: v.array(
+      v.object({
+        storageId: v.id("_storage"),
+        fileName: v.string(),
+        kind: v.union(v.literal("image"), v.literal("pdf")),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const trainee = await requireTrainee(ctx, args.token);
+    const a = await assignmentFor(ctx, trainee, args.assignmentId);
+    const videoUrl = (args.videoUrl ?? "").trim() || undefined;
+    if (videoUrl && !/^(https?:\/\/)?(www\.|m\.)?(youtube\.com|youtu\.be)\//i.test(videoUrl)) {
+      throw new ConvexError("The video link has to be a YouTube link.");
+    }
+    const note = (args.note ?? "").trim() || undefined;
+    if (!videoUrl && !note && args.files.length === 0) {
+      throw new ConvexError("Add your video link, a note or a file before handing it in.");
+    }
+    if (args.files.length > MAX_FILES) throw new ConvexError(`At most ${MAX_FILES} files.`);
+
+    const existing = (await submissionsIn(ctx, trainee._id, a.courseId)).get(a._id);
+    if (existing?.marks !== undefined) throw new ConvexError("This one is already marked — it can't be changed now.");
+
+    /*
+      A file the trainee didn't just upload can't be attached. The ids come
+      from the browser, and without this a trainee could name a file that
+      belongs to someone else — and, by dropping it on the next hand-in, have
+      it deleted.
+    */
+    const already = new Set((existing?.files ?? []).map((f) => f.storageId as string));
+    for (const f of args.files) {
+      if (already.has(f.storageId)) continue;
+      const meta = await ctx.db.system.get(f.storageId);
+      if (!meta || Date.now() - meta._creationTime > FRESH_UPLOAD_MS) {
+        throw new ConvexError("One of the files needs uploading again.");
+      }
+    }
+
+    if (existing) {
+      // Files dropped from the new hand-in are deleted, not left orphaned.
+      const kept = new Set(args.files.map((f) => f.storageId as string));
+      for (const f of existing.files ?? []) {
+        if (!kept.has(f.storageId)) {
+          try {
+            await ctx.storage.delete(f.storageId);
+          } catch {
+            // Already gone.
+          }
+        }
+      }
+      await ctx.db.patch(existing._id, { videoUrl, note, files: args.files, submittedAt: Date.now() });
+    } else {
+      await ctx.db.insert("submissions", {
+        assignmentId: a._id,
+        courseId: a.courseId,
+        traineeId: trainee._id,
+        videoUrl,
+        note,
+        files: args.files,
+        submittedAt: Date.now(),
+      });
+    }
   },
 });
