@@ -74,7 +74,19 @@ export function TraineeDialog({
     setNote(trainee?.note ?? "");
   }, [open, trainee]);
 
-  const valid = name.trim() !== "" && !saving;
+  const valid =
+    Boolean(
+      name.trim() &&
+      phone.trim() &&
+      fatherName.trim() &&
+      motherName.trim() &&
+      dateOfBirth.trim() &&
+      nidNumber.trim() &&
+      nationality.trim() &&
+      religion.trim() &&
+      hometown.trim() &&
+      currentAddress.trim(),
+    ) && !saving;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -137,7 +149,7 @@ export function TraineeDialog({
             </Field>
             <Field label={t("trainees.phone")}>
               {(id) => (
-                <Input id={id} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXX-XXXXXX" />
+                <Input id={id} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXX-XXXXXX" required />
               )}
             </Field>
           </div>
@@ -146,16 +158,16 @@ export function TraineeDialog({
             <SectionLabel>{t("trainees.family")}</SectionLabel>
             <div className="grid gap-5 sm:grid-cols-2">
               <Field label={t("trainees.fatherName")}>
-                {(id) => <Input id={id} value={fatherName} onChange={(e) => setFatherName(e.target.value)} />}
+                {(id) => <Input id={id} value={fatherName} onChange={(e) => setFatherName(e.target.value)} required />}
               </Field>
-              <Field label={t("trainees.fatherPhone")}>
-                {(id) => <Input id={id} value={fatherPhone} onChange={(e) => setFatherPhone(e.target.value)} />}
+              <Field label={t("trainees.fatherPhone")} hint={t("common.optional")}>
+                {(id) => <Input id={id} value={fatherPhone} onChange={(e) => setFatherPhone(e.target.value)} placeholder="01XXX-XXXXXX" />}
               </Field>
               <Field label={t("trainees.motherName")}>
-                {(id) => <Input id={id} value={motherName} onChange={(e) => setMotherName(e.target.value)} />}
+                {(id) => <Input id={id} value={motherName} onChange={(e) => setMotherName(e.target.value)} required />}
               </Field>
-              <Field label={t("trainees.motherPhone")}>
-                {(id) => <Input id={id} value={motherPhone} onChange={(e) => setMotherPhone(e.target.value)} />}
+              <Field label={t("trainees.motherPhone")} hint={t("common.optional")}>
+                {(id) => <Input id={id} value={motherPhone} onChange={(e) => setMotherPhone(e.target.value)} placeholder="01XXX-XXXXXX" />}
               </Field>
             </div>
           </div>
@@ -170,6 +182,7 @@ export function TraineeDialog({
                     type="date"
                     value={dateOfBirth}
                     onChange={(e) => setDateOfBirth(e.target.value)}
+                    required
                   />
                 )}
               </Field>
@@ -188,13 +201,13 @@ export function TraineeDialog({
                 </Select>
               </div>
               <Field label={t("trainees.nationality")}>
-                {(id) => <Input id={id} value={nationality} onChange={(e) => setNationality(e.target.value)} />}
+                {(id) => <Input id={id} value={nationality} onChange={(e) => setNationality(e.target.value)} placeholder="Bangladeshi" required />}
               </Field>
               <Field label={t("trainees.nid")}>
-                {(id) => <Input id={id} value={nidNumber} onChange={(e) => setNidNumber(e.target.value)} />}
+                {(id) => <Input id={id} value={nidNumber} onChange={(e) => setNidNumber(e.target.value)} placeholder="NID or Birth Certificate no." required />}
               </Field>
               <Field label={t("trainees.religion")}>
-                {(id) => <Input id={id} value={religion} onChange={(e) => setReligion(e.target.value)} />}
+                {(id) => <Input id={id} value={religion} onChange={(e) => setReligion(e.target.value)} placeholder="Islam / Hindu / Christian…" required />}
               </Field>
             </div>
           </div>
@@ -203,11 +216,11 @@ export function TraineeDialog({
             <SectionLabel>{t("trainees.addresses")}</SectionLabel>
             <div className="grid gap-5 sm:grid-cols-2">
               <Field label={t("trainees.hometown")}>
-                {(id) => <Input id={id} value={hometown} onChange={(e) => setHometown(e.target.value)} />}
+                {(id) => <Input id={id} value={hometown} onChange={(e) => setHometown(e.target.value)} placeholder="Village, Upazila, District" required />}
               </Field>
               <Field label={t("trainees.currentAddress")}>
                 {(id) => (
-                  <Input id={id} value={currentAddress} onChange={(e) => setCurrentAddress(e.target.value)} />
+                  <Input id={id} value={currentAddress} onChange={(e) => setCurrentAddress(e.target.value)} placeholder="House, Road, Area, District" required />
                 )}
               </Field>
             </div>

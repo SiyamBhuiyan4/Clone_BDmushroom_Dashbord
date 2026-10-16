@@ -74,8 +74,28 @@ function trim(value?: string) {
   return value?.trim() || undefined;
 }
 
-function validate(name: string) {
-  if (!name.trim()) throw new ConvexError("A trainee needs a name.");
+function validateCreate(args: {
+  name: string;
+  phone?: string;
+  fatherName?: string;
+  motherName?: string;
+  dateOfBirth?: number;
+  nationality?: string;
+  nidNumber?: string;
+  religion?: string;
+  hometown?: string;
+  currentAddress?: string;
+}) {
+  if (!args.name?.trim()) throw new ConvexError("Name is required.");
+  if (!args.phone?.trim()) throw new ConvexError("Phone number is required.");
+  if (!args.fatherName?.trim()) throw new ConvexError("Father's name is required.");
+  if (!args.motherName?.trim()) throw new ConvexError("Mother's name is required.");
+  if (!args.dateOfBirth) throw new ConvexError("Date of birth is required.");
+  if (!args.nationality?.trim()) throw new ConvexError("Nationality is required.");
+  if (!args.nidNumber?.trim()) throw new ConvexError("NID or Birth Certificate number is required.");
+  if (!args.religion?.trim()) throw new ConvexError("Religion is required.");
+  if (!args.hometown?.trim()) throw new ConvexError("Permanent address / Hometown is required.");
+  if (!args.currentAddress?.trim()) throw new ConvexError("Current address is required.");
 }
 
 const profileArgs = {
@@ -131,7 +151,7 @@ export const create = mutation({
   args: profileArgs,
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
-    validate(args.name);
+    validateCreate(args);
     return await ctx.db.insert("trainees", { ...profilePatch(args), createdAt: Date.now() });
   },
 });
@@ -142,7 +162,7 @@ export const update = mutation({
     await requireSession(ctx, args.token);
     const row = await ctx.db.get(args.id);
     if (!row) throw new ConvexError("That trainee no longer exists.");
-    validate(args.name);
+    if (!args.name?.trim()) throw new ConvexError("A trainee needs a name.");
     await ctx.db.patch(args.id, profilePatch(args));
   },
 });
