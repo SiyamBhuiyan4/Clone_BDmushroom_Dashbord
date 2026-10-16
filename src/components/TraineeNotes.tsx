@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { KeyRound, Lock, Pencil, Phone, Radio, Trash2, X } from "lucide-react";
+import { Pencil, Radio, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
 import { Button, Modal, ModalFooter, Textarea, cx } from "./ui";
 import { useSettings } from "../lib/settings";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
-import { gradientFor, initialOf } from "../lib/avatar";
 
 /** Note text with its links made clickable. */
 function Linkified({ text }: { text: string }) {
@@ -221,158 +220,98 @@ export function AdminTraineeNoteDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center sm:justify-end p-4 sm:p-8 sm:pr-14 overflow-hidden" onClick={onClose}>
       <div
         className={cx(
-          "absolute inset-0 bg-scrim transition-opacity duration-500",
+          "absolute inset-0 bg-scrim/30 backdrop-blur-[2px] transition-opacity duration-300",
           shown ? "opacity-100" : "opacity-0",
         )}
       />
-      <aside
+      <div
         role="dialog"
         aria-label={`Note for ${trainee.name}`}
         onClick={(e) => e.stopPropagation()}
         className={cx(
-          "absolute top-0 right-0 flex h-[100dvh] w-full max-w-md flex-col border-l border-line bg-surface shadow-[var(--shadow-pop)]",
-          "transition-transform duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
-          shown ? "translate-x-0" : "translate-x-full",
+          "relative z-10 w-full max-w-sm sm:max-w-md mt-16 sm:mt-24",
+          "transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          shown ? "translate-x-0 opacity-100 scale-100" : "translate-x-8 opacity-0 scale-95",
         )}
       >
-        <div className="flex shrink-0 items-center gap-3.5 border-b border-line px-5 py-4">
-          {trainee.photoUrl ? (
-            <img src={trainee.photoUrl} alt="" className="size-11 shrink-0 rounded-2xl object-cover" />
-          ) : (
-            <span
-              className="flex size-11 shrink-0 items-center justify-center rounded-2xl text-[15px] font-bold text-white shadow-[var(--shadow-hero)]"
-              style={{ background: gradientFor(trainee.name) }}
-              aria-hidden
-            >
-              {initialOf(trainee.name)}
-            </span>
-          )}
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate text-[16px] font-bold text-ink">{trainee.name}</h2>
-            <p className="flex items-center gap-1.5 text-[12px] text-ink-3">
-              <Lock size={12} className="text-accent" />
-              <span>Admin Note • Private to office</span>
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-xl p-2 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
-          <div className="mb-5 flex flex-wrap items-center gap-2">
-            {trainee.phone && (
-              <span className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-page px-2.5 py-1 text-[12px] font-medium text-ink-2">
-                <Phone size={12} className="text-ink-3" />
-                {trainee.phone}
-              </span>
-            )}
-            {trainee.username && (
-              <span className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-page px-2.5 py-1 text-[12px] font-medium text-ink-2">
-                <KeyRound size={12} className="text-accent" />
-                {trainee.username}
-              </span>
-            )}
-          </div>
-
-          <div className="pb-8">
-            <SpeechBubble className="ac-pop-in">
-              {editing ? (
-                <div className="flex flex-col gap-3">
-                  <Textarea
-                    rows={6}
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    placeholder="Write a private note about this trainee..."
-                    autoFocus
-                  />
-                  <div className="mt-2 flex items-center justify-between border-t border-line/70 pt-3">
-                    <span className="text-[11.5px] text-ink-3">Kept only for admin</span>
-                    <div className="flex items-center gap-2">
-                      {trainee.note && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setText(trainee.note ?? "");
-                            setEditing(false);
-                          }}
-                          disabled={saving}
-                        >
-                          Cancel
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="primary"
-                        onClick={handleSave}
-                        disabled={saving}
-                      >
-                        {saving ? "Saving…" : "Save note"}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ) : text ? (
-                <div className="flex flex-col">
-                  <p className="whitespace-pre-wrap text-[14.5px] leading-7 text-ink">
-                    <Linkified text={text} />
-                  </p>
-                  <div className="mt-4 flex items-center justify-end gap-2 border-t border-line/70 pt-3">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setEditing(true)}
-                    >
-                      <Pencil size={13} /> Edit
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={handleClear}
-                      className="text-critical hover:bg-critical-soft"
-                    >
-                      <Trash2 size={13} /> Clear
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-6 text-center">
-                  <p className="text-[13.5px] text-ink-3">No note written for this trainee yet.</p>
+        <SpeechBubble className="w-full">
+          {editing ? (
+            <div className="flex flex-col">
+              <Textarea
+                rows={4}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Write note..."
+                autoFocus
+                className="border-none bg-transparent p-0 text-[15px] leading-7 text-ink placeholder:text-ink-3 focus:ring-0 focus:outline-none resize-none"
+              />
+              <div className="mt-3 flex items-center justify-end gap-2 border-t border-line/40 pt-2.5">
+                {trainee.note && (
                   <Button
                     type="button"
                     size="sm"
-                    variant="secondary"
-                    onClick={() => setEditing(true)}
-                    className="mt-3"
+                    variant="ghost"
+                    onClick={() => {
+                      setText(trainee.note ?? "");
+                      setEditing(false);
+                    }}
+                    disabled={saving}
                   >
-                    <Pencil size={13} /> Write note
+                    Cancel
                   </Button>
-                </div>
-              )}
-            </SpeechBubble>
-          </div>
-
-          <div className="rounded-xl border border-line bg-page/70 p-3.5 text-[12px] leading-5 text-ink-3">
-            <p className="font-semibold text-ink-2">🔒 Admin Only Note</p>
-            <p className="mt-0.5">
-              This note is visible only to admins and never shared with the trainee.
-              To announce something to all trainees, use the <strong className="text-ink">Broadcast</strong> button.
-            </p>
-          </div>
-        </div>
-      </aside>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="primary"
+                  onClick={handleSave}
+                  disabled={saving}
+                >
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </div>
+          ) : text ? (
+            <div className="flex flex-col">
+              <p className="min-h-[2.5rem] whitespace-pre-wrap text-[15px] leading-7 text-ink">
+                <Linkified text={text} />
+              </p>
+              <div className="mt-4 flex items-center justify-end gap-4 border-t border-line/40 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  className="inline-flex items-center gap-1.5 text-[13px] font-medium text-ink-2 hover:text-ink transition-colors"
+                >
+                  <Pencil size={13} /> Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="inline-flex items-center gap-1.5 text-[13px] font-medium text-ink-3 hover:text-critical transition-colors"
+                >
+                  <Trash2 size={13} /> Clear
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-4 text-center">
+              <p className="text-[13.5px] text-ink-3">No note written for this trainee.</p>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => setEditing(true)}
+                className="mt-3"
+              >
+                <Pencil size={13} /> Write note
+              </Button>
+            </div>
+          )}
+        </SpeechBubble>
+      </div>
     </div>
   );
 }
