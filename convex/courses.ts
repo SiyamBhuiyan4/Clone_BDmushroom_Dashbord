@@ -341,6 +341,7 @@ export const ofTrainee = query({
   args: { token: v.string(), traineeId: v.id("trainees") },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
+    const trainee = await ctx.db.get(args.traineeId);
     const enrollments = await ctx.db
       .query("enrollments")
       .withIndex("by_trainee", (q) => q.eq("traineeId", args.traineeId))
@@ -378,6 +379,7 @@ export const ofTrainee = query({
           lessons: lessons.map((l) => ({ _id: l._id, title: l.title, completedAt: doneAt.get(l._id) ?? null })),
           assignments,
           score: await scoreOf(ctx, e),
+          traineeCertifiedAt: trainee?.certificateIssuedAt ?? null,
         };
       }),
     );
@@ -482,6 +484,54 @@ export const setCertificate = mutation({
       }
     }
     await ctx.db.patch(args.id, { certificateApprovedAt: args.approved ? Date.now() : undefined });
+  },
+});
+
+/** Approves (or withdraws) the trainee's single official certificate — covering all completed courses. */
+export const setTraineeCertificate = mutation({
+  args: { token: v.string(), traineeId: v.id("trainees"), approved: v.boolean() },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const trainee = await ctx.db.get(args.traineeId);
+    if (!trainee) throw new ConvexError("That trainee no longer exists.");
+
+    const enrollments = await ctx.db
+      .query("enrollments")
+      .withIndex("by_trainee", (q) => q.eq("traineeId", args.traineeId))
+      .collect();
+
+    const now = Date.now();
+
+    if (args.approved) {
+      if (enrollments.length === 0) {
+        throw new ConvexError("No courses assigned to this trainee yet.");
+      }
+      const done = await doneLessonIds(ctx, args.traineeId);
+      let anyComplete = false;
+      for (const e of enrollments) {
+        const lessons = await lessonsOf(ctx, e.courseId);
+        const score = await scoreOf(ctx, e);
+        const isFailed = score.graded && score.grade === "F";
+        const allDone = lessons.length > 0 && lessons.every((l) => done.has(l._id));
+        if (allDone && !isFailed) {
+          anyComplete = true;
+          await ctx.db.patch(e._id, { certificateApprovedAt: now });
+        } else {
+          await ctx.db.patch(e._id, { certificateApprovedAt: undefined });
+        }
+      }
+      if (!anyComplete) {
+        throw new ConvexError(
+          "At least one course must have all lessons completed and a passing grade to approve the certificate.",
+        );
+      }
+      await ctx.db.patch(args.traineeId, { certificateIssuedAt: now });
+    } else {
+      await ctx.db.patch(args.traineeId, { certificateIssuedAt: undefined });
+      for (const e of enrollments) {
+        await ctx.db.patch(e._id, { certificateApprovedAt: undefined });
+      }
+    }
   },
 });
 

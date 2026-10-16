@@ -257,6 +257,8 @@ function ProgressBar({ done, total, light }: { done: number; total: number; ligh
 
 function MyCourses({ token, name }: { token: string; name: string }) {
   const courses = useQuery(api.portal.myCourses, { token });
+  const cert = useQuery(api.portal.certificate, { token });
+  const [downloading, setDownloading] = useState(false);
   const firstName = name.split(/\s+/)[0];
 
   return (
@@ -265,6 +267,40 @@ function MyCourses({ token, name }: { token: string; name: string }) {
         <h1 className="text-[24px] leading-8 font-bold tracking-tight text-ink">Hi {firstName} 👋</h1>
         <p className="mt-1 text-[14px] text-ink-3">Your courses at BD Mushroom.</p>
       </div>
+
+      {cert && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-card)]">
+          <div className="flex items-center gap-3">
+            <span
+              className="flex size-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-[var(--shadow-hero)]"
+              style={{ background: "var(--grad-emerald)" }}
+            >
+              <Award size={22} />
+            </span>
+            <div>
+              <p className="text-[15px] font-bold text-ink">Official Certificate of Completion</p>
+              <p className="text-[12.5px] text-ink-3">
+                Approved by BD Mushroom · Includes your completed courses
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="primary"
+            disabled={downloading}
+            onClick={async () => {
+              setDownloading(true);
+              try {
+                await downloadCertificate(cert);
+              } finally {
+                setDownloading(false);
+              }
+            }}
+            className="shrink-0"
+          >
+            <Download size={14} /> {downloading ? "Preparing…" : "Download Certificate"}
+          </Button>
+        </div>
+      )}
       {courses === undefined ? (
         <div className="ac-skeleton h-40 rounded-card border border-line bg-surface" aria-hidden />
       ) : courses.length === 0 ? (
@@ -483,7 +519,7 @@ function CourseView({ token, courseId }: { token: string; courseId: Id<"courses"
               {isFailed ? (
                 <span className="text-critical font-semibold">Course status: Failed (Grade F) — certificate is not available.</span>
               ) : cert ? (
-                "Approved by BD Mushroom — download it below."
+                "Approved by BD Mushroom — download your official certificate below."
               ) : total === 0 ? (
                 "No lessons have been added to this course yet."
               ) : complete ? (

@@ -46,10 +46,26 @@ export function TraineeCoursesPanel({
   const assign = useAuthedMutation(api.courses.assign);
   const unassign = useAuthedMutation(api.courses.unassign);
   const setProgress = useAuthedMutation(api.courses.setProgress);
-  const setCertificate = useAuthedMutation(api.courses.setCertificate);
+  const setTraineeCertificate = useAuthedMutation(api.courses.setTraineeCertificate);
   const setFinal = useAuthedMutation(api.courses.setFinal);
   const addLesson = useAuthedMutation(api.courses.addLesson);
   const [grading, setGrading] = useState<{ assignment: Doc<"assignments">; submission: Submission } | null>(null);
+
+  const completedCourses = (rows ?? []).filter((r) => {
+    const isFailed = r.score.graded && r.score.grade === "F";
+    const doneCount = r.lessons.filter((l) => l.completedAt).length;
+    return r.lessons.length > 0 && doneCount === r.lessons.length && !isFailed;
+  });
+
+  const isCertified = Boolean(
+    (rows ?? [])[0]?.traineeCertifiedAt ||
+    (rows ?? []).some((r) => r.enrollment.certificateApprovedAt)
+  );
+
+  const certifiedAt =
+    (rows ?? [])[0]?.traineeCertifiedAt ||
+    (rows ?? []).find((r) => r.enrollment.certificateApprovedAt)?.enrollment.certificateApprovedAt ||
+    Date.now();
 
   const [picked, setPicked] = useState("");
   const [removing, setRemoving] = useState<{ id: Id<"enrollments">; name: string } | null>(null);
@@ -103,6 +119,113 @@ export function TraineeCoursesPanel({
           </Button>
         </div>
 
+        {/* Single unified Certificate Card for the trainee */}
+        {rows !== undefined && (
+          <div className="overflow-hidden rounded-2xl border border-line bg-surface p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+                  <Award size={18} />
+                </span>
+                <div>
+                  <p className="text-[14.5px] font-bold text-ink">Certificate of Completion</p>
+                  <p className="text-[12px] text-ink-3">
+                    {completedCourses.length > 0
+                      ? `${completedCourses.length} ${completedCourses.length === 1 ? "course" : "courses"} completed (${completedCourses.reduce((sum, c) => sum + c.lessons.length, 0)} lessons)`
+                      : "No completed courses yet"}
+                  </p>
+                </div>
+              </div>
+              {isCertified ? (
+                <Badge tone="good">
+                  <Award size={11} /> Approved {fmtDateFull(certifiedAt)}
+                </Badge>
+              ) : completedCourses.length > 0 ? (
+                <Badge tone="warning">Ready to approve</Badge>
+              ) : (
+                <Badge tone="neutral">In progress</Badge>
+              )}
+            </div>
+
+            {completedCourses.length > 0 && (
+              <div className="mt-3 rounded-xl border border-line/60 bg-page/60 p-3">
+                <p className="mb-2 text-[10.5px] font-bold uppercase tracking-wider text-ink-3">
+                  Courses & Lessons on this Certificate:
+                </p>
+                <ul className="flex flex-col gap-2.5">
+                  {completedCourses.map((c) => (
+                    <li key={c.course._id} className="text-[12.5px]">
+                      <div className="flex items-center gap-1.5 font-semibold text-ink">
+                        <CheckCircle2 size={13} className="text-good shrink-0" />
+                        <span>{c.course.name}</span>
+                        {c.score.grade && (
+                          <span className="rounded bg-surface-2 px-1.5 py-0.2 text-[11px] font-bold text-good-ink">
+                            Grade {c.score.grade}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 pl-4 text-[11.5px] text-ink-3">
+                        {c.lessons.map((l) => l.title).join("  •  ")}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-line/60 pt-3">
+              {isCertified ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      void downloadCertificate({
+                        name: traineeName,
+                        courses: completedCourses.map((c) => ({
+                          courseName: c.course.name,
+                          grade: c.score.grade ?? undefined,
+                          lessonNames: c.lessons.map((l) => l.title),
+                        })),
+                        issuedAt: certifiedAt,
+                      })
+                    }
+                  >
+                    <Download size={14} /> Download Certificate
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      void run(() => setTraineeCertificate({ traineeId, approved: false }), "Certificate approval withdrawn.")
+                    }
+                  >
+                    Withdraw
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p className="text-[12px] text-ink-3">
+                    {completedCourses.length === 0
+                      ? "Complete all lessons of at least one course to issue certificate."
+                      : "Ready to issue certificate with all completed courses."}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={completedCourses.length === 0}
+                    onClick={() =>
+                      void run(() => setTraineeCertificate({ traineeId, approved: true }), "Certificate approved!")
+                    }
+                  >
+                    <Award size={14} /> Approve Certificate
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {rows === undefined ? (
           <div className="ac-skeleton h-40 rounded-2xl bg-surface-2" aria-hidden />
         ) : rows.length === 0 ? (
@@ -114,7 +237,6 @@ export function TraineeCoursesPanel({
             const done = lessons.filter((l) => l.completedAt).length;
             const isFailed = score.graded && score.grade === "F";
             const complete = lessons.length > 0 && done === lessons.length && !isFailed;
-            const approved = Boolean(enrollment.certificateApprovedAt);
             const currentTitle = newLessonTitle[course._id] ?? "";
             return (
               <div key={enrollment._id} className="overflow-hidden rounded-2xl border border-line bg-page">
@@ -278,66 +400,20 @@ export function TraineeCoursesPanel({
                   </div>
                 )}
 
-                <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
-                  {approved ? (
-                    <>
-                      <Badge tone="good">
-                        <Award size={11} /> Approved {fmtDateFull(enrollment.certificateApprovedAt!)}
-                      </Badge>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="ml-auto"
-                        onClick={() =>
-                          void run(() =>
-                            downloadCertificate({
-                              name: traineeName,
-                              courseName: course.name,
-                              grade: score.grade ?? undefined,
-                              lessonNames: lessons.map((l) => l.title),
-                              issuedAt: enrollment.certificateApprovedAt!,
-                            }),
-                          )
-                        }
-                      >
-                        <Download size={14} /> Certificate
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => void run(() => setCertificate({ id: enrollment._id, approved: false }), "Approval withdrawn.")}
-                      >
-                        Withdraw
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-[12px] text-ink-3">
-                        {isFailed ? (
-                          <span className="font-semibold text-critical">Failed (Grade F) — certificate cannot be approved.</span>
-                        ) : lessons.length === 0 ? (
-                          "Add lessons above and mark them done to unlock certificate."
-                        ) : !complete ? (
-                          `Unlocks once every lesson is done (${done}/${lessons.length} done).`
-                        ) : score.graded && !score.allMarked ? (
-                          "Lessons done — mark final exam/assignments to unlock."
-                        ) : (
-                          "All done — approve to let them download it."
-                        )}
-                      </p>
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        className="ml-auto"
-                        disabled={!complete || isFailed || (score.graded && !score.allMarked)}
-                        onClick={() =>
-                          void run(() => setCertificate({ id: enrollment._id, approved: true }), "Certificate approved.")
-                        }
-                      >
-                        <Award size={14} /> Approve certificate
-                      </Button>
-                    </>
-                  )}
+                <div className="flex items-center justify-between border-t border-line px-4 py-2.5 text-[12px]">
+                  <span className="text-ink-3">
+                    {isFailed ? (
+                      <span className="font-semibold text-critical">Course status: Failed (Grade F) — excluded from certificate.</span>
+                    ) : complete ? (
+                      <span className="font-semibold text-good-ink inline-flex items-center gap-1">
+                        <CheckCircle2 size={13} className="text-good" /> Completed ({done}/{lessons.length} lessons) — included on certificate
+                      </span>
+                    ) : lessons.length === 0 ? (
+                      "No lessons created for this course yet."
+                    ) : (
+                      `In progress (${done}/${lessons.length} lessons done)`
+                    )}
+                  </span>
                 </div>
               </div>
             );

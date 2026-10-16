@@ -9,14 +9,22 @@ import type { ShopInfo } from "./receipt";
   is a layout nobody actually checks.
 */
 
+export type CompletedCourse = {
+  courseName: string;
+  grade?: string;
+  lessonNames: string[];
+};
+
 export type CertificateTrainee = {
   name: string;
+  issuedAt: number;
   /** The course finished, when the certificate is for one. */
   courseName?: string;
   /** The grade earned (A+, A, …), when the course was marked. */
   grade?: string;
-  lessonNames: string[];
-  issuedAt: number;
+  lessonNames?: string[];
+  /** Unified list of completed courses and their completed lessons */
+  courses?: CompletedCourse[];
 };
 
 /** Minimal shape of the PDFKit document this module needs — mirrors receipt.ts's. */
@@ -112,42 +120,99 @@ export function drawCertificate(doc: Doc, trainee: CertificateTrainee, shop: Sho
     .stroke();
   y += 22;
 
-  const hasLessons = trainee.lessonNames.length > 0;
-  doc
-    .font(REGULAR)
-    .fontSize(12)
-    .fillColor(MUTED)
-    .text(
-      trainee.courseName
-        ? (hasLessons
-            ? `has successfully completed the course “${trainee.courseName}” at BD Mushroom, covering:`
-            : `has successfully completed the course “${trainee.courseName}” at BD Mushroom.`)
-        : (hasLessons
-            ? "has successfully completed training at BD Mushroom, covering:"
-            : "has successfully completed training at BD Mushroom."),
-      margin,
-      y,
-      { width: width - margin * 2, align: "center" },
-    );
-  y = doc.y + 10;
+  // Determine completed courses to display on the single certificate
+  const courses: CompletedCourse[] =
+    trainee.courses && trainee.courses.length > 0
+      ? trainee.courses
+      : trainee.courseName
+      ? [
+          {
+            courseName: trainee.courseName,
+            grade: trainee.grade,
+            lessonNames: trainee.lessonNames ?? [],
+          },
+        ]
+      : [];
 
-  if (hasLessons) {
-    const lessonsText = trainee.lessonNames.join("  •  ");
+  if (courses.length > 1) {
     doc
-      .font(BOLD)
-      .fontSize(13)
-      .fillColor(GREEN)
-      .text(lessonsText, margin + 60, y, { width: width - (margin + 60) * 2, align: "center" });
-    y += doc.heightOfString(lessonsText, { width: width - (margin + 60) * 2, align: "center" }) + 18;
-  }
+      .font(REGULAR)
+      .fontSize(11.5)
+      .fillColor(MUTED)
+      .text(
+        "has successfully completed training at BD Mushroom, covering the following courses and lessons:",
+        margin,
+        y,
+        { width: width - margin * 2, align: "center" },
+      );
+    y = doc.y + 12;
 
-  if (trainee.grade) {
+    for (const c of courses) {
+      const headerText = c.grade ? `Course: ${c.courseName}  (Grade: ${c.grade})` : `Course: ${c.courseName}`;
+      doc
+        .font(BOLD)
+        .fontSize(12)
+        .fillColor(INK)
+        .text(headerText, margin + 40, y, { width: width - (margin + 40) * 2, align: "center" });
+      y = doc.y + 3;
+
+      if (c.lessonNames.length > 0) {
+        const lessonsText = c.lessonNames.join("  •  ");
+        doc
+          .font(REGULAR)
+          .fontSize(10.5)
+          .fillColor(GREEN)
+          .text(lessonsText, margin + 50, y, { width: width - (margin + 50) * 2, align: "center" });
+        y = doc.y + 8;
+      } else {
+        y += 4;
+      }
+    }
+  } else if (courses.length === 1) {
+    const single = courses[0];
+    const hasLessons = single.lessonNames.length > 0;
     doc
-      .font(BOLD)
-      .fontSize(16)
-      .fillColor(INK)
-      .text(`Grade: ${trainee.grade}`, margin, y, { width: width - margin * 2, align: "center" });
-    y = doc.y + 16;
+      .font(REGULAR)
+      .fontSize(12)
+      .fillColor(MUTED)
+      .text(
+        hasLessons
+          ? `has successfully completed the course “${single.courseName}” at BD Mushroom, covering:`
+          : `has successfully completed the course “${single.courseName}” at BD Mushroom.`,
+        margin,
+        y,
+        { width: width - margin * 2, align: "center" },
+      );
+    y = doc.y + 10;
+
+    if (hasLessons) {
+      const lessonsText = single.lessonNames.join("  •  ");
+      doc
+        .font(BOLD)
+        .fontSize(13)
+        .fillColor(GREEN)
+        .text(lessonsText, margin + 60, y, { width: width - (margin + 60) * 2, align: "center" });
+      y += doc.heightOfString(lessonsText, { width: width - (margin + 60) * 2, align: "center" }) + 14;
+    }
+
+    if (single.grade) {
+      doc
+        .font(BOLD)
+        .fontSize(15)
+        .fillColor(INK)
+        .text(`Grade: ${single.grade}`, margin, y, { width: width - margin * 2, align: "center" });
+      y = doc.y + 14;
+    }
+  } else {
+    doc
+      .font(REGULAR)
+      .fontSize(12)
+      .fillColor(MUTED)
+      .text("has successfully completed training at BD Mushroom.", margin, y, {
+        width: width - margin * 2,
+        align: "center",
+      });
+    y = doc.y + 14;
   }
 
   const footerY = height - margin - 70;

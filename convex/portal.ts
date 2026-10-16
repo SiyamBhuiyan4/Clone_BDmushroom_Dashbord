@@ -58,7 +58,7 @@ export const myCourses = query({
           description: course.description,
           lessonCount: lessons.length,
           doneCount: lessons.filter((l) => done.has(l._id)).length,
-          certificateApproved: Boolean(e.certificateApprovedAt),
+          certificateApproved: Boolean(e.certificateApprovedAt || trainee.certificateIssuedAt),
           assignedAt: e.assignedAt,
         };
       }),
@@ -135,22 +135,53 @@ export const setDone = mutation({
   },
 });
 
-/** What the certificate PDF needs — only once the shop has approved it. */
+/** What the certificate PDF needs — once the shop has approved the trainee's certificate. */
 export const certificate = query({
-  args: { token: v.string(), courseId: v.id("courses") },
+  args: { token: v.string(), courseId: v.optional(v.id("courses")) },
   handler: async (ctx, args) => {
     const trainee = await requireTrainee(ctx, args.token);
-    const e = await enrollmentFor(ctx, trainee._id, args.courseId);
-    if (!e.certificateApprovedAt) return null;
-    const lessons = await lessonsOf(ctx, args.courseId);
-    const course = await ctx.db.get(args.courseId);
-    const score = await scoreOf(ctx, e);
+    const enrollments = await ctx.db
+      .query("enrollments")
+      .withIndex("by_trainee", (q) => q.eq("traineeId", trainee._id))
+      .collect();
+
+    const isApproved = Boolean(
+      trainee.certificateIssuedAt || enrollments.some((e) => e.certificateApprovedAt),
+    );
+    if (!isApproved) return null;
+
+    const done = await doneLessonIds(ctx, trainee._id);
+    const completedCourses: { courseName: string; grade?: string; lessonNames: string[] }[] = [];
+    let latestApprovedAt = trainee.certificateIssuedAt ?? 0;
+
+    for (const e of enrollments) {
+      if (e.certificateApprovedAt && e.certificateApprovedAt > latestApprovedAt) {
+        latestApprovedAt = e.certificateApprovedAt;
+      }
+      const course = await ctx.db.get(e.courseId);
+      if (!course) continue;
+      const lessons = await lessonsOf(ctx, e.courseId);
+      const score = await scoreOf(ctx, e);
+      const isFailed = score.graded && score.grade === "F";
+      const completedLessons = lessons.filter((l) => done.has(l._id)).map((l) => l.title);
+      if (!isFailed && completedLessons.length > 0) {
+        completedCourses.push({
+          courseName: course.name,
+          grade: score.grade ?? undefined,
+          lessonNames: completedLessons,
+        });
+      }
+    }
+
+    if (completedCourses.length === 0) return null;
+
     return {
       name: trainee.name,
-      courseName: course?.name,
-      grade: score.grade ?? undefined,
-      lessonNames: lessons.map((l) => l.title),
-      issuedAt: e.certificateApprovedAt,
+      courses: completedCourses,
+      courseName: completedCourses.length === 1 ? completedCourses[0].courseName : undefined,
+      grade: completedCourses.length === 1 ? completedCourses[0].grade : undefined,
+      lessonNames: completedCourses.flatMap((c) => c.lessonNames),
+      issuedAt: latestApprovedAt || Date.now(),
     };
   },
 });
