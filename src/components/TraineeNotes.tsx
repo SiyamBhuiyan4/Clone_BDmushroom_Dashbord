@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { KeyRound, Lock, Pencil, Phone, Radio, StickyNote, Trash2, X } from "lucide-react";
+import { KeyRound, Lock, Pencil, Phone, Radio, Trash2, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Doc, Id } from "../../convex/_generated/dataModel";
+import type { Doc } from "../../convex/_generated/dataModel";
 import { Button, Modal, ModalFooter, Textarea, cx } from "./ui";
 import { useSettings } from "../lib/settings";
 import { errorMessage, useToast } from "../lib/toast";
@@ -378,68 +378,4 @@ export function AdminTraineeNoteDrawer({
 }
 
 
-/** A note shown to this one trainee in their portal — not the shop's private note. */
-export function PortalNoteCard({ traineeId, note }: { traineeId: Id<"trainees">; note?: string }) {
-  const toast = useToast();
-  const save = useAuthedMutation(api.trainees.setPortalNote);
-  const [editing, setEditing] = useState(false);
-  const [text, setText] = useState("");
-  const [saving, setSaving] = useState(false);
 
-  useEffect(() => setEditing(false), [traineeId]);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await save({ id: traineeId, text });
-      toast.ok(text.trim() ? "Saved — they'll see it under Notes." : "Note removed.");
-      setEditing(false);
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="rounded-2xl border border-line bg-page p-4">
-      <div className="flex items-center gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-ink-2">
-          <StickyNote size={16} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[13.5px] font-semibold text-ink">Note for this trainee</p>
-          <p className="text-[12px] text-ink-3">Shown only to them, under Notes in their portal.</p>
-        </div>
-        {!editing && (
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              setText(note ?? "");
-              setEditing(true);
-            }}
-          >
-            <Pencil size={14} /> {note ? "Edit" : "Write"}
-          </Button>
-        )}
-      </div>
-      {editing ? (
-        <form onSubmit={submit} className="mt-3 flex flex-col gap-2">
-          <Textarea rows={5} value={text} onChange={(e) => setText(e.target.value)} autoFocus />
-          <div className="flex justify-end gap-2">
-            <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" variant="primary" disabled={saving}>
-              {saving ? "Saving…" : "Save"}
-            </Button>
-          </div>
-        </form>
-      ) : (
-        note && <p className="mt-3 text-[13px] leading-6 whitespace-pre-wrap text-ink-2">{note}</p>
-      )}
-    </div>
-  );
-}
