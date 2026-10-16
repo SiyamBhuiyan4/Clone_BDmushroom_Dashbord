@@ -18,7 +18,7 @@ import {
   Loader2,
   LogOut,
   PlayCircle,
-  StickyNote,
+  MessageSquare,
   Upload,
   UserRound,
   X,
@@ -962,43 +962,24 @@ function FileChips({ files, onRemove }: { files: PendingFile[]; onRemove?: (id: 
 
 /* ----------------------------------------------------------------- notes */
 
-const NOTES_SEEN_KEY = "ac.traineeNotesSeen";
-
-/** Opens the office's notes; a dot says one changed since they last looked. */
+/**
+ * The office's broadcast note, shown as one speech bubble, read-only. A
+ * trainee's own note is not part of this — it's the same kind of bubble, but
+ * only shown when there is one.
+ */
 function NotesButton({ token }: { token: string }) {
   const notes = useQuery(api.portal.notes, { token });
   const [open, setOpen] = useState(false);
-  const [seen, setSeen] = useState(() => {
-    try {
-      return Number(localStorage.getItem(NOTES_SEEN_KEY) ?? 0);
-    } catch {
-      return 0;
-    }
-  });
-  const latest = Math.max(notes?.general?.updatedAt ?? 0, notes?.personal?.updatedAt ?? 0);
-  const fresh = latest > seen;
-
-  function show() {
-    setOpen(true);
-    setSeen(latest);
-    try {
-      localStorage.setItem(NOTES_SEEN_KEY, String(latest));
-    } catch {
-      // Private mode — the dot just comes back next visit.
-    }
-  }
-
   return (
     <>
       <button
-        onClick={show}
-        className="relative inline-flex h-9 items-center gap-1.5 rounded-xl border border-line-strong bg-page px-3 text-[13px] font-semibold text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+        onClick={() => setOpen(true)}
+        className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-line-strong bg-page px-3 text-[13px] font-semibold text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
       >
-        <StickyNote size={15} className="text-accent" />
-        <span className="hidden sm:inline">Notes</span>
-        {fresh && <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-critical-solid ring-2 ring-surface" aria-label="New note" />}
+        <MessageSquare size={15} className="text-accent" />
+        Note
       </button>
-      <NotesPanel open={open} onClose={() => setOpen(false)} notes={notes} />
+      <NotePanel open={open} onClose={() => setOpen(false)} notes={notes} />
     </>
   );
 }
@@ -1009,10 +990,11 @@ type Notes = {
 };
 
 /**
- * The notes, sliding in from the right. Stays mounted for the slide out, so
- * closing plays the same motion backwards.
+ * Slides in from the right, the same way the customer profile's dashboard
+ * does: it stays mounted for the slide out, and closes on ✕, Esc or a click
+ * outside it.
  */
-function NotesPanel({ open, onClose, notes }: { open: boolean; onClose: () => void; notes: Notes | undefined }) {
+function NotePanel({ open, onClose, notes }: { open: boolean; onClose: () => void; notes: Notes | undefined }) {
   const [mounted, setMounted] = useState(open);
   const [shown, setShown] = useState(false);
   useEffect(() => {
@@ -1028,7 +1010,7 @@ function NotesPanel({ open, onClose, notes }: { open: boolean; onClose: () => vo
       };
     }
     setShown(false);
-    const timer = window.setTimeout(() => setMounted(false), 520);
+    const timer = window.setTimeout(() => setMounted(false), 800);
     return () => window.clearTimeout(timer);
   }, [open]);
   useEffect(() => {
@@ -1039,61 +1021,49 @@ function NotesPanel({ open, onClose, notes }: { open: boolean; onClose: () => vo
   }, [open, onClose]);
 
   if (!mounted) return null;
-  const empty = notes && !notes.general && !notes.personal;
-  const fmt = (ts: number) => new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  // The broadcast note is the only one a trainee reads here.
+  const text = notes?.general?.text ?? "";
+  const date = notes?.general ? new Date(notes.general.updatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden">
-      <div
-        onClick={onClose}
-        className={cx(
-          "absolute inset-0 bg-scrim transition-opacity duration-500",
-          shown ? "opacity-100" : "opacity-0",
-        )}
-      />
+    <div className="fixed inset-0 z-50" onClick={onClose}>
+      <div className={cx("absolute inset-0 bg-scrim transition-opacity duration-700", shown ? "opacity-100" : "opacity-0")} />
       <aside
         role="dialog"
-        aria-label="Notes"
+        aria-label="Note"
+        onClick={(e) => e.stopPropagation()}
         className={cx(
           "absolute top-0 right-0 flex h-[100dvh] w-full max-w-md flex-col border-l border-line bg-surface shadow-[var(--shadow-pop)]",
-          "transition-[translate] duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
+          "transition-transform duration-700 ease-[cubic-bezier(0.4,0,0.2,1)]",
           shown ? "translate-x-0" : "translate-x-full",
         )}
       >
-        <div className="relative shrink-0 overflow-hidden border-b border-line">
-          <div
-            className="pointer-events-none absolute -top-24 -right-16 size-56 rounded-full opacity-[0.13] blur-3xl"
-            style={{ background: "var(--grad-violet)" }}
-            aria-hidden
-          />
-          <div className="relative flex items-center gap-3 px-5 py-4">
-            <span
-              className="flex size-10 shrink-0 items-center justify-center rounded-2xl text-white shadow-[var(--shadow-hero)]"
-              style={{ background: "var(--grad-violet)" }}
-            >
-              <StickyNote size={18} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <h2 className="text-[17px] leading-6 font-bold tracking-tight text-ink">Notes</h2>
-              <p className="text-[12.5px] text-ink-3">From BD Mushroom</p>
-            </div>
-            <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 text-ink-3 hover:bg-surface-2 hover:text-ink">
-              <X size={18} />
-            </button>
+        <div className="flex shrink-0 items-center gap-3 border-b border-line px-5 py-4">
+          <span className="flex size-9 items-center justify-center rounded-xl bg-accent-soft text-accent">
+            <MessageSquare size={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[15px] font-bold text-ink">Note</p>
+            <p className="text-[12px] text-ink-3">From BD Mushroom</p>
           </div>
+          <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 text-ink-3 hover:bg-surface-2 hover:text-ink">
+            <X size={18} />
+          </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
           {!notes ? (
-            <div className="ac-skeleton h-32 rounded-2xl bg-surface-2" aria-hidden />
-          ) : empty ? (
-            <p className="py-10 text-center text-[13.5px] text-ink-3">No notes from the office right now.</p>
-          ) : (
-            <div className="flex flex-col gap-4">
-              {notes.personal && (
-                <NoteCard title="For you" date={fmt(notes.personal.updatedAt)} text={notes.personal.text} highlight />
-              )}
-              {notes.general && <NoteCard title="For everyone" date={fmt(notes.general.updatedAt)} text={notes.general.text} />}
+            <div className="ac-skeleton h-24 rounded-2xl bg-surface-2" aria-hidden />
+          ) : text ? (
+            <div className="ac-pop-in relative rounded-2xl border border-accent/40 bg-accent-soft/50 px-5 py-4 shadow-[var(--shadow-card)]">
+              <p className="whitespace-pre-wrap text-[15px] leading-7 text-ink">
+                <Linkified text={text} />
+              </p>
+              <p className="mt-3 text-right text-[11.5px] text-ink-3">{date}</p>
+              {/* The bubble's tail, pointing back at the header button. */}
+              <span className="absolute -top-2 right-6 size-4 rotate-45 border-t border-l border-accent/40 bg-accent-soft/50" aria-hidden />
             </div>
+          ) : (
+            <p className="py-12 text-center text-[13.5px] text-ink-3">No note right now.</p>
           )}
         </div>
       </aside>
@@ -1101,7 +1071,7 @@ function NotesPanel({ open, onClose, notes }: { open: boolean; onClose: () => vo
   );
 }
 
-/** Note text with its links made clickable — an address or a form link is the usual thing in one. */
+/** Note text with its links made clickable. */
 function Linkified({ text }: { text: string }) {
   const parts = text.split(/(https?:\/\/[^\s]+)/g);
   return (
@@ -1116,19 +1086,5 @@ function Linkified({ text }: { text: string }) {
         ),
       )}
     </>
-  );
-}
-
-function NoteCard({ title, date, text, highlight }: { title: string; date: string; text: string; highlight?: boolean }) {
-  return (
-    <div className={cx("rounded-2xl border p-4", highlight ? "border-accent/50 bg-accent-soft/40" : "border-line bg-page")}>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className={cx("text-[11px] font-bold tracking-[0.08em] uppercase", highlight ? "text-accent" : "text-ink-3")}>{title}</p>
-        <p className="text-[11px] text-ink-3">{date}</p>
-      </div>
-      <p className="text-[14.5px] leading-7 whitespace-pre-wrap text-ink">
-        <Linkified text={text} />
-      </p>
-    </div>
   );
 }
