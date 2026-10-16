@@ -112,27 +112,34 @@ export function drawCertificate(doc: Doc, trainee: CertificateTrainee, shop: Sho
     .stroke();
   y += 22;
 
+  const hasLessons = trainee.lessonNames.length > 0;
   doc
     .font(REGULAR)
     .fontSize(12)
     .fillColor(MUTED)
     .text(
       trainee.courseName
-        ? `has successfully completed the course “${trainee.courseName}” at BD Mushroom, covering:`
-        : "has successfully completed training at BD Mushroom, covering:",
+        ? (hasLessons
+            ? `has successfully completed the course “${trainee.courseName}” at BD Mushroom, covering:`
+            : `has successfully completed the course “${trainee.courseName}” at BD Mushroom.`)
+        : (hasLessons
+            ? "has successfully completed training at BD Mushroom, covering:"
+            : "has successfully completed training at BD Mushroom."),
       margin,
       y,
       { width: width - margin * 2, align: "center" },
     );
   y = doc.y + 10;
 
-  const lessonsText = trainee.lessonNames.join("  •  ");
-  doc
-    .font(BOLD)
-    .fontSize(13)
-    .fillColor(GREEN)
-    .text(lessonsText, margin + 60, y, { width: width - (margin + 60) * 2, align: "center" });
-  y += doc.heightOfString(lessonsText, { width: width - (margin + 60) * 2, align: "center" }) + 18;
+  if (hasLessons) {
+    const lessonsText = trainee.lessonNames.join("  •  ");
+    doc
+      .font(BOLD)
+      .fontSize(13)
+      .fillColor(GREEN)
+      .text(lessonsText, margin + 60, y, { width: width - (margin + 60) * 2, align: "center" });
+    y += doc.heightOfString(lessonsText, { width: width - (margin + 60) * 2, align: "center" }) + 18;
+  }
 
   if (trainee.grade) {
     doc

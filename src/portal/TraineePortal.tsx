@@ -329,6 +329,7 @@ function CourseView({ token, courseId }: { token: string; courseId: Id<"courses"
   const toast = useToast();
   const course = useQuery(api.portal.course, { token, courseId });
   const cert = useQuery(api.portal.certificate, { token, courseId });
+  const setDone = useMutation(api.portal.setDone);
   const [saving, setSaving] = useState(false);
 
   if (course === undefined) {
@@ -336,7 +337,8 @@ function CourseView({ token, courseId }: { token: string; courseId: Id<"courses"
   }
   const done = course.lessons.filter((l) => l.done).length;
   const total = course.lessons.length;
-  const complete = total > 0 && done === total;
+  const isFailed = course.graded && course.grade === "F";
+  const complete = (total === 0 || done === total) && !isFailed;
   const next = course.lessons.find((l) => !l.done);
 
   return (
@@ -350,7 +352,13 @@ function CourseView({ token, courseId }: { token: string; courseId: Id<"courses"
 
       <div
         className="relative overflow-hidden rounded-card p-6 text-white shadow-[var(--shadow-hero)]"
-        style={{ background: complete ? "var(--grad-emerald)" : "var(--grad-violet)" }}
+        style={{
+          background: isFailed
+            ? "linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%)"
+            : complete
+            ? "var(--grad-emerald)"
+            : "var(--grad-violet)",
+        }}
       >
         <div
           className="pointer-events-none absolute -top-16 -right-10 size-48 rounded-full opacity-25 blur-2xl"
@@ -384,28 +392,49 @@ function CourseView({ token, courseId }: { token: string; courseId: Id<"courses"
         )}
       </div>
 
-      <ol className="flex flex-col gap-2">
-        {course.lessons.map((l, i) => (
-          <li key={l._id}>
-            <button
-              onClick={() => go(`/l/${l._id}`)}
-              className="flex w-full items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3.5 text-left transition-colors hover:bg-surface-2"
-            >
-              {l.done ? (
-                <CheckCircle2 size={20} className="shrink-0 text-good" />
-              ) : (
-                <Circle size={20} className="shrink-0 text-ink-3" />
-              )}
-              <span className="w-6 shrink-0 text-[12px] font-bold tabular-nums text-ink-3">{i + 1}</span>
-              <span className={cx("min-w-0 flex-1 truncate text-[14px] font-semibold", l.done ? "text-ink-2" : "text-ink")}>
-                {l.title}
-              </span>
-              {l.hasVideo && <PlayCircle size={16} className="shrink-0 text-ink-3" aria-label="Has a video" />}
-              <ArrowRight size={15} className="shrink-0 text-ink-3" />
-            </button>
-          </li>
-        ))}
-      </ol>
+      {course.lessons.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-line p-6 text-center text-[13px] text-ink-3">
+          No lessons added to this course yet.
+        </div>
+      ) : (
+        <ol className="flex flex-col gap-2">
+          {course.lessons.map((l, i) => (
+            <li key={l._id}>
+              <div
+                onClick={() => go(`/l/${l._id}`)}
+                className="flex w-full items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3.5 text-left transition-colors hover:bg-surface-2 cursor-pointer"
+              >
+                <button
+                  type="button"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    try {
+                      await setDone({ token, lessonId: l._id, done: !l.done });
+                    } catch (err) {
+                      toast.error(errorMessage(err));
+                    }
+                  }}
+                  aria-label={l.done ? "Mark as not done" : "Mark as done"}
+                  title={l.done ? "Click to mark as not done" : "Click to mark as done"}
+                  className="p-1 -m-1 rounded-full hover:bg-surface-3 transition-colors cursor-pointer"
+                >
+                  {l.done ? (
+                    <CheckCircle2 size={20} className="shrink-0 text-good" />
+                  ) : (
+                    <Circle size={20} className="shrink-0 text-ink-3 hover:text-accent" />
+                  )}
+                </button>
+                <span className="w-6 shrink-0 text-[12px] font-bold tabular-nums text-ink-3">{i + 1}</span>
+                <span className={cx("min-w-0 flex-1 truncate text-[14px] font-semibold", l.done ? "text-ink-2 line-through" : "text-ink")}>
+                  {l.title}
+                </span>
+                {l.hasVideo && <PlayCircle size={16} className="shrink-0 text-ink-3" aria-label="Has a video" />}
+                <ArrowRight size={15} className="shrink-0 text-ink-3" />
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
 
       {course.assignments.length > 0 && (
         <div className="flex flex-col gap-2">
@@ -451,15 +480,19 @@ function CourseView({ token, courseId }: { token: string; courseId: Id<"courses"
           <div className="min-w-0 flex-1">
             <p className="text-[14.5px] font-bold text-ink">Certificate</p>
             <p className="mt-0.5 text-[13px] text-ink-3">
-              {cert
-                ? "Approved by BD Mushroom — download it below."
-                : complete
-                  ? "All lessons done! The office will approve your certificate soon."
-                  : "Finish every lesson, then the office approves your certificate."}
+              {isFailed ? (
+                <span className="text-critical font-semibold">Course status: Failed (Grade F) — certificate is not available.</span>
+              ) : cert ? (
+                "Approved by BD Mushroom — download it below."
+              ) : complete ? (
+                "All lessons done! The office will approve your certificate soon."
+              ) : (
+                "Finish every lesson, then the office approves your certificate."
+              )}
             </p>
           </div>
         </div>
-        {cert && (
+        {cert && !isFailed && (
           <Button
             variant="primary"
             className="mt-4 w-full"

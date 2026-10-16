@@ -48,10 +48,12 @@ export function TraineeCoursesPanel({
   const setProgress = useAuthedMutation(api.courses.setProgress);
   const setCertificate = useAuthedMutation(api.courses.setCertificate);
   const setFinal = useAuthedMutation(api.courses.setFinal);
+  const addLesson = useAuthedMutation(api.courses.addLesson);
   const [grading, setGrading] = useState<{ assignment: Doc<"assignments">; submission: Submission } | null>(null);
 
   const [picked, setPicked] = useState("");
   const [removing, setRemoving] = useState<{ id: Id<"enrollments">; name: string } | null>(null);
+  const [newLessonTitle, setNewLessonTitle] = useState<Record<string, string>>({});
   const assigned = new Set((rows ?? []).map((r) => r.course._id as string));
   const available = courses.filter((c) => !assigned.has(c._id));
 
@@ -62,6 +64,15 @@ export function TraineeCoursesPanel({
     } catch (err) {
       toast.error(errorMessage(err));
     }
+  }
+
+  async function handleAddLesson(courseId: Id<"courses">) {
+    const title = (newLessonTitle[courseId] ?? "").trim();
+    if (!title) return;
+    await run(async () => {
+      await addLesson({ courseId, title });
+      setNewLessonTitle((prev) => ({ ...prev, [courseId]: "" }));
+    }, "Lesson added.");
   }
 
   return (
@@ -101,13 +112,21 @@ export function TraineeCoursesPanel({
         ) : (
           rows.map(({ enrollment, course, lessons, assignments, score }) => {
             const done = lessons.filter((l) => l.completedAt).length;
-            const complete = lessons.length > 0 && done === lessons.length;
+            const isFailed = score.graded && score.grade === "F";
+            const complete = (lessons.length === 0 || done === lessons.length) && !isFailed;
             const approved = Boolean(enrollment.certificateApprovedAt);
+            const currentTitle = newLessonTitle[course._id] ?? "";
             return (
               <div key={enrollment._id} className="overflow-hidden rounded-2xl border border-line bg-page">
                 <div
                   className="relative p-4 text-white"
-                  style={{ background: complete ? "var(--grad-emerald)" : "var(--grad-violet)" }}
+                  style={{
+                    background: isFailed
+                      ? "linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%)"
+                      : complete
+                      ? "var(--grad-emerald)"
+                      : "var(--grad-violet)",
+                  }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <p className="flex items-center gap-2 text-[15px] font-bold">
@@ -129,32 +148,82 @@ export function TraineeCoursesPanel({
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/25">
                     <div
                       className="h-full rounded-full bg-white transition-[width] duration-500"
-                      style={{ width: `${lessons.length ? (done / lessons.length) * 100 : 0}%` }}
+                      style={{ width: `${lessons.length ? (done / lessons.length) * 100 : complete ? 100 : 0}%` }}
                     />
                   </div>
                 </div>
 
-                <ul className="flex flex-col divide-y divide-line">
-                  {lessons.map((l) => (
-                    <li key={l._id} className="flex items-center gap-3 px-4 py-2.5">
-                      <button
-                        onClick={() => void run(() => setProgress({ traineeId, lessonId: l._id, done: !l.completedAt }))}
-                        aria-pressed={Boolean(l.completedAt)}
-                        aria-label={`${l.completedAt ? "Untick" : "Tick"} ${l.title}`}
-                        className={cx(
-                          "flex size-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors",
-                          l.completedAt ? "border-good bg-good text-white" : "border-line-strong",
-                        )}
+                {/* Lessons Section with direct checkboxes and quick add */}
+                <div className="border-b border-line bg-surface">
+                  <div className="flex items-center justify-between px-4 pt-3 pb-1.5">
+                    <p className="text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">
+                      Lessons ({done}/{lessons.length}) — Click checkbox to mark done
+                    </p>
+                  </div>
+
+                  {lessons.length === 0 ? (
+                    <div className="px-4 py-3 bg-surface-2/30 text-center">
+                      <p className="text-[12.5px] text-ink-3">No lessons created for this course yet.</p>
+                    </div>
+                  ) : (
+                    <ul className="flex flex-col divide-y divide-line">
+                      {lessons.map((l) => (
+                        <li key={l._id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-2/40 transition-colors">
+                          <button
+                            type="button"
+                            onClick={() => void run(() => setProgress({ traineeId, lessonId: l._id, done: !l.completedAt }))}
+                            aria-pressed={Boolean(l.completedAt)}
+                            aria-label={`${l.completedAt ? "Untick" : "Tick"} ${l.title}`}
+                            className={cx(
+                              "flex size-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors cursor-pointer",
+                              l.completedAt ? "border-good bg-good text-white" : "border-line-strong hover:border-good",
+                            )}
+                            title={l.completedAt ? "Click to mark incomplete" : "Click to mark done"}
+                          >
+                            {l.completedAt && <CheckCircle2 size={12} />}
+                          </button>
+                          <span
+                            onClick={() => void run(() => setProgress({ traineeId, lessonId: l._id, done: !l.completedAt }))}
+                            className={cx(
+                              "min-w-0 flex-1 truncate text-[13px] font-medium cursor-pointer select-none",
+                              l.completedAt ? "text-ink-3 line-through" : "text-ink",
+                            )}
+                            title="Click to toggle status"
+                          >
+                            {l.title}
+                          </span>
+                          {l.completedAt && <span className="shrink-0 text-[11px] text-ink-3">{fmtDateFull(l.completedAt)}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {/* Inline quick-add lesson */}
+                  <div className="p-3 bg-page/40 border-t border-line/60">
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void handleAddLesson(course._id);
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <Input
+                        value={currentTitle}
+                        onChange={(e) => setNewLessonTitle({ ...newLessonTitle, [course._id]: e.target.value })}
+                        placeholder="Add lesson name (e.g. Introduction)..."
+                        className="h-9 text-[13px]"
+                      />
+                      <Button
+                        type="submit"
+                        size="sm"
+                        variant="secondary"
+                        disabled={!currentTitle.trim()}
                       >
-                        {l.completedAt && <CheckCircle2 size={12} />}
-                      </button>
-                      <span className={cx("min-w-0 flex-1 truncate text-[13px] font-medium", l.completedAt ? "text-ink-3" : "text-ink")}>
-                        {l.title}
-                      </span>
-                      {l.completedAt && <span className="shrink-0 text-[11px] text-ink-3">{fmtDateFull(l.completedAt)}</span>}
-                    </li>
-                  ))}
-                </ul>
+                        <Plus size={14} /> Add lesson
+                      </Button>
+                    </form>
+                  </div>
+                </div>
 
                 {assignments.length > 0 && (
                   <div className="border-t border-line">
@@ -202,8 +271,9 @@ export function TraineeCoursesPanel({
                         {score.percent !== null ? ` (${Math.round(score.percent)}%)` : ""}
                       </span>
                     </span>
-                    <span className="text-[13px] font-bold text-ink">
+                    <span className={cx("text-[13px] font-bold", isFailed ? "text-critical" : "text-ink")}>
                       {score.grade ? `Grade ${score.grade}` : score.gradeSoFar ? `So far ${score.gradeSoFar}` : "Not marked yet"}
+                      {isFailed && " (Failed)"}
                     </span>
                   </div>
                 )}
@@ -243,17 +313,21 @@ export function TraineeCoursesPanel({
                   ) : (
                     <>
                       <p className="text-[12px] text-ink-3">
-                        {!complete
-                          ? "Unlocks once every lesson is done."
-                          : score.graded && !score.allMarked
-                            ? "Lessons done — mark everything to unlock it."
-                            : "All done — approve to let them download it."}
+                        {isFailed ? (
+                          <span className="font-semibold text-critical">Failed (Grade F) — certificate cannot be approved.</span>
+                        ) : !complete ? (
+                          `Unlocks once every lesson is done (${done}/${lessons.length} done).`
+                        ) : score.graded && !score.allMarked ? (
+                          "Lessons done — mark final exam/assignments to unlock."
+                        ) : (
+                          "All done — approve to let them download it."
+                        )}
                       </p>
                       <Button
                         size="sm"
                         variant="primary"
                         className="ml-auto"
-                        disabled={!complete || (score.graded && !score.allMarked)}
+                        disabled={!complete || isFailed || (score.graded && !score.allMarked)}
                         onClick={() =>
                           void run(() => setCertificate({ id: enrollment._id, approved: true }), "Certificate approved.")
                         }

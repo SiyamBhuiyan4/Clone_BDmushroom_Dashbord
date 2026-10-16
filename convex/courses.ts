@@ -457,7 +457,7 @@ export const setProgress = mutation({
   },
 });
 
-/** Approves (or withdraws) the certificate — only once every lesson is done. */
+/** Approves (or withdraws) the certificate — only once every lesson is done and trainee has passed. */
 export const setCertificate = mutation({
   args: { token: v.string(), id: v.id("enrollments"), approved: v.boolean() },
   handler: async (ctx, args) => {
@@ -467,12 +467,15 @@ export const setCertificate = mutation({
     if (args.approved) {
       const lessons = await lessonsOf(ctx, e.courseId);
       const done = await doneLessonIds(ctx, e.traineeId);
-      if (lessons.length === 0 || lessons.some((l) => !done.has(l._id))) {
+      if (lessons.length > 0 && lessons.some((l) => !done.has(l._id))) {
         throw new ConvexError("Every lesson has to be done first.");
       }
       const score = await scoreOf(ctx, e);
       if (score.graded && !score.allMarked) {
         throw new ConvexError("Every assignment (and the final exam, if set) has to be marked first.");
+      }
+      if (score.graded && score.grade === "F") {
+        throw new ConvexError("Cannot approve certificate: The trainee has failed the course (Grade F).");
       }
     }
     await ctx.db.patch(args.id, { certificateApprovedAt: args.approved ? Date.now() : undefined });
