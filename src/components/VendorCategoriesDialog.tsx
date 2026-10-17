@@ -22,8 +22,8 @@ import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { useVendorCategories } from "../lib/vendorCategories";
 
-/** How long a row has to be held before it can be dragged. */
-const HOLD_MS = 1600;
+/** How long a row has to be held before it can be dragged (0.3s). */
+const HOLD_MS = 300;
 
 /**
  * Vendor categories and sub-categories management.
@@ -48,20 +48,23 @@ export function VendorCategoriesDialog({
   const reorder = useAuthedMutation(api.vendorCategories.reorder);
 
   /*
-    Press and hold a row to pick it up, then drag it to reorder. The row
-    grows slowly while held, so it's clear something is about to happen;
-    once picked up, rows swap as the pointer passes their middle, and
-    letting go saves the new order. Letting go early, or moving off before
-    it's picked up (scrolling the list, say), does nothing. Pointer events
-    rather than HTML drag-and-drop, so it works the same by touch.
-    A grip handle is also available for instant grab-and-drag.
+    Press and hold a row for 0.3s to pick it up, then drag smoothly to reorder.
+    Visual feedback starts immediately on press; after 300ms the row elevates
+    with a glow and can be moved up or down fluidly with hysteresis deadzones
+    to eliminate jitter. A grip handle is also available for instant dragging.
   */
   const [order, setOrder] = useState<Id<"vendorCategories">[] | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [pressId, setPressId] = useState<string | null>(null);
+  const [subOrders, setSubOrders] = useState<Record<string, Id<"vendorCategories">[]>>({});
+
   const pressRef = useRef<{ id: string; x: number; y: number; timer: number } | null>(null);
   const dragIdRef = useRef<string | null>(null);
   dragIdRef.current = dragId;
+  const orderRef = useRef(order);
+  orderRef.current = order;
+  const categoriesRef = useRef(categories);
+  categoriesRef.current = categories;
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
 
   const rows = order
@@ -70,7 +73,16 @@ export function VendorCategoriesDialog({
         .filter((c): c is Doc<"vendorCategories"> => Boolean(c))
     : categories;
 
-  // Once a row is picked up, a finger moving it must not scroll the page too.
+  const getSubcategories = (parentId: Id<"vendorCategories">) => {
+    const subs = subcategoriesOf(parentId);
+    const customOrder = subOrders[parentId];
+    if (!customOrder) return subs;
+    return customOrder
+      .map((id) => subs.find((s) => s._id === id))
+      .filter((s): s is Doc<"vendorCategories"> => Boolean(s));
+  };
+
+  // Prevent browser scrolling while an item is actively being dragged.
   useEffect(() => {
     const stopScroll = (e: TouchEvent) => {
       if (dragIdRef.current) e.preventDefault();
@@ -86,85 +98,157 @@ export function VendorCategoriesDialog({
   }
 
   function startPress(e: React.PointerEvent<HTMLLIElement>, id: string) {
-    if ((e.target as Element).closest("button, input, form")) return;
+    if ((e.target as Element).closest("button, input, form, [data-nodrag]")) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {}
+
+    cancelPress();
+    setPressId(id);
+    const startX = e.clientX;
+    const startY = e.clientY;
+
     const timer = window.setTimeout(() => {
       pressRef.current = null;
       setPressId(null);
       setDragId(id);
-      setOrder(categories.map((c) => c._id));
-      navigator.vibrate?.(12);
+      setOrder(categoriesRef.current.map((c) => c._id));
+      navigator.vibrate?.([20]);
     }, HOLD_MS);
-    pressRef.current = { id, x: e.clientX, y: e.clientY, timer };
-    setPressId(id);
+
+    pressRef.current = { id, x: startX, y: startY, timer };
+  }
+
+  function handlePointerMoveOnRow(e: React.PointerEvent) {
+    const press = pressRef.current;
+    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 12) {
+      cancelPress();
+    }
   }
 
   function startDrag(e: React.PointerEvent, id: string) {
     e.preventDefault();
     e.stopPropagation();
-    try {
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    } catch {}
     cancelPress();
     setDragId(id);
     setOrder(categories.map((c) => c._id));
+    navigator.vibrate?.([15]);
   }
 
-  /** The order with the dragged row placed where the pointer is now. */
-  function orderAt(clientY: number) {
-    if (!dragId || !order) return null;
-    const others = order.filter((id) => id !== dragId);
-    // How many of the other rows sit above the pointer is where this one goes.
-    const index = others.filter((id) => {
+  /**
+   * Calculates the reordered list using hysteresis deadzones (0.45 and 0.55).
+   * This completely prevents rapid bouncing/jittering when crossing row midpoints.
+   */
+  function orderAt(clientY: number): Id<"vendorCategories">[] | null {
+    const activeOrder = orderRef.current;
+    const activeDragId = dragIdRef.current;
+    if (!activeDragId || !activeOrder) return null;
+
+    const currIdx = activeOrder.indexOf(activeDragId as Id<"vendorCategories">);
+    if (currIdx === -1) return null;
+
+    let targetIdx = currIdx;
+
+    // Moving UP: check items above
+    for (let i = currIdx - 1; i >= 0; i--) {
+      const id = activeOrder[i];
       const rect = rowRefs.current.get(id)?.getBoundingClientRect();
-      return rect ? rect.top + rect.height / 2 < clientY : false;
-    }).length;
-    return [...others.slice(0, index), dragId as Id<"vendorCategories">, ...others.slice(index)];
-  }
-
-  function moveDrag(e: React.PointerEvent) {
-    const press = pressRef.current;
-    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) cancelPress();
-    const next = orderAt(e.clientY);
-    if (next && order && next.some((id, i) => id !== order[i])) setOrder(next);
-  }
-
-  async function endDrag(e: React.PointerEvent) {
-    cancelPress();
-    const final = orderAt(e.clientY) ?? order;
-    if (!dragId || !final) return;
-    setDragId(null);
-    setOrder(final);
-    const changed = final.some((id, i) => id !== categories[i]?._id);
-    try {
-      if (changed) await reorder({ ids: final });
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setOrder(null);
+      if (!rect) break;
+      const threshold = rect.top + rect.height * 0.45;
+      if (clientY < threshold) {
+        targetIdx = i;
+      } else {
+        break;
+      }
     }
+
+    // Moving DOWN: check items below
+    for (let i = currIdx + 1; i < activeOrder.length; i++) {
+      const id = activeOrder[i];
+      const rect = rowRefs.current.get(id)?.getBoundingClientRect();
+      if (!rect) break;
+      const threshold = rect.top + rect.height * 0.55;
+      if (clientY > threshold) {
+        targetIdx = i;
+      } else {
+        break;
+      }
+    }
+
+    if (targetIdx === currIdx) return activeOrder;
+
+    const next = [...activeOrder];
+    const [item] = next.splice(currIdx, 1);
+    next.splice(targetIdx, 0, item);
+    return next;
   }
+
+  // Global window listeners while actively dragging for 100% fluid pointer tracking
+  useEffect(() => {
+    if (!dragId) return;
+
+    function handlePointerMove(e: PointerEvent) {
+      const next = orderAt(e.clientY);
+      if (next && orderRef.current && next.some((id, i) => id !== orderRef.current![i])) {
+        navigator.vibrate?.([10]);
+        setOrder(next);
+      }
+    }
+
+    async function handlePointerUp(e: PointerEvent) {
+      cancelPress();
+      const final = orderAt(e.clientY) ?? orderRef.current;
+      const activeId = dragIdRef.current;
+      setDragId(null);
+      if (!activeId || !final) return;
+      setOrder(final);
+      const changed = final.some((id, i) => id !== categoriesRef.current[i]?._id);
+      try {
+        if (changed) await reorder({ ids: final });
+      } catch (err) {
+        toast.error(errorMessage(err));
+      } finally {
+        setOrder(null);
+      }
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, [dragId]);
 
   async function moveSubCategory(
     subId: Id<"vendorCategories">,
     direction: "up" | "down",
     parentId: Id<"vendorCategories">,
   ) {
-    const currentSubs = subcategoriesOf(parentId);
+    const currentSubs = getSubcategories(parentId);
     const idx = currentSubs.findIndex((s) => s._id === subId);
     if (idx < 0) return;
     const targetIdx = direction === "up" ? idx - 1 : idx + 1;
     if (targetIdx < 0 || targetIdx >= currentSubs.length) return;
+
     const newSubs = [...currentSubs];
     const [removed] = newSubs.splice(idx, 1);
     newSubs.splice(targetIdx, 0, removed);
+    const newIds = newSubs.map((s) => s._id);
+
+    setSubOrders((prev) => ({ ...prev, [parentId]: newIds }));
+    navigator.vibrate?.([10]);
+
     try {
-      await reorder({ ids: newSubs.map((s) => s._id) });
+      await reorder({ ids: newIds });
     } catch (err) {
       toast.error(errorMessage(err));
+      setSubOrders((prev) => {
+        const copy = { ...prev };
+        delete copy[parentId];
+        return copy;
+      });
     }
   }
 
@@ -244,7 +328,7 @@ export function VendorCategoriesDialog({
       <div className="flex flex-col gap-4 px-6 py-6 max-h-[75vh] overflow-y-auto">
         <ul className="flex flex-col gap-3">
           {rows.map((c) => {
-            const subcats = subcategoriesOf(c._id);
+            const subcats = getSubcategories(c._id);
             const hasSubcats = subcats.length > 0;
             const isExpanded = expanded[c._id] ?? true;
             const isSubSectionOpen = (hasSubcats && isExpanded) || addingSubFor === c._id;
@@ -256,20 +340,21 @@ export function VendorCategoriesDialog({
                   else rowRefs.current.delete(c._id);
                 }}
                 onPointerDown={(e) => startPress(e, c._id)}
-                onPointerMove={moveDrag}
-                onPointerUp={(e) => void endDrag(e)}
-                onPointerCancel={(e) => void endDrag(e)}
+                onPointerMove={handlePointerMoveOnRow}
+                onPointerUp={cancelPress}
+                onPointerCancel={cancelPress}
                 onContextMenu={(e) => {
                   if (pressId || dragId) e.preventDefault();
                 }}
                 className={cx(
-                  "flex flex-col rounded-2xl border bg-page overflow-hidden select-none [-webkit-touch-callout:none]",
-                  "transition-[scale,box-shadow,border-color]",
+                  "flex flex-col rounded-2xl border bg-page select-none [-webkit-touch-callout:none]",
+                  "transition-[transform,scale,box-shadow,border-color,background-color,opacity] duration-200 ease-out",
                   dragId === c._id
-                    ? "relative z-20 scale-[1.03] cursor-grabbing border-accent shadow-[var(--shadow-pop)] duration-200"
+                    ? "relative z-30 scale-[1.025] cursor-grabbing border-accent shadow-xl shadow-accent/20 ring-2 ring-accent/35 bg-surface"
                     : pressId === c._id
-                      ? "scale-[1.03] border-accent/60 shadow-[var(--shadow-pop)] duration-[1600ms] ease-linear"
+                      ? "relative z-20 scale-[1.018] border-accent/80 shadow-md shadow-accent/15 bg-surface/80 duration-300 ease-out"
                       : "border-line shadow-xs duration-200",
+                  dragId && dragId !== c._id ? "opacity-75" : "opacity-100",
                 )}
               >
                 {/* Main Category Header Row */}
@@ -316,11 +401,8 @@ export function VendorCategoriesDialog({
                         <button
                           type="button"
                           onPointerDown={(e) => startDrag(e, c._id)}
-                          onPointerMove={moveDrag}
-                          onPointerUp={(e) => void endDrag(e)}
-                          onPointerCancel={(e) => void endDrag(e)}
                           aria-label={`Drag to reorder ${label(c)}`}
-                          title="Drag or press and hold to reorder"
+                          title="Drag or hold for 0.3s to reorder"
                           className={cx(
                             "shrink-0 touch-none rounded-lg p-1 text-ink-3/60 hover:text-ink hover:bg-surface-2 transition-colors",
                             dragId === c._id ? "cursor-grabbing text-accent" : "cursor-grab",
@@ -390,7 +472,11 @@ export function VendorCategoriesDialog({
 
                 {/* Sub-categories Container */}
                 {isSubSectionOpen && (
-                  <div className="px-4 py-2.5 flex flex-col gap-1.5 bg-page">
+                  <div
+                    data-nodrag="true"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="px-4 py-2.5 flex flex-col gap-1.5 bg-page"
+                  >
                     {hasSubcats && isExpanded && (
                       <ul className="flex flex-col gap-1 pl-4">
                         {subcats.map((sub, sIdx) => (
