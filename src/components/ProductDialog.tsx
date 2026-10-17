@@ -410,6 +410,8 @@ export function ProductDialog({
         onDeleted={(id) => {
           if (draft.categoryId === id) {
             setDraft((d) => ({ ...d, categoryId: "", subCategoryId: "" }));
+          } else if (draft.subCategoryId === id) {
+            setDraft((d) => ({ ...d, subCategoryId: "" }));
           }
         }}
       />
