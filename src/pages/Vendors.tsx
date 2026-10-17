@@ -9,6 +9,7 @@ import { VendorDetailDialog } from "../components/VendorDetailDialog";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useT } from "../lib/i18n";
 import { ContactAvatar } from "../components/ContactAvatar";
+import { CategoryBreadcrumb } from "../components/CategoryBreadcrumb";
 import { normalisePhone, whatsappUrl } from "../../convex/shared";
 import { useVendorCategories } from "../lib/vendorCategories";
 import { VendorCategoriesDialog } from "../components/VendorCategoriesDialog";
@@ -324,10 +325,10 @@ export function VendorsPage() {
                           {v.name}
                         </p>
                         {categoryOf(v) && (
-                          <Badge tone="accent">
-                            {label(categoryOf(v)!)}
-                            {subCategoryOf(v) ? ` › ${label(subCategoryOf(v)!)}` : ""}
-                          </Badge>
+                          <CategoryBreadcrumb
+                            category={label(categoryOf(v)!)}
+                            subCategory={subCategoryOf(v) ? label(subCategoryOf(v)!) : null}
+                          />
                         )}
                         {v.due > 0 && (
                           <Badge tone="critical">

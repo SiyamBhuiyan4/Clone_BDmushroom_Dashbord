@@ -28,6 +28,7 @@ import { useToast } from "../lib/toast";
 import { useAuthedQuery, useAuthedMutation } from "../lib/session";
 import { useProductCategories } from "../lib/productCategories";
 import { ProductCategoriesDialog } from "../components/ProductCategoriesDialog";
+import { CategoryBreadcrumb } from "../components/CategoryBreadcrumb";
 
 type ProductRow = Doc<"products"> & { photoUrl: string | null };
 
@@ -305,6 +306,8 @@ export function ProductsPage() {
           if (category === id) {
             setCategory("");
             setSubCategory("");
+          } else if (subCategory === id) {
+            setSubCategory("");
           }
         }}
       />
@@ -412,16 +415,11 @@ function ProductCard({
           </div>
         )}
 
-        {/* Floating Top Badges (Category, Stock, Archived) */}
+        {/* Floating Top Badges (Stock, Archived) */}
         <div className="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-1.5 max-w-[calc(100%-8.5rem)]">
           {product.archived && (
             <span className="inline-flex items-center rounded-lg bg-surface/90 px-2.5 py-1 text-[11px] font-bold text-ink-2 shadow-[var(--shadow-sm)] backdrop-blur-md border border-line/60">
               Archived
-            </span>
-          )}
-          {product.category && (
-            <span className="inline-flex items-center rounded-lg bg-surface/90 px-2.5 py-1 text-[11px] font-bold text-accent shadow-[var(--shadow-sm)] backdrop-blur-md border border-accent/25">
-              {product.category}{product.subCategory ? ` › ${product.subCategory}` : ""}
             </span>
           )}
           {out ? (
@@ -459,6 +457,12 @@ function ProductCard({
 
       {/* -------------------- Card Content Body -------------------- */}
       <div className="flex flex-1 flex-col p-5">
+        <CategoryBreadcrumb
+          category={product.category}
+          subCategory={product.subCategory}
+          className="mb-2"
+        />
+
         {/* Title */}
         <div className="flex items-start justify-between gap-2">
           <button
