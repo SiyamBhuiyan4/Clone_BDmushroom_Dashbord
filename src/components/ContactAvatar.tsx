@@ -43,18 +43,18 @@ export function ContactAvatar({
         className,
       )}
     >
-      {/* Outer ambient glow halo (pulsing and blooming on hover) */}
-      {!showPhoto && (
-        <span
-          className={cx(
-            "pointer-events-none absolute -inset-1 rounded-full opacity-65 blur-md transition-all duration-500",
-            "group-hover:opacity-100 group-hover:blur-lg group-hover/avatar:opacity-100 group-hover/avatar:blur-lg",
-            animated && "ac-avatar-glow",
-          )}
-          style={{ background: theme.glow }}
-          aria-hidden
-        />
-      )}
+      {/* Outer ambient color glow halo — radiates around both initials and uploaded photos */}
+      <span
+        className={cx(
+          "pointer-events-none absolute -inset-1 rounded-full transition-all duration-500",
+          showPhoto
+            ? "opacity-75 blur-md group-hover:opacity-100 group-hover:blur-lg group-hover/avatar:opacity-100 group-hover/avatar:blur-lg"
+            : "opacity-65 blur-md group-hover:opacity-100 group-hover:blur-lg group-hover/avatar:opacity-100 group-hover/avatar:blur-lg",
+          animated && "ac-avatar-glow",
+        )}
+        style={{ background: theme.glow }}
+        aria-hidden
+      />
 
       {/* Main avatar surface */}
       <div
@@ -64,21 +64,36 @@ export function ContactAvatar({
           roundedClass,
           !showPhoto && "ring-1 ring-inset ring-white/35 dark:ring-white/20 shadow-[0_2px_12px_rgba(0,0,0,0.18)]",
           !showPhoto && animated && "ac-avatar-gradient-shift",
-          showPhoto && "ring-1 ring-line/80 bg-surface-2",
+          showPhoto && "ring-2 ring-white/90 dark:ring-white/50 bg-surface-2",
         )}
-        style={!showPhoto ? { background: theme.gradient } : undefined}
+        style={{
+          background: !showPhoto ? theme.gradient : undefined,
+          boxShadow: showPhoto
+            ? `0 0 16px 2px ${theme.glow}, 0 0 0 2px ${theme.ring}, 0 2px 10px rgba(0,0,0,0.2)`
+            : undefined,
+        }}
         aria-hidden
       >
         {showPhoto ? (
-          <img
-            src={photoUrl!}
-            alt={name}
-            onError={() => setImgFailed(true)}
-            className={cx(
-              "size-full object-cover transition-transform duration-300 group-hover:scale-105",
-              roundedClass,
-            )}
-          />
+          <>
+            <img
+              src={photoUrl!}
+              alt={name}
+              onError={() => setImgFailed(true)}
+              className={cx(
+                "size-full object-cover transition-transform duration-300 group-hover:scale-105",
+                roundedClass,
+              )}
+            />
+            {/* Subtle inner glass rim to keep the edge crisp */}
+            <span
+              className={cx(
+                "pointer-events-none absolute inset-0 ring-1 ring-inset ring-white/30 dark:ring-white/20",
+                roundedClass,
+              )}
+              aria-hidden
+            />
+          </>
         ) : (
           <>
             {/* Top glossy specular reflection */}

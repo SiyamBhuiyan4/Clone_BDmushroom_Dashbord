@@ -9,6 +9,7 @@ import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation } from "../lib/session";
 import { normalisePhone } from "../../convex/shared";
 import { uploadFile, useFileDrop, useUploadProgress } from "../lib/upload";
+import { avatarThemeFor } from "../lib/avatar";
 
 /** What the dialog needs to edit someone — the list query's shape, not the row's. */
 export type EditableCustomer = {
@@ -186,23 +187,36 @@ export function CustomerDialog({
       <form onSubmit={submit}>
         <div className="flex flex-col gap-5 px-6 py-6">
           <div className="flex items-center gap-4">
-            <div
-              {...dropProps}
-              className={cx(
-                "relative flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-page transition-colors",
-                dragOver ? "border-accent ring-2 ring-accent" : "border-line-strong",
+            <div className="relative shrink-0 flex items-center justify-center">
+              {photoPreview && (
+                <span
+                  className="pointer-events-none absolute -inset-1 rounded-full opacity-75 blur-md ac-avatar-glow"
+                  style={{ background: avatarThemeFor(name || "Customer").glow }}
+                  aria-hidden
+                />
               )}
-            >
-              {photoPreview ? (
-                <img src={photoPreview} alt="" className="size-full object-cover" />
-              ) : (
-                <Camera size={22} className="text-ink-3" aria-hidden />
-              )}
-              {photoBusy && (
-                <div className="absolute inset-0 flex items-center justify-center bg-page/70">
-                  <div className="ac-skeleton size-5 rounded-full" aria-hidden />
-                </div>
-              )}
+              <div
+                {...dropProps}
+                className={cx(
+                  "relative z-10 flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-page transition-all",
+                  dragOver ? "border-accent ring-2 ring-accent" : "border-line-strong",
+                  photoPreview && "ring-2 ring-white/90 dark:ring-white/50",
+                )}
+                style={photoPreview ? {
+                  boxShadow: `0 0 18px 2px ${avatarThemeFor(name || "Customer").glow}, 0 0 0 2px ${avatarThemeFor(name || "Customer").ring}`,
+                } : undefined}
+              >
+                {photoPreview ? (
+                  <img src={photoPreview} alt="" className="size-full object-cover rounded-full" />
+                ) : (
+                  <Camera size={22} className="text-ink-3" aria-hidden />
+                )}
+                {photoBusy && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-page/70 rounded-full">
+                    <div className="ac-skeleton size-5 rounded-full" aria-hidden />
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex flex-col gap-2">
               <input
