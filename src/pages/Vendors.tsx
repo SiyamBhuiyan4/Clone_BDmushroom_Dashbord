@@ -31,19 +31,28 @@ export function VendorsPage() {
   const removeVendor = useAuthedMutation(api.vendors.remove);
 
   const [search, setSearch] = useState("");
-  const { categories, label, categoryOf } = useVendorCategories();
+  const { categories, allCategories, label, categoryOf, subCategoryOf, subcategoriesOf } = useVendorCategories();
   /** A category id, "" for all, or "none" for vendors filed under nothing. */
   const [category, setCategory] = useState("");
+  const [subCategory, setSubCategory] = useState("");
   const [managing, setManaging] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<EditableVendor | null>(null);
   const [deleting, setDeleting] = useState<{ id: Id<"vendors">; name: string } | null>(null);
   const [viewing, setViewing] = useState<Id<"vendors"> | null>(null);
 
+  const activeCategoryObj = categories.find((c) => c._id === category);
+  const availableSubcategories = activeCategoryObj ? subcategoriesOf(activeCategoryObj._id) : [];
+
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return (vendors ?? []).filter((v) => {
-      if (category === "none" ? categoryOf(v) !== null : category && categoryOf(v)?._id !== category) return false;
+      if (category === "none") {
+        if (categoryOf(v) !== null) return false;
+      } else if (category) {
+        if (categoryOf(v)?._id !== category) return false;
+        if (subCategory && v.subCategoryId !== subCategory) return false;
+      }
       if (!term) return true;
       const digits = normalisePhone(term);
       return (
@@ -52,9 +61,9 @@ export function VendorsPage() {
       );
     });
     // `categoryOf` reads `categories`, so a change to the list refilters.
-  }, [vendors, search, category, categories]);
+  }, [vendors, search, category, subCategory, categories, allCategories]);
 
-  const pager = usePagination(rows, `${search}|${category}`, 25);
+  const pager = usePagination(rows, `${search}|${category}|${subCategory}`, 25);
 
   return (
     <div className="flex flex-col gap-6">
@@ -89,60 +98,105 @@ export function VendorsPage() {
       </div>
 
       {/* Category tabs — a short list, so a row of pills beats a dropdown. */}
-      <div
-        className="flex flex-wrap items-center gap-1.5 rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow-sm)]"
-        role="group"
-        aria-label={t("vendors.category")}
-      >
-        <button
-          onClick={() => setCategory("")}
-          aria-pressed={category === ""}
-          style={category === "" ? { background: "var(--grad-violet)" } : undefined}
-          className={cx(
-            "h-8 rounded-lg px-3.5 text-[12.5px] font-bold tracking-wide transition-all",
-            category === "" ? "text-white" : "text-ink-3 hover:text-ink",
-          )}
+      <div className="flex flex-col gap-2">
+        <div
+          className="flex flex-wrap items-center gap-1.5 rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow-sm)]"
+          role="group"
+          aria-label={t("vendors.category")}
         >
-          {t("vendors.allCategories")}
-        </button>
-        {categories.map((c) => {
-          const active = category === c._id;
-          return (
-            <button
-              key={c._id}
-              onClick={() => setCategory(c._id)}
-              aria-pressed={active}
-              style={active ? { background: "var(--grad-violet)" } : undefined}
-              className={cx(
-                "h-8 rounded-lg px-3.5 text-[12.5px] font-bold tracking-wide transition-all",
-                active ? "text-white" : "text-ink-3 hover:text-ink",
-              )}
-            >
-              {label(c)}
-            </button>
-          );
-        })}
-        {/* Only offered once something is actually uncategorised. */}
-        {(vendors ?? []).some((v) => categoryOf(v) === null) && (
           <button
-            onClick={() => setCategory("none")}
-            aria-pressed={category === "none"}
-            style={category === "none" ? { background: "var(--grad-violet)" } : undefined}
+            onClick={() => {
+              setCategory("");
+              setSubCategory("");
+            }}
+            aria-pressed={category === ""}
+            style={category === "" ? { background: "var(--grad-violet)" } : undefined}
             className={cx(
               "h-8 rounded-lg px-3.5 text-[12.5px] font-bold tracking-wide transition-all",
-              category === "none" ? "text-white" : "text-ink-3 hover:text-ink",
+              category === "" ? "text-white" : "text-ink-3 hover:text-ink",
             )}
           >
-            {t("vendors.noCategory")}
+            {t("vendors.allCategories")}
           </button>
+          {categories.map((c) => {
+            const active = category === c._id;
+            return (
+              <button
+                key={c._id}
+                onClick={() => {
+                  setCategory(c._id);
+                  setSubCategory("");
+                }}
+                aria-pressed={active}
+                style={active ? { background: "var(--grad-violet)" } : undefined}
+                className={cx(
+                  "h-8 rounded-lg px-3.5 text-[12.5px] font-bold tracking-wide transition-all",
+                  active ? "text-white" : "text-ink-3 hover:text-ink",
+                )}
+              >
+                {label(c)}
+              </button>
+            );
+          })}
+          {/* Only offered once something is actually uncategorised. */}
+          {(vendors ?? []).some((v) => categoryOf(v) === null) && (
+            <button
+              onClick={() => {
+                setCategory("none");
+                setSubCategory("");
+              }}
+              aria-pressed={category === "none"}
+              style={category === "none" ? { background: "var(--grad-violet)" } : undefined}
+              className={cx(
+                "h-8 rounded-lg px-3.5 text-[12.5px] font-bold tracking-wide transition-all",
+                category === "none" ? "text-white" : "text-ink-3 hover:text-ink",
+              )}
+            >
+              {t("vendors.noCategory")}
+            </button>
+          )}
+          <button
+            onClick={() => setManaging(true)}
+            className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-semibold text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+          >
+            <Settings2 size={14} />
+            {t("vendors.manageCategories")}
+          </button>
+        </div>
+
+        {availableSubcategories.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 px-1 py-0.5">
+            <span className="text-[12px] font-medium text-ink-3 mr-1">{t("vendors.subCategory") || "Subcategory"}:</span>
+            <button
+              onClick={() => setSubCategory("")}
+              className={cx(
+                "h-7 rounded-lg px-2.5 text-[11.5px] font-semibold transition-all",
+                subCategory === ""
+                  ? "bg-accent/15 text-accent font-bold"
+                  : "text-ink-3 hover:text-ink hover:bg-surface-2",
+              )}
+            >
+              {t("common.all")}
+            </button>
+            {availableSubcategories.map((sub) => {
+              const active = subCategory === sub._id;
+              return (
+                <button
+                  key={sub._id}
+                  onClick={() => setSubCategory(sub._id)}
+                  className={cx(
+                    "h-7 rounded-lg px-2.5 text-[11.5px] font-semibold transition-all",
+                    active
+                      ? "bg-accent/15 text-accent font-bold shadow-xs"
+                      : "text-ink-3 hover:text-ink hover:bg-surface-2",
+                  )}
+                >
+                  {label(sub)}
+                </button>
+              );
+            })}
+          </div>
         )}
-        <button
-          onClick={() => setManaging(true)}
-          className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-semibold text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
-        >
-          <Settings2 size={14} />
-          {t("vendors.manageCategories")}
-        </button>
       </div>
 
       <Card>
@@ -190,6 +244,7 @@ export function VendorsPage() {
                         {categoryOf(v) && (
                           <Badge tone="accent">
                             {label(categoryOf(v)!)}
+                            {subCategoryOf(v) ? ` › ${label(subCategoryOf(v)!)}` : ""}
                           </Badge>
                         )}
                         {v.due > 0 && (

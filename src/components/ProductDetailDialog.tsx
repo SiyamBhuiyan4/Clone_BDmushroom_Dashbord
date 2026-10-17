@@ -1,8 +1,8 @@
-import { Camera, Layers, Package, Pencil, Plus, Receipt, Trash2, TrendingUp, Wallet } from "lucide-react";
+import { Camera, Layers, Package, Pencil, Receipt, Trash2, TrendingUp, Wallet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Badge, Button, Modal, cx } from "./ui";
+import { Badge, Modal, cx } from "./ui";
 import { BatchDialog, type BatchInput } from "./BatchDialog";
 import { LotRemoveDialog } from "./LotRemoveDialog";
 import { LotDetailDialog } from "./LotDetailDialog";
@@ -135,7 +135,6 @@ export function ProductDetailDialog({
   const { fmt, fmtNum, fmtPercent, fmtDateFull, fmtDateTime } = useSettings();
   const t = useT();
   const data = useAuthedQuery(api.products.detail, productId ? { id: productId } : "skip");
-  const [addingLot, setAddingLot] = useState(false);
   // Lots with nothing left — sold out or taken off — stay out of the way.
   const [showFinished, setShowFinished] = useState(false);
   const [editingLot, setEditingLot] = useState<BatchInput | null>(null);
@@ -144,6 +143,9 @@ export function ProductDetailDialog({
   const [viewingVendor, setViewingVendor] = useState<Id<"vendors"> | null>(null);
 
   const name = data?.product.name ?? "";
+  const categoryLabel = data?.product.category
+    ? `${data.product.category}${data.product.subCategory ? ` › ${data.product.subCategory}` : ""}`
+    : undefined;
 
   return (
     <Modal
@@ -153,7 +155,7 @@ export function ProductDetailDialog({
       iconInteractive={Boolean(data?.product)}
       gradient={name ? gradientFor(name) : undefined}
       title={name || t("detail.title")}
-      subtitle={data?.product.category ?? undefined}
+      subtitle={categoryLabel}
       width="sm:max-w-2xl"
     >
       {!data ? (
@@ -213,10 +215,6 @@ export function ProductDetailDialog({
               <p className="text-[10.5px] font-bold tracking-[0.09em] text-ink-3 uppercase">
                 {t("detail.stockLots")}
               </p>
-              <Button size="sm" variant="secondary" onClick={() => setAddingLot(true)}>
-                <Plus size={15} />
-                {t("detail.addLot")}
-              </Button>
             </div>
             {data.lots.length === 0 ? (
               <p className="text-[13px] text-ink-3">{t("detail.noLots")}</p>
@@ -350,11 +348,6 @@ export function ProductDetailDialog({
           </Section>
         </div>
       )}
-      <BatchDialog
-        open={addingLot}
-        onClose={() => setAddingLot(false)}
-        presetProductId={productId ?? undefined}
-      />
       <BatchDialog
         open={editingLot !== null}
         onClose={() => setEditingLot(null)}

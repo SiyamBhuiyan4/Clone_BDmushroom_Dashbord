@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { Check, Pencil, Plus, Tags, Trash2, X } from "lucide-react";
+import { useState } from "react";
+import { Check, ChevronDown, ChevronRight, Pencil, Plus, Tags, Trash2, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Button, Input, Modal, cx } from "./ui";
+import { Button, Input, Modal } from "./ui";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useT } from "../lib/i18n";
 import { plural } from "../lib/format";
@@ -10,14 +10,8 @@ import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { useVendorCategories } from "../lib/vendorCategories";
 
-/** How long a row has to be held before it can be dragged. */
-const HOLD_MS = 300;
-/** How long rows take to slide out of the way, and the dropped row to settle. */
-const SETTLE_MS = 220;
-
 /**
- * The shop's own list of vendor categories: add one, rename one in place,
- * or delete one (its vendors stay, uncategorised).
+ * Vendor categories and sub-categories management.
  */
 export function VendorCategoriesDialog({
   open,
@@ -31,160 +25,75 @@ export function VendorCategoriesDialog({
 }) {
   const t = useT();
   const toast = useToast();
-  const { categories, label, categoryOf } = useVendorCategories();
+  const { categories, subcategoriesOf, label } = useVendorCategories();
   const vendors = useAuthedQuery(api.vendors.list, {}) ?? [];
   const create = useAuthedMutation(api.vendorCategories.create);
   const rename = useAuthedMutation(api.vendorCategories.rename);
   const remove = useAuthedMutation(api.vendorCategories.remove);
-  const reorder = useAuthedMutation(api.vendorCategories.reorder);
-
-  /*
-    Press and hold a row to pick it up, then drag it to reorder.
-
-    Holding grows the row and turns it green; after HOLD_MS it lifts and
-    follows the pointer exactly, while the rows it passes slide out of its
-    way. Letting go glides it into its slot and saves the new order. Letting
-    go early, or moving off first (a scroll), does nothing. The DOM order
-    never changes mid-drag — rows only move by transform, which is what
-    keeps it smooth — and is committed once the drop has settled.
-  */
-  type Drag = { id: string; from: number; to: number; dy: number; step: number; startY: number };
-  const [order, setOrder] = useState<Id<"vendorCategories">[] | null>(null);
-  const [pressId, setPressId] = useState<string | null>(null);
-  const [drag, setDrag] = useState<Drag | null>(null);
-  const [settling, setSettling] = useState(false);
-  /** One frame with transitions off, while the new order is committed in place. */
-  const [frozen, setFrozen] = useState(false);
-  const pressRef = useRef<{ id: string; x: number; y: number; timer: number } | null>(null);
-  const dragRef = useRef<Drag | null>(null);
-  dragRef.current = drag;
-  const rowRefs = useRef(new Map<string, HTMLLIElement>());
-  const rows = order
-    ? order.map((id) => categories.find((c) => c._id === id)).filter((c): c is Doc<"vendorCategories"> => Boolean(c))
-    : categories;
-
-  // Once a row is picked up, a finger moving it must not scroll the page too.
-  useEffect(() => {
-    const stopScroll = (e: TouchEvent) => {
-      if (dragRef.current) e.preventDefault();
-    };
-    document.addEventListener("touchmove", stopScroll, { passive: false });
-    return () => document.removeEventListener("touchmove", stopScroll);
-  }, []);
-
-  function cancelPress() {
-    if (pressRef.current) window.clearTimeout(pressRef.current.timer);
-    pressRef.current = null;
-    setPressId(null);
-  }
-
-  function startPress(e: React.PointerEvent<HTMLLIElement>, id: string) {
-    // The row's own buttons and the rename field keep working as before.
-    if ((e.target as Element).closest("button, input, form")) return;
-    if (e.pointerType === "mouse" && e.button !== 0) return;
-    if (drag || settling) return;
-    // So the moves keep coming to this row even once the pointer leaves it.
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      // A pointer the browser no longer tracks; the hold still works without it.
-    }
-    const timer = window.setTimeout(() => {
-      const press = pressRef.current;
-      pressRef.current = null;
-      setPressId(null);
-      if (!press) return;
-      const tops = rows.map((r) => rowRefs.current.get(r._id)?.getBoundingClientRect().top ?? 0);
-      const from = rows.findIndex((r) => r._id === id);
-      const height = rowRefs.current.get(id)?.getBoundingClientRect().height ?? 56;
-      // The distance from one row to the next, gap included.
-      const step = tops.length > 1 ? tops[1] - tops[0] : height;
-      setDrag({ id, from, to: from, dy: 0, step, startY: press.y });
-      navigator.vibrate?.(12);
-    }, HOLD_MS);
-    pressRef.current = { id, x: e.clientX, y: e.clientY, timer };
-    setPressId(id);
-  }
-
-  function moveDrag(e: React.PointerEvent) {
-    const press = pressRef.current;
-    // Moving off before it's picked up means this was a scroll, not a hold.
-    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) cancelPress();
-    const d = dragRef.current;
-    if (!d || settling) return;
-    const dy = e.clientY - d.startY;
-    const to = Math.max(0, Math.min(rows.length - 1, Math.round(d.from + dy / d.step)));
-    setDrag({ ...d, dy, to });
-  }
-
-  function endDrag() {
-    cancelPress();
-    const d = dragRef.current;
-    if (!d || settling) return;
-    const ids = rows.map((r) => r._id);
-    const final = [...ids];
-    final.splice(d.from, 1);
-    final.splice(d.to, 0, d.id as Id<"vendorCategories">);
-    // Glide into the slot, then commit the order with nothing animating.
-    setSettling(true);
-    window.setTimeout(() => {
-      setFrozen(true);
-      setOrder(final);
-      setDrag(null);
-      setSettling(false);
-      requestAnimationFrame(() => requestAnimationFrame(() => setFrozen(false)));
-      if (d.to === d.from) {
-        setOrder(null);
-        return;
-      }
-      reorder({ ids: final })
-        .catch((err) => toast.error(errorMessage(err)))
-        .finally(() => setOrder(null));
-    }, SETTLE_MS);
-  }
-
-  /** Where a row sits right now, relative to its place in the list. */
-  function offsetOf(index: number, id: string) {
-    if (!drag) return 0;
-    if (id === drag.id) return settling ? (drag.to - drag.from) * drag.step : drag.dy;
-    if (drag.from < drag.to && index > drag.from && index <= drag.to) return -drag.step;
-    if (drag.to < drag.from && index >= drag.to && index < drag.from) return drag.step;
-    return 0;
-  }
 
   const [newName, setNewName] = useState("");
-  const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [deleting, setDeleting] = useState<Doc<"vendorCategories"> | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    setNewName("");
-    setEditingId(null);
-  }, [open]);
+  // Sub-category state
+  const [addingSubFor, setAddingSubFor] = useState<string | null>(null);
+  const [newSubName, setNewSubName] = useState("");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const countIn = (id: string) => vendors.filter((v) => categoryOf(v)?._id === id).length;
+  const toggleExpand = (id: string) => {
+    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
 
-  async function add(e: React.FormEvent) {
+  const countIn = (categoryId: string) =>
+    vendors.filter((v) => v.categoryId === categoryId || v.subCategoryId === categoryId).length;
+
+  async function addCategory(e: React.FormEvent) {
     e.preventDefault();
-    if (!newName.trim()) return;
-    setAdding(true);
+    const name = newName.trim();
+    if (!name) return;
     try {
-      await create({ name: newName });
-      toast.ok(`Added ${newName.trim()}.`);
+      await create({ name });
       setNewName("");
+      toast.ok("Category added.");
     } catch (err) {
       toast.error(errorMessage(err));
-    } finally {
-      setAdding(false);
+    }
+  }
+
+  async function addSubCategory(parentId: Id<"vendorCategories">) {
+    const name = newSubName.trim();
+    if (!name) return;
+    try {
+      await create({ name, parentId });
+      setNewSubName("");
+      setAddingSubFor(null);
+      setExpanded((prev) => ({ ...prev, [parentId]: true }));
+      toast.ok("Sub-category added.");
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   }
 
   async function saveRename(id: Id<"vendorCategories">) {
+    const name = editName.trim();
+    if (!name) return;
     try {
-      await rename({ id, name: editName });
+      await rename({ id, name });
       setEditingId(null);
+      toast.ok("Category renamed.");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
+  async function confirmDelete(passcode: string) {
+    if (!deleting) return;
+    try {
+      await remove({ id: deleting._id, passcode });
+      onDeleted?.(deleting._id);
+      toast.ok("Category removed.");
+      setDeleting(null);
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -197,153 +106,239 @@ export function VendorCategoriesDialog({
       icon={<Tags size={19} />}
       title={t("vendors.categoriesTitle")}
       subtitle={t("vendors.categoriesSubtitle")}
-      width="sm:max-w-lg"
+      width="sm:max-w-xl"
     >
-      <div className="flex flex-col gap-4 px-6 py-6">
-        <ul className="flex flex-col gap-2">
-          {rows.map((c, index) => {
-            // Back to its own colours while it glides into place, so nothing jumps on commit.
-            const lifted = pressId === c._id || (drag?.id === c._id && !settling);
-            const following = drag?.id === c._id && !settling;
+      <div className="flex flex-col gap-4 px-6 py-6 max-h-[75vh] overflow-y-auto">
+        <ul className="flex flex-col gap-3">
+          {categories.map((c) => {
+            const subcats = subcategoriesOf(c._id);
+            const isExpanded = expanded[c._id] ?? true;
             return (
-            <li
-              key={c._id}
-              ref={(el) => {
-                if (el) rowRefs.current.set(c._id, el);
-                else rowRefs.current.delete(c._id);
-              }}
-              onPointerDown={(e) => startPress(e, c._id)}
-              onPointerMove={moveDrag}
-              onPointerUp={endDrag}
-              onPointerCancel={endDrag}
-              onContextMenu={(e) => {
-                if (pressId || drag) e.preventDefault();
-              }}
-              style={{
-                translate: `0 ${offsetOf(index, c._id)}px`,
-                transitionProperty: "translate, scale, background-color, border-color, box-shadow",
-                transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
-                // The row under the pointer follows it exactly; everything else eases.
-                transitionDuration: frozen
-                  ? "0ms"
-                  : following
-                    ? `0ms, ${HOLD_MS}ms, ${HOLD_MS}ms, ${HOLD_MS}ms, ${HOLD_MS}ms`
-                    : pressId === c._id
-                      ? `0ms, ${HOLD_MS}ms, ${HOLD_MS}ms, ${HOLD_MS}ms, ${HOLD_MS}ms`
-                      : `${SETTLE_MS}ms`,
-              }}
-              className={cx(
-                "relative flex items-center gap-2 rounded-xl border px-3.5 py-2.5 select-none [-webkit-touch-callout:none]",
-                lifted
-                  ? "z-10 scale-[1.04] border-accent bg-accent shadow-[var(--shadow-pop)]"
-                  : "border-line bg-page",
-                drag?.id === c._id && "cursor-grabbing",
-              )}
-            >
-              {editingId === c._id ? (
-                <form
-                  className="flex flex-1 items-center gap-2"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void saveRename(c._id);
-                  }}
-                >
-                  <Input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="h-9"
-                    autoFocus
-                    aria-label={t("common.edit")}
-                  />
-                  <button
-                    type="submit"
-                    aria-label={t("common.done")}
-                    className="rounded-lg p-1.5 text-good-ink hover:bg-surface-2"
-                  >
-                    <Check size={16} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingId(null)}
-                    aria-label={t("common.cancel")}
-                    className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-ink"
-                  >
-                    <X size={16} />
-                  </button>
-                </form>
-              ) : (
-                <>
-                  <div className="min-w-0 flex-1">
-                    <p
-                      className={cx(
-                        "truncate text-[13.5px] font-semibold transition-colors",
-                        lifted ? "text-white" : "text-ink",
-                      )}
-                      style={{ transitionDuration: `${HOLD_MS}ms` }}
+              <li
+                key={c._id}
+                className="flex flex-col rounded-2xl border border-line bg-page overflow-hidden shadow-xs"
+              >
+                {/* Main Category Header Row */}
+                <div className="flex items-center justify-between gap-2 px-4 py-3 bg-surface/50 border-b border-line/60">
+                  {editingId === c._id ? (
+                    <form
+                      className="flex flex-1 items-center gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void saveRename(c._id);
+                      }}
                     >
-                      {label(c)}
-                    </p>
-                    <p
-                      className={cx("text-[11.5px] transition-colors", lifted ? "text-white/80" : "text-ink-3")}
-                      style={{ transitionDuration: `${HOLD_MS}ms` }}
-                    >
-                      {plural(countIn(c._id), "vendor")}
-                    </p>
+                      <Input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="h-8.5 text-[13px]"
+                        autoFocus
+                      />
+                      <button
+                        type="submit"
+                        aria-label={t("common.done")}
+                        className="rounded-lg p-1 text-good-ink hover:bg-surface-2"
+                      >
+                        <Check size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        aria-label={t("common.cancel")}
+                        className="rounded-lg p-1 text-ink-3 hover:bg-surface-2"
+                      >
+                        <X size={16} />
+                      </button>
+                    </form>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => toggleExpand(c._id)}
+                          className="p-1 rounded-md text-ink-3 hover:text-ink hover:bg-surface-2"
+                        >
+                          {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                        </button>
+                        <span className="truncate text-[14px] font-bold text-ink">
+                          {label(c)}
+                        </span>
+                        <span className="shrink-0 text-[11px] font-semibold text-ink-3 tabular-nums">
+                          ({plural(countIn(c._id), "vendor")})
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAddingSubFor(c._id);
+                            setNewSubName("");
+                            setExpanded((prev) => ({ ...prev, [c._id]: true }));
+                          }}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11.5px] font-semibold text-accent hover:bg-accent-soft"
+                        >
+                          <Plus size={13} />
+                          {t("vendors.addSubCategory")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingId(c._id);
+                            setEditName(label(c));
+                          }}
+                          aria-label={t("common.edit")}
+                          className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-ink"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleting(c)}
+                          aria-label={t("common.delete")}
+                          className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Sub-categories Container */}
+                {isExpanded && (
+                  <div className="px-4 py-2.5 flex flex-col gap-1.5 bg-page">
+                    {subcats.length === 0 && addingSubFor !== c._id ? (
+                      <p className="text-[12px] italic text-ink-3 py-1 pl-6">
+                        {t("vendors.noSubCategory")}
+                      </p>
+                    ) : (
+                      <ul className="flex flex-col gap-1 pl-4">
+                        {subcats.map((sub) => (
+                          <li
+                            key={sub._id}
+                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-surface/70 border border-line/40 text-[12.5px]"
+                          >
+                            {editingId === sub._id ? (
+                              <form
+                                className="flex flex-1 items-center gap-2"
+                                onSubmit={(e) => {
+                                  e.preventDefault();
+                                  void saveRename(sub._id);
+                                }}
+                              >
+                                <Input
+                                  value={editName}
+                                  onChange={(e) => setEditName(e.target.value)}
+                                  className="h-7.5 text-[12px]"
+                                  autoFocus
+                                />
+                                <button
+                                  type="submit"
+                                  className="rounded-md p-1 text-good-ink hover:bg-surface-2"
+                                >
+                                  <Check size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingId(null)}
+                                  className="rounded-md p-1 text-ink-3 hover:bg-surface-2"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </form>
+                            ) : (
+                              <>
+                                <span className="truncate font-medium text-ink flex-1">
+                                  {label(sub)}
+                                </span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingId(sub._id);
+                                      setEditName(label(sub));
+                                    }}
+                                    className="p-1 text-ink-3 hover:text-ink rounded-md hover:bg-surface-2"
+                                  >
+                                    <Pencil size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleting(sub)}
+                                    className="p-1 text-ink-3 hover:text-critical rounded-md hover:bg-surface-2"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {addingSubFor === c._id && (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void addSubCategory(c._id);
+                        }}
+                        className="flex items-center gap-2 pl-4 mt-1"
+                      >
+                        <Input
+                          value={newSubName}
+                          onChange={(e) => setNewSubName(e.target.value)}
+                          placeholder="Sub-category name…"
+                          className="h-8 text-[12.5px]"
+                          autoFocus
+                        />
+                        <Button size="sm" variant="primary" type="submit" className="h-8 px-3 text-[12px]">
+                          Add
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          type="button"
+                          onClick={() => setAddingSubFor(null)}
+                          className="h-8 px-2 text-[12px]"
+                        >
+                          Cancel
+                        </Button>
+                      </form>
+                    )}
                   </div>
-                  <button
-                    onClick={() => {
-                      setEditingId(c._id);
-                      setEditName(label(c));
-                    }}
-                    aria-label={`${t("common.edit")} ${label(c)}`}
-                    className={cx("rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-ink transition-colors", lifted && "text-white/80")}
-                  >
-                    <Pencil size={14} />
-                  </button>
-                  <button
-                    onClick={() => setDeleting(c)}
-                    aria-label={`${t("common.delete")} ${label(c)}`}
-                    className={cx("rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical transition-colors", lifted && "text-white/80")}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </>
-              )}
-            </li>
+                )}
+              </li>
             );
           })}
         </ul>
 
-        <form onSubmit={add} className="flex items-center gap-2">
+        <form onSubmit={addCategory} className="flex items-center gap-2 pt-2 border-t border-line">
           <Input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder={t("vendors.newCategory")}
-            className="h-10"
+            placeholder="Add new main vendor category…"
+            className="h-10 text-[13.5px]"
           />
-          <Button type="submit" size="sm" variant="primary" disabled={!newName.trim() || adding}>
-            <Plus size={15} />
+          <Button type="submit" variant="primary" className="shrink-0 h-10 gap-1 px-4 font-semibold">
+            <Plus size={16} />
             {t("common.add")}
           </Button>
         </form>
       </div>
 
       <PasscodeConfirmDialog
-        open={deleting !== null}
+        open={Boolean(deleting)}
         onClose={() => setDeleting(null)}
-        title={t("vendors.deleteCategory")}
-        confirmLabel={t("common.delete")}
+        onConfirm={confirmDelete}
+        title={deleting?.parentId ? "Delete sub-category?" : "Delete category?"}
         body={
-          deleting
-            ? `${label(deleting)} · ${plural(countIn(deleting._id), "vendor")}\n${t("vendors.deleteCategoryBody")}`
-            : ""
+          deleting?.parentId
+            ? `Are you sure you want to delete "${label(deleting)}"? Vendors with this sub-category will remain in the parent category.`
+            : `Are you sure you want to delete "${deleting ? label(deleting) : ""}"? Its sub-categories will be removed and vendors will become uncategorized.`
         }
-        onConfirm={async (passcode) => {
-          if (!deleting) return;
-          await remove({ id: deleting._id, passcode });
-          onDeleted?.(deleting._id);
-          toast.ok(`${label(deleting)} deleted.`);
-        }}
+        confirmLabel={t("common.delete")}
       />
     </Modal>
   );

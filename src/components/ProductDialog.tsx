@@ -1,36 +1,30 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera, PackagePlus, Pencil, Trash2, Upload } from "lucide-react";
+import { Camera, PackagePlus, Pencil, Settings2, Trash2, Upload } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Button, Field, Input, Modal, ModalFooter, SectionLabel, Textarea, cx } from "./ui";
+import { Button, Field, Input, Modal, ModalFooter, Select, Textarea, cx } from "./ui";
 import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
-import { useAuthedQuery, useAuthedMutation } from "../lib/session";
+import { useAuthedMutation } from "../lib/session";
 import { uploadFile, useFileDrop, useUploadProgress } from "../lib/upload";
+import { useProductCategories } from "../lib/productCategories";
+import { ProductCategoriesDialog } from "./ProductCategoriesDialog";
 
 type ProductWithPhoto = Doc<"products"> & { photoUrl?: string | null };
 
 /*
   Only what a product is. Its stock and prices live on its lots — a product
-  is added here, then stocked with a lot.
+  is added here, then stocked with a lot via Vendors.
 */
 type Draft = {
   name: string;
-  category: string;
+  categoryId: string;
+  subCategoryId: string;
   unit: string;
   details: string;
 };
 
-const EMPTY: Draft = { name: "", category: "", unit: "", details: "" };
-
-function toDraft(product: Doc<"products">): Draft {
-  return {
-    name: product.name,
-    category: product.category ?? "",
-    unit: product.unit ?? "",
-    details: product.details,
-  };
-}
+const EMPTY: Draft = { name: "", categoryId: "", subCategoryId: "", unit: "", details: "" };
 
 export function ProductDialog({
   open,
@@ -42,7 +36,7 @@ export function ProductDialog({
   onClose: () => void;
   /** Present when editing; absent when adding. */
   product?: ProductWithPhoto | null;
-  /** Called with the new product's id, so its first lot can be added straight away. */
+  /** Called with the new product's id. */
   onCreated?: (id: Id<"products">) => void;
 }) {
   const t = useT();
@@ -52,7 +46,8 @@ export function ProductDialog({
   const generateUploadUrl = useAuthedMutation(api.products.generateUploadUrl);
   const setPhoto = useAuthedMutation(api.products.setPhoto);
   const removePhoto = useAuthedMutation(api.products.removePhoto);
-  const categories = useAuthedQuery(api.products.categories) ?? [];
+  const { categories: productCats, allCategories, subcategoriesOf, label: catLabel, categoryOf, subCategoryOf } = useProductCategories();
+  const [manageCategories, setManageCategories] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [draft, setDraft] = useState<Draft>(EMPTY);
@@ -74,11 +69,23 @@ export function ProductDialog({
   const [photoBusy, setPhotoBusy] = useState(false);
   useEffect(() => {
     if (!open) return;
-    setDraft(product ? toDraft(product) : EMPTY);
+    if (product) {
+      const cat = categoryOf(product);
+      const sub = subCategoryOf(product);
+      setDraft({
+        name: product.name,
+        categoryId: product.categoryId ?? cat?._id ?? "",
+        subCategoryId: product.subCategoryId ?? sub?._id ?? "",
+        unit: product.unit ?? "",
+        details: product.details,
+      });
+    } else {
+      setDraft(EMPTY);
+    }
     setSavedPhotoUrl(product?.photoUrl ?? null);
     setPhotoPreview(product?.photoUrl ?? null);
     setPendingPhoto(null);
-  }, [open, product]);
+  }, [open, product, allCategories]);
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
@@ -135,10 +142,15 @@ export function ProductDialog({
     if (!valid || saving) return;
     setSaving(true);
     try {
+      const selectedCat = allCategories.find((c) => c._id === draft.categoryId);
+      const selectedSubCat = allCategories.find((c) => c._id === draft.subCategoryId);
       const payload = {
         name: draft.name,
         details: draft.details,
-        category: draft.category,
+        category: selectedCat ? selectedCat.name : undefined,
+        subCategory: selectedSubCat ? selectedSubCat.name : undefined,
+        categoryId: draft.categoryId ? (draft.categoryId as Id<"productCategories">) : undefined,
+        subCategoryId: draft.subCategoryId ? (draft.subCategoryId as Id<"productCategories">) : undefined,
         unit: draft.unit,
       };
       if (product) {
@@ -166,190 +178,220 @@ export function ProductDialog({
     }
   }
 
+  const subcats = subcategoriesOf(draft.categoryId);
+
   return (
-    <Modal
-      guardChanges
-      open={open}
-      onClose={onClose}
-      icon={product ? <Pencil size={18} /> : <PackagePlus size={19} />}
-      title={product ? "Edit product" : "Add product"}
-      subtitle={
-        product
-          ? "Past sales keep the cost they were recorded with."
-          : "Next you'll add its first lot — that's where stock and prices go."
-      }
-    >
-      <form onSubmit={submit}>
-        <div className="flex flex-col gap-6 px-6 py-6">
-          <div className="flex items-center gap-4">
-            <div
-              {...dropProps}
-              className={cx(
-                "relative flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-page transition-colors",
-                dragOver ? "border-accent ring-2 ring-accent" : "border-line-strong",
-              )}
-            >
-              {photoPreview ? (
-                <img src={photoPreview} alt="" className="size-full object-cover" />
-              ) : (
-                <Camera size={22} className="text-ink-3" aria-hidden />
-              )}
-              {photoBusy && (
-                <div className="absolute inset-0 flex items-center justify-center bg-page/70">
-                  <div className="ac-skeleton size-5 rounded-full" aria-hidden />
-                </div>
-              )}
-            </div>
-            <div className="flex flex-col gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (file) void pickPhoto(file);
-                }}
-              />
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={photoBusy}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Upload size={14} />
-                  {photoPreview ? t("products.changePhoto") : t("products.uploadPhoto")}
-                </Button>
-                {photoPreview && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={photoBusy}
-                    onClick={() => void clearPhoto()}
-                  >
-                    <Trash2 size={14} />
-                    {t("products.removePhoto")}
-                  </Button>
+    <>
+      <Modal
+        guardChanges
+        open={open}
+        onClose={onClose}
+        icon={product ? <Pencil size={18} /> : <PackagePlus size={19} />}
+        title={product ? "Edit product" : "Add product"}
+        subtitle={
+          product
+            ? "Past sales keep the cost they were recorded with."
+            : "Add product to catalog. Stock and lots are purchased via Vendors."
+        }
+      >
+        <form onSubmit={submit}>
+          <div className="flex flex-col gap-6 px-6 py-6">
+            <div className="flex items-center gap-4">
+              <div
+                {...dropProps}
+                className={cx(
+                  "relative flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-page transition-colors",
+                  dragOver ? "border-accent ring-2 ring-accent" : "border-line-strong",
+                )}
+              >
+                {photoPreview ? (
+                  <img src={photoPreview} alt="" className="size-full object-cover" />
+                ) : (
+                  <Camera size={22} className="text-ink-3" aria-hidden />
+                )}
+                {photoBusy && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-page/70">
+                    <div className="ac-skeleton size-5 rounded-full" aria-hidden />
+                  </div>
                 )}
               </div>
-              {photoBusy && uploadStatus ? (
-                <div className="w-48 mt-0.5">
-                  <div className="flex items-center justify-between text-[11px] text-ink-3 mb-1">
-                    <span>{uploadStatus.stage === "compressing" ? "Compressing..." : "Uploading..."}</span>
-                    <span className="font-semibold tabular-nums">{uploadStatus.progress}%</span>
-                  </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
-                    <div
-                      className="h-full rounded-full bg-accent transition-all duration-200"
-                      style={{ width: `${Math.max(5, uploadStatus.progress)}%` }}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[11.5px] text-ink-3">
-                  {photoBusy ? t("products.uploading") : t("products.photo")}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <Field label="Name">
-            {(id) => (
-              <Input
-                id={id}
-                value={draft.name}
-                onChange={(e) => set("name", e.target.value)}
-                placeholder="Netflix Premium — 1 month"
-                autoComplete="off"
-                required
-              />
-            )}
-          </Field>
-
-          <Field label={t("products.unit")} hint={t("products.unitHint")}>
-            {(id) => (
-              <Input
-                id={id}
-                list="product-unit-suggestions"
-                value={draft.unit}
-                onChange={(e) => set("unit", e.target.value)}
-                placeholder="পিস"
-              />
-            )}
-          </Field>
-          <datalist id="product-unit-suggestions">
-            <option value="পিস" />
-            <option value="কেজি" />
-            <option value="গ্রাম" />
-            <option value="লিটার" />
-            <option value="বক্স" />
-            <option value="প্যাকেট" />
-          </datalist>
-
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-baseline justify-between gap-3">
-              <SectionLabel>Category</SectionLabel>
-              <span className="text-[11.5px] text-ink-3">Optional</span>
-            </div>
-            <Input
-              value={draft.category}
-              onChange={(e) => set("category", e.target.value)}
-              placeholder="Streaming"
-              autoComplete="off"
-              aria-label="Category"
-            />
-            {categories.length > 0 && (
-              // Reusing an existing category is one tap; typing a new one still works.
-              <div className="flex flex-wrap gap-1.5 pt-0.5">
-                {categories.map((c) => {
-                  const active = draft.category.trim() === c;
-                  return (
-                    <button
-                      key={c}
+              <div className="flex flex-col gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) void pickPhoto(file);
+                  }}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={photoBusy}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload size={14} />
+                    {photoPreview ? t("products.changePhoto") : t("products.uploadPhoto")}
+                  </Button>
+                  {photoPreview && (
+                    <Button
                       type="button"
-                      onClick={() => set("category", active ? "" : c)}
-                      aria-pressed={active}
-                      className={cx(
-                        "rounded-lg px-2.5 py-1 text-[12px] font-semibold transition-colors",
-                        active
-                          ? "bg-accent text-white"
-                          : "bg-surface-2 text-ink-2 hover:bg-surface-3 hover:text-ink",
-                      )}
+                      variant="ghost"
+                      size="sm"
+                      disabled={photoBusy}
+                      onClick={() => void clearPhoto()}
                     >
-                      {c}
-                    </button>
-                  );
-                })}
+                      <Trash2 size={14} />
+                      {t("products.removePhoto")}
+                    </Button>
+                  )}
+                </div>
+                {photoBusy && uploadStatus ? (
+                  <div className="w-48 mt-0.5">
+                    <div className="flex items-center justify-between text-[11px] text-ink-3 mb-1">
+                      <span>{uploadStatus.stage === "compressing" ? "Compressing..." : "Uploading..."}</span>
+                      <span className="font-semibold tabular-nums">{uploadStatus.progress}%</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
+                      <div
+                        className="h-full rounded-full bg-accent transition-all duration-200"
+                        style={{ width: `${Math.max(5, uploadStatus.progress)}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11.5px] text-ink-3">
+                    {photoBusy ? t("products.uploading") : t("products.photo")}
+                  </p>
+                )}
               </div>
-            )}
+            </div>
+
+            <Field label="Name">
+              {(id) => (
+                <Input
+                  id={id}
+                  value={draft.name}
+                  onChange={(e) => set("name", e.target.value)}
+                  placeholder="Fresh Oyster Mushroom"
+                  autoComplete="off"
+                  required
+                />
+              )}
+            </Field>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[13px] font-semibold text-ink-2">
+                    {t("products.category")}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setManageCategories(true)}
+                    className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-ink-3 transition-colors hover:text-accent"
+                  >
+                    <Settings2 size={13} />
+                    {t("vendors.manageCategories")}
+                  </button>
+                </div>
+                <Select
+                  value={draft.categoryId}
+                  onChange={(e) =>
+                    setDraft((d) => ({
+                      ...d,
+                      categoryId: e.target.value,
+                      subCategoryId: "",
+                    }))
+                  }
+                >
+                  <option value="">{t("vendors.noCategory")}</option>
+                  {productCats.map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {catLabel(c)}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              {subcats.length > 0 && (
+                <Field label={t("vendors.subCategory")} hint={t("common.optional")}>
+                  {(id) => (
+                    <Select
+                      id={id}
+                      value={draft.subCategoryId}
+                      onChange={(e) => setDraft((d) => ({ ...d, subCategoryId: e.target.value }))}
+                    >
+                      <option value="">{t("vendors.noSubCategory")}</option>
+                      {subcats.map((sc) => (
+                        <option key={sc._id} value={sc._id}>
+                          {catLabel(sc)}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </Field>
+              )}
+
+              <Field label={t("products.unit")} hint={t("products.unitHint")}>
+                {(id) => (
+                  <Input
+                    id={id}
+                    list="product-unit-suggestions"
+                    value={draft.unit}
+                    onChange={(e) => set("unit", e.target.value)}
+                    placeholder="পিস"
+                  />
+                )}
+              </Field>
+            </div>
+            <datalist id="product-unit-suggestions">
+              <option value="পিস" />
+              <option value="কেজি" />
+              <option value="গ্রাম" />
+              <option value="লিটার" />
+              <option value="বক্স" />
+              <option value="প্যাকেট" />
+            </datalist>
+
+            <Field label="Details" hint="Grade, origin, harvest notes, packaging — anything you want to remember.">
+              {(id) => (
+                <Textarea
+                  id={id}
+                  rows={4}
+                  value={draft.details}
+                  onChange={(e) => set("details", e.target.value)}
+                  placeholder="Plain text. Shown on the product card."
+                />
+              )}
+            </Field>
           </div>
 
-          <Field label="Details" hint="Login, renewal date, warranty — anything you want to remember.">
-            {(id) => (
-              <Textarea
-                id={id}
-                rows={4}
-                value={draft.details}
-                onChange={(e) => set("details", e.target.value)}
-                placeholder="Plain text. Shown on the product card."
-              />
-            )}
-          </Field>
-        </div>
+          <ModalFooter>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" disabled={!valid || saving}>
+              {saving ? "Saving…" : product ? "Save changes" : "Add product"}
+            </Button>
+          </ModalFooter>
+        </form>
+      </Modal>
 
-        <ModalFooter>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" disabled={!valid || saving}>
-            {saving ? "Saving…" : product ? "Save changes" : "Add product"}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
+      <ProductCategoriesDialog
+        open={manageCategories}
+        onClose={() => setManageCategories(false)}
+        onDeleted={(id) => {
+          if (draft.categoryId === id) {
+            setDraft((d) => ({ ...d, categoryId: "", subCategoryId: "" }));
+          }
+        }}
+      />
+    </>
   );
 }

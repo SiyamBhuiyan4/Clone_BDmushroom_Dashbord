@@ -21,6 +21,7 @@ import type * as migrations from "../migrations.js";
 import type * as orders from "../orders.js";
 import type * as otp from "../otp.js";
 import type * as portal from "../portal.js";
+import type * as productCategories from "../productCategories.js";
 import type * as products from "../products.js";
 import type * as profit from "../profit.js";
 import type * as sales from "../sales.js";
@@ -52,6 +53,7 @@ declare const fullApi: ApiFromModules<{
   orders: typeof orders;
   otp: typeof otp;
   portal: typeof portal;
+  productCategories: typeof productCategories;
   products: typeof products;
   profit: typeof profit;
   sales: typeof sales;

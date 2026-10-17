@@ -121,6 +121,7 @@ export const create = mutation({
     token: v.string(),
     name: v.string(),
     categoryId: v.optional(v.id("vendorCategories")),
+    subCategoryId: v.optional(v.id("vendorCategories")),
     phone: v.optional(v.string()),
     extraPhones: v.optional(v.array(v.string())),
     whatsapp: v.optional(v.string()),
@@ -137,6 +138,7 @@ export const create = mutation({
     const id = await ctx.db.insert("vendors", {
       name: args.name.trim(),
       categoryId: args.categoryId,
+      subCategoryId: args.subCategoryId,
       phone: args.phone?.trim() || undefined,
       extraPhones: cleanPhones(args.extraPhones),
       whatsapp: args.whatsapp?.trim() || undefined,
@@ -160,6 +162,7 @@ export const update = mutation({
     id: v.id("vendors"),
     name: v.string(),
     categoryId: v.optional(v.id("vendorCategories")),
+    subCategoryId: v.optional(v.id("vendorCategories")),
     phone: v.optional(v.string()),
     extraPhones: v.optional(v.array(v.string())),
     whatsapp: v.optional(v.string()),
@@ -177,6 +180,7 @@ export const update = mutation({
     await ctx.db.patch(args.id, {
       name: args.name.trim(),
       categoryId: args.categoryId,
+      subCategoryId: args.subCategoryId,
       // Picked from the editable list now, so the old fixed one goes.
       category: undefined,
       phone: args.phone?.trim() || undefined,

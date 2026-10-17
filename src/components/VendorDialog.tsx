@@ -28,9 +28,10 @@ export function VendorDialog({
   const update = useAuthedMutation(api.vendors.update);
 
   const [name, setName] = useState("");
-  const { categories, label, categoryOf } = useVendorCategories();
+  const { categories, subcategoriesOf, label, categoryOf } = useVendorCategories();
   // A category id, or "" for none.
   const [category, setCategory] = useState("");
+  const [subCategory, setSubCategory] = useState("");
   const [phone, setPhone] = useState("");
   const [extraPhones, setExtraPhones] = useState<string[]>([]);
   const [whatsapp, setWhatsapp] = useState("");
@@ -44,7 +45,9 @@ export function VendorDialog({
   useEffect(() => {
     if (!open) return;
     setName(vendor?.name ?? "");
-    setCategory(vendor ? (categoryOf(vendor)?._id ?? "") : (categories[0]?._id ?? ""));
+    const cat = vendor ? (categoryOf(vendor)?._id ?? "") : (categories[0]?._id ?? "");
+    setCategory(cat);
+    setSubCategory(vendor?.subCategoryId ?? "");
     setPhone(vendor?.phone ?? "");
     setExtraPhones(vendor?.extraPhones ?? []);
     setWhatsapp(vendor?.whatsapp ?? "");
@@ -65,6 +68,7 @@ export function VendorDialog({
       const payload = {
         name,
         categoryId: category ? (category as Id<"vendorCategories">) : undefined,
+        subCategoryId: subCategory ? (subCategory as Id<"vendorCategories">) : undefined,
         phone,
         extraPhones,
         whatsapp,
@@ -88,6 +92,8 @@ export function VendorDialog({
       setSaving(false);
     }
   }
+
+  const subcats = subcategoriesOf(category);
 
   return (
     <Modal
@@ -113,22 +119,46 @@ export function VendorDialog({
             )}
           </Field>
 
-          <Field label={t("vendors.category")}>
-            {(id) => (
-              <Select
-                id={id}
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-              >
-                {categories.map((c) => (
-                  <option key={c._id} value={c._id}>
-                    {label(c)}
-                  </option>
-                ))}
-                <option value="">{t("vendors.noCategory")}</option>
-              </Select>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={t("vendors.category")}>
+              {(id) => (
+                <Select
+                  id={id}
+                  value={category}
+                  onChange={(e) => {
+                    setCategory(e.target.value);
+                    setSubCategory("");
+                  }}
+                >
+                  {categories.map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {label(c)}
+                    </option>
+                  ))}
+                  <option value="">{t("vendors.noCategory")}</option>
+                </Select>
+              )}
+            </Field>
+
+            {subcats.length > 0 && (
+              <Field label={t("vendors.subCategory")} hint={t("common.optional")}>
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={subCategory}
+                    onChange={(e) => setSubCategory(e.target.value)}
+                  >
+                    <option value="">{t("vendors.noSubCategory")}</option>
+                    {subcats.map((s) => (
+                      <option key={s._id} value={s._id}>
+                        {label(s)}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
             )}
-          </Field>
+          </div>
 
           <div className="grid gap-5 sm:grid-cols-2">
             <Field label={t("orders.phone")}>

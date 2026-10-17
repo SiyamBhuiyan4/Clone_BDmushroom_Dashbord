@@ -7,18 +7,18 @@ import {
   PackagePlus,
   Pencil,
   Search,
+  Settings2,
   ShoppingCart,
   Trash2,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Doc, Id } from "../../convex/_generated/dataModel";
+import type { Doc } from "../../convex/_generated/dataModel";
 import { Button, Card, EmptyState, Input, Select, cx } from "../components/ui";
 import { Pagination, SortSelect, usePagination } from "../components/Pagination";
 import { useT } from "../lib/i18n";
 import { ProductDialog } from "../components/ProductDialog";
 import { ProductDetailDialog } from "../components/ProductDetailDialog";
 import { SaleDialog } from "../components/SaleDialog";
-import { BatchDialog } from "../components/BatchDialog";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { RangePills } from "../components/RangePills";
 import { useSettings } from "../lib/settings";
@@ -26,6 +26,8 @@ import { useRangeFilter } from "../lib/dateRange";
 import { gradientFor, initialOf } from "../lib/avatar";
 import { useToast } from "../lib/toast";
 import { useAuthedQuery, useAuthedMutation } from "../lib/session";
+import { useProductCategories } from "../lib/productCategories";
+import { ProductCategoriesDialog } from "../components/ProductCategoriesDialog";
 
 type ProductRow = Doc<"products"> & { photoUrl: string | null };
 
@@ -37,11 +39,13 @@ export function ProductsPage() {
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
+  const [subCategory, setSubCategory] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
   const [showArchived, setShowArchived] = useState(false);
+  const [managingCategories, setManagingCategories] = useState(false);
 
   const products = useAuthedQuery(api.products.list, { search, includeArchived: showArchived });
-  const categories = useAuthedQuery(api.products.categories) ?? [];
+  const { categories: productCats, allCategories, subcategoriesOf, label: catLabel, categoryOf, subCategoryOf } = useProductCategories();
   const range = useRangeFilter("ac.range.products");
   const salesWindow = useAuthedQuery(api.products.salesWindow);
 
@@ -72,10 +76,21 @@ export function ProductsPage() {
   const [selling, setSelling] = useState<Doc<"products"> | null>(null);
   const [deleting, setDeleting] = useState<Doc<"products"> | null>(null);
   const [viewing, setViewing] = useState<Doc<"products"> | null>(null);
-  const [lotFor, setLotFor] = useState<Id<"products"> | null>(null);
 
   const visible = useMemo(() => {
-    const filtered = (products ?? []).filter((p) => !category || p.category === category);
+    const filtered = (products ?? []).filter((p) => {
+      if (category) {
+        const catDoc = categoryOf(p);
+        const matchesCategory = p.categoryId === category || catDoc?._id === category || p.category === category;
+        if (!matchesCategory) return false;
+        if (subCategory) {
+          const subDoc = subCategoryOf(p);
+          const matchesSub = p.subCategoryId === subCategory || subDoc?._id === subCategory || p.subCategory === subCategory;
+          if (!matchesSub) return false;
+        }
+      }
+      return true;
+    });
     return [...filtered].sort((a, b) => {
       if (sort === "name") return a.name.localeCompare(b.name);
       if (sort === "stockLow") return a.quantity - b.quantity;
@@ -88,9 +103,9 @@ export function ProductsPage() {
       }
       return b.createdAt - a.createdAt;
     });
-  }, [products, category, sort, profitByProduct]);
+  }, [products, category, subCategory, sort, profitByProduct, allCategories]);
 
-  const pager = usePagination(visible, `${search}|${category}|${sort}|${showArchived}`, 25);
+  const pager = usePagination(visible, `${search}|${category}|${subCategory}|${sort}|${showArchived}`, 25);
 
   return (
     <div className="flex flex-col gap-6">
@@ -126,21 +141,49 @@ export function ProductsPage() {
             aria-label={t("common.search")}
           />
         </div>
-        <div className="flex w-full gap-3 sm:w-auto">
-          <div className="flex-1 sm:w-48 sm:flex-none">
+        <div className="flex flex-wrap w-full gap-2.5 sm:w-auto">
+          <div className="flex-1 sm:w-44 sm:flex-none">
             <Select
               value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              onChange={(e) => {
+                setCategory(e.target.value);
+                setSubCategory("");
+              }}
               aria-label={t("common.category")}
             >
               <option value="">{t("common.allCategories")}</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
+              {productCats.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {catLabel(c)}
                 </option>
               ))}
             </Select>
           </div>
+          {category && subcategoriesOf(category).length > 0 && (
+            <div className="flex-1 sm:w-44 sm:flex-none">
+              <Select
+                value={subCategory}
+                onChange={(e) => setSubCategory(e.target.value)}
+                aria-label={t("vendors.subCategory") || "Subcategory"}
+              >
+                <option value="">{t("common.all") || "All"}</option>
+                {subcategoriesOf(category).map((sc) => (
+                  <option key={sc._id} value={sc._id}>
+                    {catLabel(sc)}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setManagingCategories(true)}
+            className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-line-strong bg-page px-3 text-[13px] font-semibold text-ink-3 transition-colors hover:text-ink hover:bg-surface-2"
+            title={t("vendors.manageCategories")}
+          >
+            <Settings2 size={16} />
+            <span className="hidden sm:inline">{t("vendors.manageCategories")}</span>
+          </button>
           <div className="flex-1 sm:flex-none">
             <SortSelect
               value={sort}
@@ -214,7 +257,6 @@ export function ProductsPage() {
                 key={product._id}
                 product={product}
                 lots={openLots.filter((l) => l.productId === product._id)}
-                onAddLot={() => setLotFor(product._id)}
                 onView={() => setViewing(product)}
                 onSell={() => setSelling(product)}
                 onEdit={() => setEditing(product)}
@@ -252,12 +294,17 @@ export function ProductsPage() {
         onClose={() => setViewing(null)}
         productId={viewing?._id ?? null}
       />
-      <BatchDialog
-        open={lotFor !== null}
-        onClose={() => setLotFor(null)}
-        presetProductId={lotFor ?? undefined}
+      <ProductDialog open={addOpen} onClose={() => setAddOpen(false)} />
+      <ProductCategoriesDialog
+        open={managingCategories}
+        onClose={() => setManagingCategories(false)}
+        onDeleted={(id) => {
+          if (category === id) {
+            setCategory("");
+            setSubCategory("");
+          }
+        }}
       />
-      <ProductDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={setLotFor} />
       <ProductDialog open={editing !== null} onClose={() => setEditing(null)} product={editing} />
       <SaleDialog
         open={selling !== null}
@@ -284,7 +331,6 @@ export function ProductsPage() {
 function ProductCard({
   product,
   lots,
-  onAddLot,
   onView,
   onSell,
   onEdit,
@@ -296,7 +342,6 @@ function ProductCard({
 }: {
   product: ProductRow;
   lots: { unitCost: number; unitPrice?: number; remaining: number }[];
-  onAddLot: () => void;
   onView: () => void;
   onSell: () => void;
   onEdit: () => void;
@@ -373,7 +418,7 @@ function ProductCard({
           )}
           {product.category && (
             <span className="inline-flex items-center rounded-lg bg-surface/90 px-2.5 py-1 text-[11px] font-bold text-accent shadow-[var(--shadow-sm)] backdrop-blur-md border border-accent/25">
-              {product.category}
+              {product.category}{product.subCategory ? ` › ${product.subCategory}` : ""}
             </span>
           )}
           {out ? (
@@ -397,9 +442,6 @@ function ProductCard({
           onClick={(e) => e.stopPropagation()}
           className="absolute top-3 right-3 z-10 flex items-center gap-0.5 rounded-xl border border-line-strong/30 bg-surface/90 p-1 shadow-[var(--shadow-card)] backdrop-blur-md transition-all duration-200 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100"
         >
-          <IconButton label="Add lot" onClick={onAddLot}>
-            <Layers size={14} />
-          </IconButton>
           <IconButton label="Edit" onClick={onEdit}>
             <Pencil size={14} />
           </IconButton>

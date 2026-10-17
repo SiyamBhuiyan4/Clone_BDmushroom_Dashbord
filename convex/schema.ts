@@ -262,9 +262,13 @@ export default defineSchema({
     /** Shown instead of `name` in Bangla, when there is one. */
     nameBn: v.optional(v.string()),
     key: v.optional(v.string()),
+    /** Parent category for hierarchical sub-categories */
+    parentId: v.optional(v.id("vendorCategories")),
     order: v.number(),
     createdAt: v.number(),
-  }).index("by_order", ["order"]),
+  })
+    .index("by_order", ["order"])
+    .index("by_parent", ["parentId"]),
 
   /*
     A supplier — who the shop buys stock from, as distinct from `customers`,
@@ -277,6 +281,7 @@ export default defineSchema({
     photoId: v.optional(v.id("_storage")),
     /** Absent when uncategorised — including after its category was deleted. */
     categoryId: v.optional(v.id("vendorCategories")),
+    subCategoryId: v.optional(v.id("vendorCategories")),
     /*
       Legacy: the old fixed category, before categories could be edited.
       `migrations:vendorCategories` moves it to `categoryId`.
@@ -453,6 +458,18 @@ export default defineSchema({
     .index("by_key", ["key"])
     .index("by_orders", ["orderCount"]),
 
+  productCategories: defineTable({
+    name: v.string(),
+    nameBn: v.optional(v.string()),
+    key: v.optional(v.string()),
+    /** Parent category for hierarchical sub-categories */
+    parentId: v.optional(v.id("productCategories")),
+    order: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_order", ["order"])
+    .index("by_parent", ["parentId"]),
+
   products: defineTable({
     name: v.string(),
     /** The product's photo, stored in Convex file storage. */
@@ -473,6 +490,9 @@ export default defineSchema({
     tags: v.optional(v.array(v.string())),
     details: v.string(),
     category: v.optional(v.string()),
+    subCategory: v.optional(v.string()),
+    categoryId: v.optional(v.id("productCategories")),
+    subCategoryId: v.optional(v.id("productCategories")),
     // Units currently on hand: what is left across all lots (see stock.ts).
     quantity: v.number(),
     /** Per-product low-stock threshold; falls back to a global default. */

@@ -26,7 +26,8 @@ export const list = query({
       return (
         p.name.toLowerCase().includes(term) ||
         p.details.toLowerCase().includes(term) ||
-        (p.category ?? "").toLowerCase().includes(term)
+        (p.category ?? "").toLowerCase().includes(term) ||
+        (p.subCategory ?? "").toLowerCase().includes(term)
       );
     });
     return await Promise.all(filtered.map((p) => withPhoto(ctx, p)));
@@ -164,6 +165,9 @@ const productArgs = {
   name: v.string(),
   details: v.string(),
   category: v.optional(v.string()),
+  subCategory: v.optional(v.string()),
+  categoryId: v.optional(v.id("productCategories")),
+  subCategoryId: v.optional(v.id("productCategories")),
   unit: v.optional(v.string()),
 };
 
@@ -173,11 +177,15 @@ export const create = mutation({
     await requireSession(ctx, args.token);
     validate(args.name);
     const category = (args.category ?? "").trim();
+    const subCategory = (args.subCategory ?? "").trim();
     return await ctx.db.insert("products", {
       name: args.name.trim(),
       costPrice: 0,
       details: args.details.trim(),
       category: category ? category : undefined,
+      subCategory: subCategory ? subCategory : undefined,
+      categoryId: args.categoryId,
+      subCategoryId: args.subCategoryId,
       quantity: 0,
       unit: args.unit?.trim() || undefined,
       archived: false,
@@ -194,10 +202,14 @@ export const update = mutation({
     if (!existing) throw new ConvexError("That product no longer exists.");
     validate(args.name);
     const category = (args.category ?? "").trim();
+    const subCategory = (args.subCategory ?? "").trim();
     await ctx.db.patch(args.id, {
       name: args.name.trim(),
       details: args.details.trim(),
       category: category ? category : undefined,
+      subCategory: subCategory ? subCategory : undefined,
+      categoryId: args.categoryId,
+      subCategoryId: args.subCategoryId,
       unit: args.unit?.trim() || undefined,
     });
   },

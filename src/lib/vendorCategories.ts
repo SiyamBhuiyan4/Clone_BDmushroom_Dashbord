@@ -1,19 +1,43 @@
+import { useMemo } from "react";
 import { api } from "../../convex/_generated/api";
-import type { Doc } from "../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { useAuthedQuery } from "./session";
 import { useSettings } from "./settings";
 
 /**
- * The shop's vendor categories, and a way to name the one a vendor is in.
- * A vendor saved before categories were editable still carries the old
- * fixed key, so that is matched against the starter categories too.
+ * The shop's vendor categories and sub-categories.
  */
 export function useVendorCategories() {
   const { lang } = useSettings();
-  const categories = useAuthedQuery(api.vendorCategories.list) ?? [];
+  const allCategories = useAuthedQuery(api.vendorCategories.list) ?? [];
+
+  const categories = useMemo(
+    () => allCategories.filter((c) => !c.parentId),
+    [allCategories],
+  );
+
+  const subcategoriesOf = (parentId: string | Id<"vendorCategories"> | undefined) => {
+    if (!parentId) return [];
+    return allCategories.filter((c) => c.parentId === parentId);
+  };
+
   const label = (c: Doc<"vendorCategories">) => (lang === "bn" && c.nameBn ? c.nameBn : c.name);
+
   const categoryOf = (vendor: Pick<Doc<"vendors">, "categoryId" | "category">) =>
     categories.find((c) => (vendor.categoryId ? c._id === vendor.categoryId : c.key === vendor.category)) ??
     null;
-  return { categories, label, categoryOf };
+
+  const subCategoryOf = (vendor: { subCategoryId?: Id<"vendorCategories"> | string }) => {
+    if (!vendor.subCategoryId) return null;
+    return allCategories.find((c) => c._id === vendor.subCategoryId) ?? null;
+  };
+
+  return {
+    categories,
+    allCategories,
+    subcategoriesOf,
+    label,
+    categoryOf,
+    subCategoryOf,
+  };
 }

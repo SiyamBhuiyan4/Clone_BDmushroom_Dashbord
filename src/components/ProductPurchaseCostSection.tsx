@@ -1,11 +1,10 @@
 import { useMemo, useState } from "react";
-import { Hash, Landmark, Plus, StickyNote, Trash2 } from "lucide-react";
+import { Hash, Landmark, StickyNote, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
-import { Button, Card, CardHeader, EmptyState } from "./ui";
+import { Card, CardHeader, EmptyState } from "./ui";
 import { StatTile } from "./StatTile";
 import { RangePills } from "./RangePills";
-import { ProductPurchaseDialog } from "./ProductPurchaseDialog";
 import { LotRemoveDialog } from "./LotRemoveDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -25,7 +24,6 @@ export function ProductPurchaseCostSection() {
   const all = useAuthedQuery(api.profit.purchaseCostBatches, {});
   const range = useRangeFilter("ac.range.investment");
 
-  const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<Doc<"stockBatches"> | null>(null);
 
   const rows = useMemo(
@@ -53,13 +51,6 @@ export function ProductPurchaseCostSection() {
 
   return (
     <>
-      <div className="flex justify-end">
-        <Button variant="primary" onClick={() => setAddOpen(true)}>
-          <Plus size={17} />
-          {t("investment.add")}
-        </Button>
-      </div>
-
       {/* Same row as every other page's date filter: a label on the left, RangePills on the right. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[13.5px] text-ink-3">
@@ -130,14 +121,6 @@ export function ProductPurchaseCostSection() {
                 ? "Try a wider date range."
                 : t("investment.noneBody")
             }
-            action={
-              (all?.length ?? 0) === 0 ? (
-                <Button variant="primary" onClick={() => setAddOpen(true)}>
-                  <Plus size={17} />
-                  {t("investment.add")}
-                </Button>
-              ) : undefined
-            }
           />
         ) : (
           <ul className="flex flex-col divide-y divide-line">
@@ -185,8 +168,6 @@ export function ProductPurchaseCostSection() {
           </ul>
         )}
       </Card>
-
-      <ProductPurchaseDialog open={addOpen} onClose={() => setAddOpen(false)} />
 
       <LotRemoveDialog
         lot={deleting ? { ...deleting, id: deleting._id } : null}
