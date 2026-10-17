@@ -72,10 +72,17 @@ export function ProductDialog({
     if (product) {
       const cat = categoryOf(product);
       const sub = subCategoryOf(product);
+      const resolvedCategoryId = product.categoryId ?? cat?._id ?? "";
+      const validSubcats = subcategoriesOf(resolvedCategoryId);
+      const candidateSubId = product.subCategoryId ?? sub?._id ?? "";
+      const resolvedSubCategoryId = validSubcats.some((sc) => sc._id === candidateSubId)
+        ? candidateSubId
+        : "";
+
       setDraft({
         name: product.name,
-        categoryId: product.categoryId ?? cat?._id ?? "",
-        subCategoryId: product.subCategoryId ?? sub?._id ?? "",
+        categoryId: resolvedCategoryId,
+        subCategoryId: resolvedSubCategoryId,
         unit: product.unit ?? "",
         details: product.details,
       });
@@ -86,6 +93,15 @@ export function ProductDialog({
     setPhotoPreview(product?.photoUrl ?? null);
     setPendingPhoto(null);
   }, [open, product, allCategories]);
+
+  // Ensure sub-category always belongs to currently selected category
+  useEffect(() => {
+    if (!draft.subCategoryId) return;
+    const validSubcats = subcategoriesOf(draft.categoryId);
+    if (!validSubcats.some((sc) => sc._id === draft.subCategoryId)) {
+      setDraft((d) => ({ ...d, subCategoryId: "" }));
+    }
+  }, [draft.categoryId, draft.subCategoryId, allCategories]);
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
@@ -142,15 +158,16 @@ export function ProductDialog({
     if (!valid || saving) return;
     setSaving(true);
     try {
-      const selectedCat = allCategories.find((c) => c._id === draft.categoryId);
-      const selectedSubCat = allCategories.find((c) => c._id === draft.subCategoryId);
+      const selectedCat = allCategories.find((c) => c._id === draft.categoryId && !c.parentId);
+      const validSubcats = selectedCat ? subcategoriesOf(selectedCat._id) : [];
+      const selectedSubCat = validSubcats.find((c) => c._id === draft.subCategoryId);
       const payload = {
         name: draft.name,
         details: draft.details,
         category: selectedCat ? selectedCat.name : undefined,
         subCategory: selectedSubCat ? selectedSubCat.name : undefined,
-        categoryId: draft.categoryId ? (draft.categoryId as Id<"productCategories">) : undefined,
-        subCategoryId: draft.subCategoryId ? (draft.subCategoryId as Id<"productCategories">) : undefined,
+        categoryId: selectedCat ? (selectedCat._id as Id<"productCategories">) : undefined,
+        subCategoryId: selectedSubCat ? (selectedSubCat._id as Id<"productCategories">) : undefined,
         unit: draft.unit,
       };
       if (product) {
@@ -297,18 +314,22 @@ export function ProductDialog({
                     className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-ink-3 transition-colors hover:text-accent"
                   >
                     <Settings2 size={13} />
-                    {t("vendors.manageCategories")}
+                    {t("products.manageCategories")}
                   </button>
                 </div>
                 <Select
                   value={draft.categoryId}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const nextCatId = e.target.value;
+                    const validSubcats = subcategoriesOf(nextCatId);
                     setDraft((d) => ({
                       ...d,
-                      categoryId: e.target.value,
-                      subCategoryId: "",
-                    }))
-                  }
+                      categoryId: nextCatId,
+                      subCategoryId: validSubcats.some((sc) => sc._id === d.subCategoryId)
+                        ? d.subCategoryId
+                        : "",
+                    }));
+                  }}
                 >
                   <option value="">{t("products.noCategory")}</option>
                   {productCats.map((c) => (

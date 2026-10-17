@@ -58,7 +58,7 @@ export function CategoryBreadcrumb({
 
       {/* Subcategory Pill with Nested Hierarchy Indicator */}
       {subCategory && (
-        <>
+        <span className="inline-flex shrink-0 items-center gap-1.5">
           <span
             className="text-ink-3/70 text-[10px] select-none shrink-0 font-bold leading-none"
             aria-hidden="true"
@@ -78,7 +78,7 @@ export function CategoryBreadcrumb({
             <span className="sr-only">Subcategory: </span>
             <span className="truncate max-w-[130px] sm:max-w-none">{subCategory}</span>
           </span>
-        </>
+        </span>
       )}
     </div>
   );
