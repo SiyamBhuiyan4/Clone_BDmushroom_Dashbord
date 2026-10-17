@@ -6,7 +6,7 @@ import { Modal, cx } from "./ui";
 import { ContactPhotoAvatar } from "./ContactPhotoAvatar";
 import { CustomerDashboardPanel, ReceiptPanel } from "./CustomerDashboard";
 import { useT } from "../lib/i18n";
-import { gradientFor } from "../lib/avatar";
+import { avatarGradientFor } from "../lib/avatar";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { uploadFile } from "../lib/upload";
 import { externalUrl, whatsappUrl } from "../../convex/shared";
@@ -64,7 +64,7 @@ export function CustomerDetailDialog({
         )
       }
       iconInteractive={Boolean(data?.customer)}
-      gradient={name ? gradientFor(name) : undefined}
+      gradient={name ? avatarGradientFor(name) : undefined}
       title={name || t("customers.title")}
       subtitle={data?.customer.phone ?? data?.customer.address ?? undefined}
       width="sm:max-w-2xl"

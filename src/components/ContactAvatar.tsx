@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { avatarGradientFor, initialOf } from "../lib/avatar";
+import { avatarThemeFor, initialOf } from "../lib/avatar";
 import { cx } from "./ui";
 
 export interface ContactAvatarProps {
@@ -8,6 +8,7 @@ export interface ContactAvatarProps {
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   className?: string;
   shape?: "circle" | "squircle";
+  animated?: boolean;
 }
 
 const SIZE_MAP = {
@@ -24,11 +25,12 @@ export function ContactAvatar({
   size = "md",
   className,
   shape = "circle",
+  animated = true,
 }: ContactAvatarProps) {
   const [imgFailed, setImgFailed] = useState(false);
   const sizeClasses = SIZE_MAP[size] || SIZE_MAP.md;
   const initial = initialOf(name);
-  const gradient = avatarGradientFor(name);
+  const theme = avatarThemeFor(name);
   const roundedClass = shape === "circle" ? "rounded-full" : "rounded-2xl";
 
   const showPhoto = Boolean(photoUrl) && !imgFailed;
@@ -36,39 +38,74 @@ export function ContactAvatar({
   return (
     <div
       className={cx(
-        "relative shrink-0 aspect-square select-none flex items-center justify-center font-bold text-white shadow-sm overflow-hidden",
-        roundedClass,
+        "group/avatar relative shrink-0 aspect-square select-none",
         sizeClasses,
-        !showPhoto && "ring-1 ring-inset ring-white/25 dark:ring-white/15 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.16)]",
-        showPhoto && "ring-1 ring-line/80 bg-surface-2",
         className,
       )}
-      style={!showPhoto ? { background: gradient } : undefined}
-      aria-hidden
     >
-      {showPhoto ? (
-        <img
-          src={photoUrl!}
-          alt={name}
-          onError={() => setImgFailed(true)}
-          className={cx("size-full object-cover", roundedClass)}
+      {/* Outer ambient glow halo (pulsing and blooming on hover) */}
+      {!showPhoto && (
+        <span
+          className={cx(
+            "pointer-events-none absolute -inset-1 rounded-full opacity-65 blur-md transition-all duration-500",
+            "group-hover:opacity-100 group-hover:blur-lg group-hover/avatar:opacity-100 group-hover/avatar:blur-lg",
+            animated && "ac-avatar-glow",
+          )}
+          style={{ background: theme.glow }}
+          aria-hidden
         />
-      ) : (
-        <>
-          {/* Subtle glossy top highlight for depth */}
-          <span
+      )}
+
+      {/* Main avatar surface */}
+      <div
+        className={cx(
+          "relative z-10 flex size-full items-center justify-center font-bold text-white overflow-hidden transition-all duration-300",
+          "group-hover:scale-105 group-hover/avatar:scale-105",
+          roundedClass,
+          !showPhoto && "ring-1 ring-inset ring-white/35 dark:ring-white/20 shadow-[0_2px_12px_rgba(0,0,0,0.18)]",
+          !showPhoto && animated && "ac-avatar-gradient-shift",
+          showPhoto && "ring-1 ring-line/80 bg-surface-2",
+        )}
+        style={!showPhoto ? { background: theme.gradient } : undefined}
+        aria-hidden
+      >
+        {showPhoto ? (
+          <img
+            src={photoUrl!}
+            alt={name}
+            onError={() => setImgFailed(true)}
             className={cx(
-              "pointer-events-none absolute inset-0 bg-gradient-to-b from-white/30 via-transparent to-black/15",
+              "size-full object-cover transition-transform duration-300 group-hover:scale-105",
               roundedClass,
             )}
-            aria-hidden
           />
-          {/* First alphabet of name */}
-          <span className="relative z-10 leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.3)]">
-            {initial}
-          </span>
-        </>
-      )}
+        ) : (
+          <>
+            {/* Top glossy specular reflection */}
+            <span
+              className={cx(
+                "pointer-events-none absolute inset-0 bg-gradient-to-b from-white/35 via-transparent to-black/20",
+                roundedClass,
+              )}
+              aria-hidden
+            />
+
+            {/* Subtle 3D sphere spherical spotlight */}
+            <span
+              className={cx(
+                "pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_35%_25%,rgba(255,255,255,0.45)_0%,transparent_60%)]",
+                roundedClass,
+              )}
+              aria-hidden
+            />
+
+            {/* First alphabet of name with luminous depth */}
+            <span className="relative z-10 leading-none drop-shadow-[0_1.5px_3px_rgba(0,0,0,0.45)] select-none">
+              {initial}
+            </span>
+          </>
+        )}
+      </div>
     </div>
   );
 }

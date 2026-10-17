@@ -25,7 +25,7 @@ import { VendorAddLotPanel } from "./VendorAddLotPanel";
 import { SidePanelCard } from "./SidePanelCard";
 import { useVendorCategories } from "../lib/vendorCategories";
 import { useT } from "../lib/i18n";
-import { gradientFor } from "../lib/avatar";
+import { avatarGradientFor } from "../lib/avatar";
 import { plural } from "../lib/format";
 import { externalUrl, whatsappUrl } from "../../convex/shared";
 import { errorMessage, useToast } from "../lib/toast";
@@ -180,7 +180,7 @@ export function VendorDetailDialog({
         )
       }
       iconInteractive={Boolean(data?.vendor)}
-      gradient={name ? gradientFor(name) : undefined}
+      gradient={name ? avatarGradientFor(name) : undefined}
       title={name || t("vendors.title")}
       subtitle={data ? (categoryOf(data.vendor) ? label(categoryOf(data.vendor)!) : undefined) : undefined}
       width="sm:max-w-2xl"

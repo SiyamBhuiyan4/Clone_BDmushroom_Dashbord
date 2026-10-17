@@ -581,6 +581,7 @@ export function Modal({
               <span
                 className={cx(
                   "flex size-11 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full text-white shadow-[var(--shadow-hero)]",
+                  gradient && "ac-avatar-gradient-shift",
                   iconInteractive && "ring-2 ring-transparent transition-shadow hover:ring-white/40",
                 )}
                 style={{ background: gradient }}
