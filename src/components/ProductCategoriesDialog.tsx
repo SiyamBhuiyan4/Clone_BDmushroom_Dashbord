@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -46,22 +46,27 @@ export function ProductCategoriesDialog({
   const [order, setOrder] = useState<Id<"productCategories">[] | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [pressId, setPressId] = useState<string | null>(null);
+  const [deltaY, setDeltaY] = useState<number>(0);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [subOrders, setSubOrders] = useState<Record<string, Id<"productCategories">[]>>({});
 
   const pressRef = useRef<{ id: string; x: number; y: number; timer: number } | null>(null);
   const dragIdRef = useRef<string | null>(null);
   dragIdRef.current = dragId;
-  const orderRef = useRef(order);
-  orderRef.current = order;
-  const categoriesRef = useRef(categories);
-  categoriesRef.current = categories;
+  const hoverIndexRef = useRef<number | null>(null);
+  hoverIndexRef.current = hoverIndex;
+  const dragStartY = useRef<number>(0);
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  const rowPositions = useRef<Array<{ id: string; top: number; height: number; midY: number }>>([]);
 
   const rows = order
     ? order
         .map((id) => categories.find((c) => c._id === id))
         .filter((c): c is Doc<"productCategories"> => Boolean(c))
     : categories;
+
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
 
   const getSubcategories = (parentId: Id<"productCategories">) => {
     const subs = subcategoriesOf(parentId);
@@ -86,6 +91,35 @@ export function ProductCategoriesDialog({
     setPressId(null);
   }
 
+  function initDrag(id: string, startClientY: number) {
+    dragStartY.current = startClientY;
+    dragIdRef.current = id;
+    setDragId(id);
+    setDeltaY(0);
+
+    const currentRows = rowsRef.current;
+    const startIdx = currentRows.findIndex((c) => c._id === id);
+    const initialIdx = startIdx >= 0 ? startIdx : 0;
+    hoverIndexRef.current = initialIdx;
+    setHoverIndex(initialIdx);
+
+    // Measure bounding boxes of all items at the rest position
+    const pos: Array<{ id: string; top: number; height: number; midY: number }> = [];
+    currentRows.forEach((c) => {
+      const el = rowRefs.current.get(c._id);
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        pos.push({
+          id: c._id,
+          top: rect.top,
+          height: rect.height,
+          midY: rect.top + rect.height / 2,
+        });
+      }
+    });
+    rowPositions.current = pos;
+  }
+
   function startPress(e: React.PointerEvent<HTMLLIElement>, id: string) {
     if ((e.target as Element).closest("button, input, form, [data-nodrag]")) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
@@ -98,9 +132,8 @@ export function ProductCategoriesDialog({
     const timer = window.setTimeout(() => {
       pressRef.current = null;
       setPressId(null);
-      setDragId(id);
-      setOrder(categoriesRef.current.map((c) => c._id));
-      navigator.vibrate?.([20]);
+      initDrag(id, startY);
+      navigator.vibrate?.([25]);
     }, HOLD_MS);
 
     pressRef.current = { id, x: startX, y: startY, timer };
@@ -117,57 +150,8 @@ export function ProductCategoriesDialog({
     e.preventDefault();
     e.stopPropagation();
     cancelPress();
-    setDragId(id);
-    setOrder(categories.map((c) => c._id));
-    navigator.vibrate?.([15]);
-  }
-
-  /**
-   * Calculates the reordered list using hysteresis deadzones (0.45 and 0.55).
-   * This completely prevents rapid bouncing/jittering when crossing row midpoints.
-   */
-  function orderAt(clientY: number): Id<"productCategories">[] | null {
-    const activeOrder = orderRef.current;
-    const activeDragId = dragIdRef.current;
-    if (!activeDragId || !activeOrder) return null;
-
-    const currIdx = activeOrder.indexOf(activeDragId as Id<"productCategories">);
-    if (currIdx === -1) return null;
-
-    let targetIdx = currIdx;
-
-    // Moving UP: check items above
-    for (let i = currIdx - 1; i >= 0; i--) {
-      const id = activeOrder[i];
-      const rect = rowRefs.current.get(id)?.getBoundingClientRect();
-      if (!rect) break;
-      const threshold = rect.top + rect.height * 0.45;
-      if (clientY < threshold) {
-        targetIdx = i;
-      } else {
-        break;
-      }
-    }
-
-    // Moving DOWN: check items below
-    for (let i = currIdx + 1; i < activeOrder.length; i++) {
-      const id = activeOrder[i];
-      const rect = rowRefs.current.get(id)?.getBoundingClientRect();
-      if (!rect) break;
-      const threshold = rect.top + rect.height * 0.55;
-      if (clientY > threshold) {
-        targetIdx = i;
-      } else {
-        break;
-      }
-    }
-
-    if (targetIdx === currIdx) return activeOrder;
-
-    const next = [...activeOrder];
-    const [item] = next.splice(currIdx, 1);
-    next.splice(targetIdx, 0, item);
-    return next;
+    initDrag(id, e.clientY);
+    navigator.vibrate?.([20]);
   }
 
   // Global window listeners while actively dragging for 100% fluid pointer tracking
@@ -175,23 +159,72 @@ export function ProductCategoriesDialog({
     if (!dragId) return;
 
     function handlePointerMove(e: PointerEvent) {
-      const next = orderAt(e.clientY);
-      if (next && orderRef.current && next.some((id, i) => id !== orderRef.current![i])) {
+      const activeId = dragIdRef.current;
+      if (!activeId) return;
+
+      const dy = e.clientY - dragStartY.current;
+      setDeltaY(dy);
+
+      const pos = rowPositions.current;
+      const currentRows = rowsRef.current;
+      const startIdx = currentRows.findIndex((c) => c._id === activeId);
+      if (startIdx === -1 || pos.length === 0) return;
+
+      const draggedPos = pos.find((p) => p.id === activeId);
+      const draggedCenter = (draggedPos ? draggedPos.midY : e.clientY) + dy;
+
+      let targetIdx = startIdx;
+
+      // Moving down
+      for (let i = startIdx + 1; i < pos.length; i++) {
+        if (draggedCenter > pos[i].midY + 6) {
+          targetIdx = i;
+        } else {
+          break;
+        }
+      }
+
+      // Moving up
+      for (let i = startIdx - 1; i >= 0; i--) {
+        if (draggedCenter < pos[i].midY - 6) {
+          targetIdx = i;
+        } else {
+          break;
+        }
+      }
+
+      if (hoverIndexRef.current !== targetIdx) {
+        hoverIndexRef.current = targetIdx;
+        setHoverIndex(targetIdx);
         navigator.vibrate?.([10]);
-        setOrder(next);
       }
     }
 
-    async function handlePointerUp(e: PointerEvent) {
+    async function handlePointerUp() {
       cancelPress();
-      const final = orderAt(e.clientY) ?? orderRef.current;
       const activeId = dragIdRef.current;
+      const targetIdx = hoverIndexRef.current;
+
       setDragId(null);
-      if (!activeId || !final) return;
-      setOrder(final);
-      const changed = final.some((id, i) => id !== categoriesRef.current[i]?._id);
+      setHoverIndex(null);
+      setDeltaY(0);
+
+      if (!activeId || targetIdx === null) return;
+
+      const currentRows = rowsRef.current;
+      const startIdx = currentRows.findIndex((c) => c._id === activeId);
+      if (startIdx === -1 || startIdx === targetIdx) return;
+
+      const next = [...currentRows];
+      const [removed] = next.splice(startIdx, 1);
+      next.splice(targetIdx, 0, removed);
+      const nextIds = next.map((c) => c._id);
+
+      setOrder(nextIds);
+      navigator.vibrate?.([15]);
+
       try {
-        if (changed) await reorder({ ids: final });
+        await reorder({ ids: nextIds });
       } catch (err) {
         toast.error(errorMessage(err));
       } finally {
@@ -209,6 +242,46 @@ export function ProductCategoriesDialog({
       window.removeEventListener("pointercancel", handlePointerUp);
     };
   }, [dragId]);
+
+  function getItemStyle(cId: string, index: number): CSSProperties | undefined {
+    if (dragId === cId) {
+      return {
+        transform: `translateY(${deltaY}px) scale(1.045)`,
+        zIndex: 50,
+        position: "relative",
+      };
+    }
+
+    if (!dragId || hoverIndex === null) {
+      return undefined;
+    }
+
+    const currentRows = rowsRef.current;
+    const startIndex = currentRows.findIndex((c) => c._id === dragId);
+    if (startIndex === -1) return undefined;
+
+    const draggedPos = rowPositions.current.find((p) => p.id === dragId);
+    const shiftDistance = (draggedPos?.height ?? 60) + 12; // 12px = gap-3
+
+    let translateY = 0;
+    if (startIndex < hoverIndex) {
+      // Dragged item is moving DOWN
+      if (index > startIndex && index <= hoverIndex) {
+        translateY = -shiftDistance;
+      }
+    } else if (startIndex > hoverIndex) {
+      // Dragged item is moving UP
+      if (index >= hoverIndex && index < startIndex) {
+        translateY = shiftDistance;
+      }
+    }
+
+    return {
+      transform: translateY !== 0 ? `translateY(${translateY}px)` : undefined,
+      transition: "transform 220ms cubic-bezier(0.2, 0, 0, 1), opacity 200ms ease",
+      zIndex: 1,
+    };
+  }
 
   async function moveSubCategory(
     subId: Id<"productCategories">,
@@ -316,11 +389,15 @@ export function ProductCategoriesDialog({
     >
       <div className="flex flex-col gap-4 px-6 py-6 max-h-[75vh] overflow-y-auto">
         <ul className="flex flex-col gap-3">
-          {rows.map((c) => {
+          {rows.map((c, cIdx) => {
             const subcats = getSubcategories(c._id);
             const hasSubcats = subcats.length > 0;
             const isExpanded = expanded[c._id] ?? true;
             const isSubSectionOpen = (hasSubcats && isExpanded) || addingSubFor === c._id;
+            const isHeld = pressId === c._id && !dragId;
+            const isDragging = dragId === c._id;
+            const isOther = Boolean(dragId && !isDragging);
+
             return (
               <li
                 key={c._id}
@@ -328,6 +405,7 @@ export function ProductCategoriesDialog({
                   if (el) rowRefs.current.set(c._id, el);
                   else rowRefs.current.delete(c._id);
                 }}
+                style={getItemStyle(c._id, cIdx)}
                 onPointerDown={(e) => startPress(e, c._id)}
                 onPointerMove={handlePointerMoveOnRow}
                 onPointerUp={cancelPress}
@@ -336,20 +414,20 @@ export function ProductCategoriesDialog({
                   if (pressId || dragId) e.preventDefault();
                 }}
                 className={cx(
-                  "flex flex-col rounded-2xl border bg-page select-none [-webkit-touch-callout:none]",
-                  "transition-[transform,scale,box-shadow,border-color,background-color,opacity] duration-200 ease-out",
-                  dragId === c._id
-                    ? "relative z-30 scale-[1.025] cursor-grabbing border-accent shadow-xl shadow-accent/20 ring-2 ring-accent/35 bg-surface"
-                    : pressId === c._id
-                      ? "relative z-20 scale-[1.018] border-accent/80 shadow-md shadow-accent/15 bg-surface/80 duration-300 ease-out"
-                      : "border-line shadow-xs duration-200",
-                  dragId && dragId !== c._id ? "opacity-75" : "opacity-100",
+                  "flex flex-col rounded-2xl border select-none [-webkit-touch-callout:none]",
+                  !isHeld && !isDragging && "bg-page border-line shadow-xs",
+                  isHeld && "scale-[1.035] border-emerald-500 bg-emerald-500/[0.08] ring-4 ring-emerald-500/25 shadow-[0_12px_28px_-4px_rgba(16,185,129,0.35)] transition-all duration-300 ease-out",
+                  isDragging && "cursor-grabbing border-emerald-500 bg-page ring-4 ring-emerald-500/40 shadow-[0_20px_45px_-8px_rgba(16,185,129,0.45),0_0_0_1px_rgba(16,185,129,0.4)]",
+                  isOther && "opacity-60",
                 )}
               >
                 {/* Main Category Header Row */}
                 <div
                   className={cx(
-                    "flex items-center justify-between gap-2 px-3.5 py-3 bg-surface/50",
+                    "flex items-center justify-between gap-2 px-3.5 py-3 transition-colors duration-200",
+                    isHeld && "bg-emerald-500/15",
+                    isDragging && "bg-emerald-500/20",
+                    !isHeld && !isDragging && "bg-surface/50",
                     isSubSectionOpen && "border-b border-line/60"
                   )}
                 >
@@ -393,8 +471,10 @@ export function ProductCategoriesDialog({
                           aria-label={`Drag to reorder ${label(c)}`}
                           title="Drag or hold for 0.3s to reorder"
                           className={cx(
-                            "shrink-0 touch-none rounded-lg p-1 text-ink-3/60 hover:text-ink hover:bg-surface-2 transition-colors",
-                            dragId === c._id ? "cursor-grabbing text-accent" : "cursor-grab",
+                            "shrink-0 touch-none rounded-lg p-1 transition-all",
+                            isDragging || isHeld
+                              ? "cursor-grabbing text-emerald-500 bg-emerald-500/10 scale-110"
+                              : "cursor-grab text-ink-3/60 hover:text-ink hover:bg-surface-2",
                           )}
                         >
                           <GripVertical size={15} />
@@ -414,10 +494,20 @@ export function ProductCategoriesDialog({
                           <span className="w-6 shrink-0" aria-hidden />
                         )}
 
-                        <span className="truncate text-[14px] font-bold text-ink">
+                        <span
+                          className={cx(
+                            "truncate text-[14px] font-bold transition-colors",
+                            (isHeld || isDragging) ? "text-emerald-950 dark:text-emerald-100 font-extrabold" : "text-ink"
+                          )}
+                        >
                           {label(c)}
                         </span>
-                        <span className="shrink-0 text-[11px] font-semibold text-ink-3 tabular-nums">
+                        <span
+                          className={cx(
+                            "shrink-0 text-[11px] font-semibold tabular-nums transition-colors",
+                            (isHeld || isDragging) ? "text-emerald-700 dark:text-emerald-300 font-bold" : "text-ink-3"
+                          )}
+                        >
                           ({plural(countIn(c._id), "product")})
                         </span>
                       </div>
