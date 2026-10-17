@@ -1,5 +1,17 @@
-import { useState } from "react";
-import { Check, ChevronDown, ChevronRight, Layers, Pencil, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  GripVertical,
+  Layers,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Button, Input, Modal, cx } from "./ui";
@@ -9,6 +21,9 @@ import { plural } from "../lib/format";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { useProductCategories } from "../lib/productCategories";
+
+/** How long a row has to be held before it can be dragged. */
+const HOLD_MS = 1600;
 
 export function ProductCategoriesDialog({
   open,
@@ -26,6 +41,116 @@ export function ProductCategoriesDialog({
   const create = useAuthedMutation(api.productCategories.create);
   const rename = useAuthedMutation(api.productCategories.rename);
   const remove = useAuthedMutation(api.productCategories.remove);
+  const reorder = useAuthedMutation(api.productCategories.reorder);
+
+  const [order, setOrder] = useState<Id<"productCategories">[] | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [pressId, setPressId] = useState<string | null>(null);
+  const pressRef = useRef<{ id: string; x: number; y: number; timer: number } | null>(null);
+  const dragIdRef = useRef<string | null>(null);
+  dragIdRef.current = dragId;
+  const rowRefs = useRef(new Map<string, HTMLLIElement>());
+
+  const rows = order
+    ? order
+        .map((id) => categories.find((c) => c._id === id))
+        .filter((c): c is Doc<"productCategories"> => Boolean(c))
+    : categories;
+
+  useEffect(() => {
+    const stopScroll = (e: TouchEvent) => {
+      if (dragIdRef.current) e.preventDefault();
+    };
+    document.addEventListener("touchmove", stopScroll, { passive: false });
+    return () => document.removeEventListener("touchmove", stopScroll);
+  }, []);
+
+  function cancelPress() {
+    if (pressRef.current) window.clearTimeout(pressRef.current.timer);
+    pressRef.current = null;
+    setPressId(null);
+  }
+
+  function startPress(e: React.PointerEvent<HTMLLIElement>, id: string) {
+    if ((e.target as Element).closest("button, input, form")) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    const timer = window.setTimeout(() => {
+      pressRef.current = null;
+      setPressId(null);
+      setDragId(id);
+      setOrder(categories.map((c) => c._id));
+      navigator.vibrate?.(12);
+    }, HOLD_MS);
+    pressRef.current = { id, x: e.clientX, y: e.clientY, timer };
+    setPressId(id);
+  }
+
+  function startDrag(e: React.PointerEvent, id: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+    cancelPress();
+    setDragId(id);
+    setOrder(categories.map((c) => c._id));
+  }
+
+  function orderAt(clientY: number) {
+    if (!dragId || !order) return null;
+    const others = order.filter((id) => id !== dragId);
+    const index = others.filter((id) => {
+      const rect = rowRefs.current.get(id)?.getBoundingClientRect();
+      return rect ? rect.top + rect.height / 2 < clientY : false;
+    }).length;
+    return [...others.slice(0, index), dragId as Id<"productCategories">, ...others.slice(index)];
+  }
+
+  function moveDrag(e: React.PointerEvent) {
+    const press = pressRef.current;
+    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) cancelPress();
+    const next = orderAt(e.clientY);
+    if (next && order && next.some((id, i) => id !== order[i])) setOrder(next);
+  }
+
+  async function endDrag(e: React.PointerEvent) {
+    cancelPress();
+    const final = orderAt(e.clientY) ?? order;
+    if (!dragId || !final) return;
+    setDragId(null);
+    setOrder(final);
+    const changed = final.some((id, i) => id !== categories[i]?._id);
+    try {
+      if (changed) await reorder({ ids: final });
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setOrder(null);
+    }
+  }
+
+  async function moveSubCategory(
+    subId: Id<"productCategories">,
+    direction: "up" | "down",
+    parentId: Id<"productCategories">,
+  ) {
+    const currentSubs = subcategoriesOf(parentId);
+    const idx = currentSubs.findIndex((s) => s._id === subId);
+    if (idx < 0) return;
+    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= currentSubs.length) return;
+    const newSubs = [...currentSubs];
+    const [removed] = newSubs.splice(idx, 1);
+    newSubs.splice(targetIdx, 0, removed);
+    try {
+      await reorder({ ids: newSubs.map((s) => s._id) });
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
 
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -102,7 +227,7 @@ export function ProductCategoriesDialog({
     >
       <div className="flex flex-col gap-4 px-6 py-6 max-h-[75vh] overflow-y-auto">
         <ul className="flex flex-col gap-3">
-          {categories.map((c) => {
+          {rows.map((c) => {
             const subcats = subcategoriesOf(c._id);
             const hasSubcats = subcats.length > 0;
             const isExpanded = expanded[c._id] ?? true;
@@ -110,12 +235,31 @@ export function ProductCategoriesDialog({
             return (
               <li
                 key={c._id}
-                className="flex flex-col rounded-2xl border border-line bg-page overflow-hidden shadow-xs"
+                ref={(el) => {
+                  if (el) rowRefs.current.set(c._id, el);
+                  else rowRefs.current.delete(c._id);
+                }}
+                onPointerDown={(e) => startPress(e, c._id)}
+                onPointerMove={moveDrag}
+                onPointerUp={(e) => void endDrag(e)}
+                onPointerCancel={(e) => void endDrag(e)}
+                onContextMenu={(e) => {
+                  if (pressId || dragId) e.preventDefault();
+                }}
+                className={cx(
+                  "flex flex-col rounded-2xl border bg-page overflow-hidden select-none [-webkit-touch-callout:none]",
+                  "transition-[scale,box-shadow,border-color]",
+                  dragId === c._id
+                    ? "relative z-20 scale-[1.03] cursor-grabbing border-accent shadow-[var(--shadow-pop)] duration-200"
+                    : pressId === c._id
+                      ? "scale-[1.03] border-accent/60 shadow-[var(--shadow-pop)] duration-[1600ms] ease-linear"
+                      : "border-line shadow-xs duration-200",
+                )}
               >
                 {/* Main Category Header Row */}
                 <div
                   className={cx(
-                    "flex items-center justify-between gap-2 px-4 py-3 bg-surface/50",
+                    "flex items-center justify-between gap-2 px-3.5 py-3 bg-surface/50",
                     isSubSectionOpen && "border-b border-line/60"
                   )}
                 >
@@ -151,7 +295,25 @@ export function ProductCategoriesDialog({
                     </form>
                   ) : (
                     <>
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        {/* Grip Handle for instant drag */}
+                        <button
+                          type="button"
+                          onPointerDown={(e) => startDrag(e, c._id)}
+                          onPointerMove={moveDrag}
+                          onPointerUp={(e) => void endDrag(e)}
+                          onPointerCancel={(e) => void endDrag(e)}
+                          aria-label={`Drag to reorder ${label(c)}`}
+                          title="Drag or press and hold to reorder"
+                          className={cx(
+                            "shrink-0 touch-none rounded-lg p-1 text-ink-3/60 hover:text-ink hover:bg-surface-2 transition-colors",
+                            dragId === c._id ? "cursor-grabbing text-accent" : "cursor-grab",
+                          )}
+                        >
+                          <GripVertical size={15} />
+                        </button>
+
+                        {/* Expand / Collapse Chevron */}
                         {hasSubcats ? (
                           <button
                             type="button"
@@ -162,8 +324,9 @@ export function ProductCategoriesDialog({
                             {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                           </button>
                         ) : (
-                          <span className="w-[23px] shrink-0" aria-hidden />
+                          <span className="w-6 shrink-0" aria-hidden />
                         )}
+
                         <span className="truncate text-[14px] font-bold text-ink">
                           {label(c)}
                         </span>
@@ -172,7 +335,7 @@ export function ProductCategoriesDialog({
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
                           onClick={() => {
@@ -214,7 +377,7 @@ export function ProductCategoriesDialog({
                   <div className="px-4 py-2.5 flex flex-col gap-1.5 bg-page">
                     {hasSubcats && isExpanded && (
                       <ul className="flex flex-col gap-1 pl-4">
-                        {subcats.map((sub) => (
+                        {subcats.map((sub, sIdx) => (
                           <li
                             key={sub._id}
                             className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-surface/70 border border-line/40 text-[12.5px]"
@@ -251,9 +414,35 @@ export function ProductCategoriesDialog({
                               </form>
                             ) : (
                               <>
-                                <span className="truncate font-medium text-ink flex-1">
-                                  {label(sub)}
-                                </span>
+                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                  {subcats.length > 1 && (
+                                    <div className="flex items-center gap-0.5 shrink-0">
+                                      <button
+                                        type="button"
+                                        disabled={sIdx === 0}
+                                        onClick={() => void moveSubCategory(sub._id, "up", c._id)}
+                                        aria-label="Move subcategory up"
+                                        title="Move up"
+                                        className="p-1 rounded text-ink-3/60 hover:text-ink hover:bg-surface-2 disabled:opacity-20 disabled:pointer-events-none transition-colors"
+                                      >
+                                        <ArrowUp size={12} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={sIdx === subcats.length - 1}
+                                        onClick={() => void moveSubCategory(sub._id, "down", c._id)}
+                                        aria-label="Move subcategory down"
+                                        title="Move down"
+                                        className="p-1 rounded text-ink-3/60 hover:text-ink hover:bg-surface-2 disabled:opacity-20 disabled:pointer-events-none transition-colors"
+                                      >
+                                        <ArrowDown size={12} />
+                                      </button>
+                                    </div>
+                                  )}
+                                  <span className="truncate font-medium text-ink flex-1">
+                                    {label(sub)}
+                                  </span>
+                                </div>
                                 <div className="flex items-center gap-1 shrink-0">
                                   <button
                                     type="button"

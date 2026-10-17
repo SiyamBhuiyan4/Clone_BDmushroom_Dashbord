@@ -212,3 +212,18 @@ export const remove = mutation({
     await ctx.db.delete(args.id);
   },
 });
+
+/** Saves a new order for the list, as dragged in the categories dialog. */
+export const reorder = mutation({
+  args: { token: v.string(), ids: v.array(v.id("productCategories")) },
+  handler: async (ctx, args) => {
+    await requireSession(ctx, args.token);
+    const all = await ctx.db.query("productCategories").collect();
+    for (const [order, id] of args.ids.entries()) {
+      if (all.some((c) => c._id === id)) {
+        await ctx.db.patch(id, { order });
+      }
+    }
+  },
+});
+
