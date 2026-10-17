@@ -60,8 +60,9 @@ export async function rememberCustomer(
 
   if (existing) {
     // Ordering again ranks a customer up the pick list, tick or no tick.
+    // Preserve existing.name so arbitrary input never rewrites the customer's name!
     await ctx.db.patch(existing._id, {
-      name,
+      name: existing.name,
       phone: phone ?? existing.phone,
       address: address ?? existing.address,
       orderCount: existing.orderCount + 1,

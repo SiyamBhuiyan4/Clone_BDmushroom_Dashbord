@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, UserRound } from "lucide-react";
+import { Search, UserRound, UserX } from "lucide-react";
 import { Input, cx } from "./ui";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
@@ -8,34 +8,28 @@ import { ContactAvatar } from "./ContactAvatar";
 export type SavedCustomer = {
   _id: string;
   name: string;
+  photoUrl?: string | null;
   phone?: string;
   address?: string;
   orderCount: number;
 };
 
 /**
- * The customer name field, with the address book behind it.
- *
- * Deliberately the name input itself rather than a separate "choose a
- * customer" control: most orders are for someone new, and a picker that has
- * to be dismissed before a new name can be typed punishes the common case to
- * serve the rarer one. Typing filters what has been saved; picking fills the
- * phone and address in; neither gets in the other's way.
- *
- * Matching runs over name and phone together, because a shop taking an order
- * over the phone has the number on screen and the name in its head, in
- * whichever order the conversation produced them.
+ * Customer search picker for sales.
+ * Enforces picking an existing customer from the saved customer database.
  */
 export function CustomerPicker({
   value,
   onChange,
   onPick,
   customers,
+  placeholder,
 }: {
   value: string;
   onChange: (next: string) => void;
   onPick: (customer: SavedCustomer) => void;
   customers: SavedCustomer[];
+  placeholder?: string;
 }) {
   const t = useT();
   const { fmtNum } = useSettings();
@@ -89,7 +83,8 @@ export function CustomerPicker({
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => {
-          if (!open || matches.length === 0) return;
+          if (!open) return;
+          if (matches.length === 0) return;
           if (e.key === "ArrowDown") {
             e.preventDefault();
             setActive((i) => Math.min(i + 1, matches.length - 1));
@@ -97,20 +92,17 @@ export function CustomerPicker({
             e.preventDefault();
             setActive((i) => Math.max(i - 1, 0));
           } else if (e.key === "Enter" && matches[active]) {
-            // Enter picks the highlighted customer rather than submitting the
-            // order behind it, which would place one with no products on it.
             e.preventDefault();
             choose(matches[active]);
           } else if (e.key === "Escape") {
             setOpen(false);
           }
         }}
-        placeholder={t("orders.customerPlaceholder")}
+        placeholder={placeholder || t("orders.searchCustomerPlaceholder")}
         className="pl-10.5"
         autoComplete="off"
         role="combobox"
         aria-expanded={open}
-        required
       />
 
       {open && matches.length > 0 && (
@@ -131,13 +123,11 @@ export function CustomerPicker({
                   i === active ? "bg-surface-2" : "hover:bg-surface-2",
                 )}
               >
-                <ContactAvatar name={c.name} size="sm" shape="circle" />
+                <ContactAvatar name={c.name} photoUrl={c.photoUrl} size="sm" shape="circle" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13.5px] font-semibold text-ink">
                     {c.name}
                   </span>
-                  {/* Phone and address are the point of picking — shown at the
-                      moment of choosing, not after. */}
                   <span className="block truncate text-[11.5px] text-ink-3">
                     {[c.phone, c.address].filter(Boolean).join(" · ") || t("orders.noDetails")}
                   </span>
@@ -150,6 +140,18 @@ export function CustomerPicker({
             </li>
           ))}
         </ul>
+      )}
+
+      {open && matches.length === 0 && (
+        <div className="ac-fade-in absolute z-30 mt-1.5 w-full rounded-xl border border-line bg-surface p-4 text-center shadow-[var(--shadow-pop)]">
+          <UserX size={20} className="mx-auto text-ink-3 mb-1.5" />
+          <p className="text-[13px] font-semibold text-ink">
+            {t("orders.noCustomerFound")}
+          </p>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-3">
+            {t("orders.onlyExistingCustomers")}
+          </p>
+        </div>
       )}
     </div>
   );

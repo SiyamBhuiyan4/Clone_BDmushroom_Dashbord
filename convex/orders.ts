@@ -3,6 +3,7 @@ import { v, ConvexError } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { requireSession, verifyPasscode } from "./auth";
 import { rememberCustomer } from "./customers";
+import { customerKey } from "./shared";
 import { oldestOpenLot, returnSaleToStock, takeFromLot } from "./stock";
 import { adjustInvestment } from "./investment";
 
@@ -171,6 +172,7 @@ export const get = query({
 export const create = mutation({
   args: {
     token: v.string(),
+    customerId: v.optional(v.id("customers")),
     customerName: v.string(),
     customerPhone: v.optional(v.string()),
     customerAddress: v.optional(v.string()),
@@ -200,7 +202,35 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     await requireSession(ctx, args.token);
-    if (!args.customerName.trim()) throw new ConvexError("Customer name is required.");
+    const rawName = args.customerName.trim();
+    if (!rawName) throw new ConvexError("Customer name is required.");
+
+    // Sales can only be made to existing customers
+    let customer = args.customerId ? await ctx.db.get(args.customerId) : null;
+    if (!customer) {
+      const key = customerKey(rawName, args.customerPhone);
+      customer = await ctx.db
+        .query("customers")
+        .withIndex("by_key", (q) => q.eq("key", key))
+        .unique();
+    }
+    if (!customer) {
+      const allCustomers = await ctx.db.query("customers").collect();
+      customer =
+        allCustomers.find(
+          (c) => c.name.trim().toLowerCase() === rawName.toLowerCase(),
+        ) ?? null;
+    }
+    if (!customer) {
+      throw new ConvexError(
+        "Sales can only be made to existing customers. Please add this customer in the Customers section first.",
+      );
+    }
+
+    // Always enforce the customer's canonical name from the record
+    const canonicalName = customer.name;
+    const resolvedPhone = args.customerPhone?.trim() || customer.phone || undefined;
+    const resolvedAddress = args.customerAddress?.trim() || customer.address || undefined;
 
     const discount = args.discount ?? 0;
     const deliveryCharge = args.deliveryCharge ?? 0;
@@ -240,26 +270,25 @@ export const create = mutation({
     const orderedAt = args.orderedAt ?? Date.now();
 
     /*
-      Remembering the customer rides along with the order rather than being a
-      second call from the client: an order that was placed but whose customer
-      was not remembered — or the reverse — is a state worth making impossible.
+      Remembering the customer updates their order count and contact info.
+      Never creates an unverified customer or overwrites their canonical name.
     */
     await rememberCustomer(
       ctx,
       {
-        name: args.customerName,
-        phone: args.customerPhone,
-        address: args.customerAddress,
+        name: canonicalName,
+        phone: resolvedPhone,
+        address: resolvedAddress,
       },
-      args.saveCustomer ?? false,
+      false,
       orderedAt,
     );
 
     const id = await ctx.db.insert("orders", {
       orderNo: await nextOrderNo(ctx),
-      customerName: args.customerName.trim(),
-      customerPhone: args.customerPhone?.trim() || undefined,
-      customerAddress: args.customerAddress?.trim() || undefined,
+      customerName: canonicalName,
+      customerPhone: resolvedPhone,
+      customerAddress: resolvedAddress,
       orderedAt,
       items: resolved,
       subtotal,

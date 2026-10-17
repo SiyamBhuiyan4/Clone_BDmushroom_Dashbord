@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, BookmarkPlus, Check, KeyRound, Receipt, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertCircle, AlertTriangle, Check, KeyRound, Receipt, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import {
@@ -16,7 +16,7 @@ import {
 } from "./ui";
 import { ProductPicker } from "./ProductPicker";
 import { CustomerPicker, type SavedCustomer } from "./CustomerPicker";
-import { customerKey } from "../../convex/shared";
+import { ContactAvatar } from "./ContactAvatar";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { CURRENCY_SYMBOL } from "../lib/format";
@@ -50,10 +50,8 @@ let lineSeq = 0;
 /**
  * Records a sale: the customer, what they took, what they paid.
  *
- * One dialog for both shapes the shop actually has — a counter sale that is
- * over the moment it is written, and an order to be delivered later. They
- * differ by one field, not by being separate features, which is why there is
- * no separate "quick sell" any more.
+ * Sales are strictly recorded for existing customers. Picking a customer
+ * locks their identity to prevent accidental name drift.
  */
 export function SaleDialog({
   open,
@@ -73,6 +71,8 @@ export function SaleDialog({
   const openLots = (useAuthedQuery(api.profit.openLots) ?? []) as OpenLot[];
   const create = useAuthedMutation(api.orders.create);
 
+  const [selectedCustomer, setSelectedCustomer] = useState<SavedCustomer | null>(null);
+  const [customerQuery, setCustomerQuery] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
@@ -84,7 +84,6 @@ export function SaleDialog({
   const [paidNow, setPaidNow] = useState("");
   const [note, setNote] = useState("");
   const [override, setOverride] = useState("");
-  const [saveCustomer, setSaveCustomer] = useState(false);
   /*
     Completed by default: most sales are rung up after the goods have gone,
     and a default that leaves stock untouched is wrong far more often than it
@@ -95,6 +94,8 @@ export function SaleDialog({
 
   useEffect(() => {
     if (!open) return;
+    setSelectedCustomer(null);
+    setCustomerQuery("");
     setName("");
     setPhone("");
     setAddress("");
@@ -105,28 +106,9 @@ export function SaleDialog({
     setPaidNow("");
     setNote("");
     setOverride("");
-    setSaveCustomer(false);
     setCompleted(true);
     setLines(presetProduct ? [lineFor(presetProduct)] : []);
   }, [open, presetProduct]);
-
-  /*
-    Whether these details are already in the address book — decided by the
-    same function the server uses, not a second copy of the rule. A tick
-    offered for someone already saved, or withheld from someone who is not,
-    is visible to the shopkeeper immediately.
-  */
-  const known = useMemo(() => {
-    if (!name.trim()) return false;
-    const key = customerKey(name, phone);
-    return customers.some((c) => customerKey(c.name, c.phone) === key);
-  }, [customers, name, phone]);
-
-  function fillFrom(c: SavedCustomer) {
-    setName(c.name);
-    setPhone(c.phone ?? "");
-    setAddress(c.address ?? "");
-  }
 
   /** Lots of this product with stock left, oldest purchase first. */
   function lotsOf(productId: Id<"products">) {
@@ -197,6 +179,7 @@ export function SaleDialog({
   // full total is Paid, so neither end of the range belongs to this one.
   const partialValid = payment !== "partial" || (paidNow !== "" && paidNowValue > 0 && paidNowValue < total);
   const valid =
+    Boolean(selectedCustomer) &&
     name.trim().length > 0 &&
     linesValid &&
     discountValue <= subtotal &&
@@ -206,13 +189,14 @@ export function SaleDialog({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!valid) return;
+    if (!valid || !selectedCustomer) return;
     setSaving(true);
     try {
       await create({
-        customerName: name,
-        customerPhone: phone,
-        customerAddress: address,
+        customerId: selectedCustomer._id as Id<"customers">,
+        customerName: selectedCustomer.name,
+        customerPhone: phone.trim() || undefined,
+        customerAddress: address.trim() || undefined,
         items: parsed.map((l) => ({
           productId: l.productId,
           quantity: l.qty,
@@ -225,7 +209,6 @@ export function SaleDialog({
         paidAmount: payment === "partial" ? paidNowValue : undefined,
         note,
         overridePasscode: shortLines.length > 0 ? override : undefined,
-        saveCustomer,
         completed,
         source: "manual",
       });
@@ -253,71 +236,100 @@ export function SaleDialog({
         <div className="flex flex-col gap-6 px-6 py-6">
           <div className="flex flex-col gap-4">
             <SectionLabel>{t("orders.customer")}</SectionLabel>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={t("orders.customerName")}>
-                {() => (
-                  <CustomerPicker
-                    value={name}
-                    onChange={setName}
-                    onPick={fillFrom}
-                    customers={customers}
-                  />
-                )}
-              </Field>
-              <Field label={t("orders.phone")}>
-                {(id) => (
-                  <Input
-                    id={id}
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="01712-345678"
-                    autoComplete="off"
-                    inputMode="tel"
-                  />
-                )}
-              </Field>
-            </div>
-            <Field label={t("orders.address")}>
-              {(id) => (
-                <Textarea
-                  id={id}
-                  rows={2}
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="১২/ক, মিরপুর রোড, ঢাকা"
-                />
-              )}
-            </Field>
 
-            {/*
-              Offered only for someone not already saved. A tick that does
-              nothing is one people stop reading, including on the orders
-              where it would have mattered.
-            */}
-            {name.trim() !== "" && !known && (
-              <label className="ac-fade-in flex cursor-pointer items-start gap-3 rounded-xl border border-line-strong bg-page px-3.5 py-3">
-                <input
-                  type="checkbox"
-                  checked={saveCustomer}
-                  onChange={(e) => setSaveCustomer(e.target.checked)}
-                  className="mt-0.5 size-4 accent-[var(--accent)]"
-                />
-                <span className="min-w-0">
-                  <span className="flex items-center gap-1.5 text-[13.5px] font-semibold text-ink">
-                    <BookmarkPlus size={15} className="text-accent" aria-hidden />
-                    {t("orders.saveCustomer")}
-                  </span>
-                  <span className="mt-0.5 block text-[12px] leading-4.5 text-ink-3">
-                    {t("orders.saveCustomerHint")}
-                  </span>
-                </span>
-              </label>
-            )}
-            {name.trim() !== "" && known && (
-              <p className="ac-fade-in flex items-center gap-1.5 text-[12px] font-semibold text-good-ink">
-                <Check size={14} aria-hidden />
-                {t("orders.customerSaved")}
-              </p>
+            {selectedCustomer ? (
+              <div className="flex flex-col gap-3 rounded-2xl border border-line-strong bg-page p-3.5 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <ContactAvatar
+                      name={selectedCustomer.name}
+                      photoUrl={selectedCustomer.photoUrl}
+                      size="md"
+                      shape="circle"
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-[15px] font-bold text-ink">
+                          {selectedCustomer.name}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-good/10 px-2 py-0.5 text-[11px] font-semibold text-good-ink">
+                          <Check size={12} />
+                          {t("orders.customerSaved")}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 truncate text-[12px] text-ink-3">
+                        {[phone || selectedCustomer.phone, address || selectedCustomer.address]
+                          .filter(Boolean)
+                          .join(" · ") || t("orders.noDetails")}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="shrink-0 text-[12.5px] font-semibold text-ink-2 hover:text-ink hover:bg-surface-2"
+                    onClick={() => {
+                      setSelectedCustomer(null);
+                      setName("");
+                      setPhone("");
+                      setAddress("");
+                      setCustomerQuery("");
+                    }}
+                  >
+                    {t("orders.changeCustomer")}
+                  </Button>
+                </div>
+
+                <div className="grid gap-3 pt-2.5 border-t border-line sm:grid-cols-2">
+                  <Field label={t("orders.phone")}>
+                    {(id) => (
+                      <Input
+                        id={id}
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="01712-345678"
+                        autoComplete="off"
+                        inputMode="tel"
+                      />
+                    )}
+                  </Field>
+                  <Field label={t("orders.address")}>
+                    {(id) => (
+                      <Textarea
+                        id={id}
+                        rows={1}
+                        value={address}
+                        onChange={(e) => setAddress(e.target.value)}
+                        placeholder="১২/ক, মিরপুর রোড, ঢাকা"
+                      />
+                    )}
+                  </Field>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Field label={t("orders.customer")}>
+                  {() => (
+                    <CustomerPicker
+                      value={customerQuery}
+                      onChange={setCustomerQuery}
+                      onPick={(c) => {
+                        setSelectedCustomer(c);
+                        setName(c.name);
+                        setPhone(c.phone ?? "");
+                        setAddress(c.address ?? "");
+                        setCustomerQuery("");
+                      }}
+                      customers={customers}
+                    />
+                  )}
+                </Field>
+                <p className="flex items-center gap-1.5 text-[12px] text-ink-3">
+                  <AlertCircle size={14} className="text-accent shrink-0" />
+                  <span>{t("orders.selectCustomerNotice")}</span>
+                </p>
+              </div>
             )}
           </div>
 
