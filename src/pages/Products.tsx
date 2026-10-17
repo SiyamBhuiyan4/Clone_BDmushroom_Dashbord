@@ -142,7 +142,7 @@ export function ProductsPage() {
           />
         </div>
         <div className="flex flex-wrap w-full gap-2.5 sm:w-auto">
-          <div className="flex-1 sm:w-44 sm:flex-none">
+          <div className="w-full sm:w-44 sm:flex-none">
             <Select
               value={category}
               onChange={(e) => {
@@ -150,6 +150,7 @@ export function ProductsPage() {
                 setSubCategory("");
               }}
               aria-label={t("common.category")}
+              className="transition-all hover:bg-surface-2/60"
             >
               <option value="">{t("common.allCategories")}</option>
               {productCats.map((c) => (
@@ -160,13 +161,14 @@ export function ProductsPage() {
             </Select>
           </div>
           {category && subcategoriesOf(category).length > 0 && (
-            <div className="flex-1 sm:w-44 sm:flex-none">
+            <div className="w-full sm:w-44 sm:flex-none">
               <Select
                 value={subCategory}
                 onChange={(e) => setSubCategory(e.target.value)}
-                aria-label={t("vendors.subCategory") || "Subcategory"}
+                aria-label={t("products.subCategory")}
+                className="transition-all hover:bg-surface-2/60"
               >
-                <option value="">{t("common.all") || "All"}</option>
+                <option value="">{t("products.allSubCategories")}</option>
                 {subcategoriesOf(category).map((sc) => (
                   <option key={sc._id} value={sc._id}>
                     {catLabel(sc)}
@@ -178,13 +180,14 @@ export function ProductsPage() {
           <button
             type="button"
             onClick={() => setManagingCategories(true)}
-            className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-line-strong bg-page px-3 text-[13px] font-semibold text-ink-3 transition-colors hover:text-ink hover:bg-surface-2"
+            className="ac-press inline-flex h-11 w-full sm:w-auto sm:shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line-strong bg-page px-3.5 text-[13px] font-semibold text-ink-3 transition-all hover:bg-surface-2 hover:text-ink hover:border-line-strong/80 focus:border-accent focus:outline-none focus:ring-4 focus:ring-[var(--ring)] active:bg-surface-3"
             title={t("vendors.manageCategories")}
+            aria-label={t("vendors.manageCategories")}
           >
-            <Settings2 size={16} />
-            <span className="hidden sm:inline">{t("vendors.manageCategories")}</span>
+            <Settings2 size={16} className="shrink-0" />
+            <span>{t("vendors.manageCategories")}</span>
           </button>
-          <div className="flex-1 sm:flex-none">
+          <div className="w-full sm:w-auto sm:flex-none">
             <SortSelect
               value={sort}
               onChange={setSort}
@@ -199,7 +202,7 @@ export function ProductsPage() {
             />
           </div>
         </div>
-        <label className="flex h-11 w-full cursor-pointer items-center gap-2.5 rounded-xl border border-line-strong bg-page px-3.5 text-[13.5px] font-medium text-ink-2 sm:w-auto">
+        <label className="flex h-11 w-full cursor-pointer items-center gap-2.5 rounded-xl border border-line-strong bg-page px-3.5 text-[13.5px] font-medium text-ink-2 transition-all hover:bg-surface-2 hover:text-ink sm:w-auto">
           <input
             type="checkbox"
             checked={showArchived}

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Check, ChevronDown, ChevronRight, Pencil, Plus, Tags, Trash2, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Button, Input, Modal } from "./ui";
+import { Button, Input, Modal, cx } from "./ui";
 import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { useT } from "../lib/i18n";
 import { plural } from "../lib/format";
@@ -89,14 +89,10 @@ export function VendorCategoriesDialog({
 
   async function confirmDelete(passcode: string) {
     if (!deleting) return;
-    try {
-      await remove({ id: deleting._id, passcode });
-      onDeleted?.(deleting._id);
-      toast.ok("Category removed.");
-      setDeleting(null);
-    } catch (err) {
-      toast.error(errorMessage(err));
-    }
+    await remove({ id: deleting._id, passcode });
+    onDeleted?.(deleting._id);
+    toast.ok("Category removed.");
+    setDeleting(null);
   }
 
   return (
@@ -112,14 +108,21 @@ export function VendorCategoriesDialog({
         <ul className="flex flex-col gap-3">
           {categories.map((c) => {
             const subcats = subcategoriesOf(c._id);
+            const hasSubcats = subcats.length > 0;
             const isExpanded = expanded[c._id] ?? true;
+            const isSubSectionOpen = (hasSubcats && isExpanded) || addingSubFor === c._id;
             return (
               <li
                 key={c._id}
                 className="flex flex-col rounded-2xl border border-line bg-page overflow-hidden shadow-xs"
               >
                 {/* Main Category Header Row */}
-                <div className="flex items-center justify-between gap-2 px-4 py-3 bg-surface/50 border-b border-line/60">
+                <div
+                  className={cx(
+                    "flex items-center justify-between gap-2 px-4 py-3 bg-surface/50",
+                    isSubSectionOpen && "border-b border-line/60"
+                  )}
+                >
                   {editingId === c._id ? (
                     <form
                       className="flex flex-1 items-center gap-2"
@@ -153,13 +156,18 @@ export function VendorCategoriesDialog({
                   ) : (
                     <>
                       <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <button
-                          type="button"
-                          onClick={() => toggleExpand(c._id)}
-                          className="p-1 rounded-md text-ink-3 hover:text-ink hover:bg-surface-2"
-                        >
-                          {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                        </button>
+                        {hasSubcats ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleExpand(c._id)}
+                            aria-label={isExpanded ? "Collapse sub-categories" : "Expand sub-categories"}
+                            className="p-1 rounded-md text-ink-3 hover:text-ink hover:bg-surface-2 transition-colors"
+                          >
+                            {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                          </button>
+                        ) : (
+                          <span className="w-[23px] shrink-0" aria-hidden />
+                        )}
                         <span className="truncate text-[14px] font-bold text-ink">
                           {label(c)}
                         </span>
@@ -206,13 +214,9 @@ export function VendorCategoriesDialog({
                 </div>
 
                 {/* Sub-categories Container */}
-                {isExpanded && (
+                {isSubSectionOpen && (
                   <div className="px-4 py-2.5 flex flex-col gap-1.5 bg-page">
-                    {subcats.length === 0 && addingSubFor !== c._id ? (
-                      <p className="text-[12px] italic text-ink-3 py-1 pl-6">
-                        {t("vendors.noSubCategory")}
-                      </p>
-                    ) : (
+                    {hasSubcats && isExpanded && (
                       <ul className="flex flex-col gap-1 pl-4">
                         {subcats.map((sub) => (
                           <li
@@ -235,6 +239,7 @@ export function VendorCategoriesDialog({
                                 />
                                 <button
                                   type="submit"
+                                  aria-label={t("common.done")}
                                   className="rounded-md p-1 text-good-ink hover:bg-surface-2"
                                 >
                                   <Check size={14} />
@@ -242,6 +247,7 @@ export function VendorCategoriesDialog({
                                 <button
                                   type="button"
                                   onClick={() => setEditingId(null)}
+                                  aria-label={t("common.cancel")}
                                   className="rounded-md p-1 text-ink-3 hover:bg-surface-2"
                                 >
                                   <X size={14} />
@@ -259,6 +265,7 @@ export function VendorCategoriesDialog({
                                       setEditingId(sub._id);
                                       setEditName(label(sub));
                                     }}
+                                    aria-label={t("common.edit")}
                                     className="p-1 text-ink-3 hover:text-ink rounded-md hover:bg-surface-2"
                                   >
                                     <Pencil size={12} />
@@ -266,6 +273,7 @@ export function VendorCategoriesDialog({
                                   <button
                                     type="button"
                                     onClick={() => setDeleting(sub)}
+                                    aria-label={t("common.delete")}
                                     className="p-1 text-ink-3 hover:text-critical rounded-md hover:bg-surface-2"
                                   >
                                     <Trash2 size={12} />
@@ -294,7 +302,7 @@ export function VendorCategoriesDialog({
                           autoFocus
                         />
                         <Button size="sm" variant="primary" type="submit" className="h-8 px-3 text-[12px]">
-                          Add
+                          {t("common.add")}
                         </Button>
                         <Button
                           size="sm"
@@ -303,7 +311,7 @@ export function VendorCategoriesDialog({
                           onClick={() => setAddingSubFor(null)}
                           className="h-8 px-2 text-[12px]"
                         >
-                          Cancel
+                          {t("common.cancel")}
                         </Button>
                       </form>
                     )}

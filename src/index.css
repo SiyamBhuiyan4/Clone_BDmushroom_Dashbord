@@ -693,3 +693,22 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   will-change: background-position;
 }
 
+/* Hide scrollbars for clean horizontal tab navigation */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Smooth scrolling utilities & transitions for category tab switching */
+.scroll-smooth {
+  scroll-behavior: smooth;
+}
+
+.tab-transition {
+  transition: background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out), box-shadow 180ms var(--ease-out), transform 120ms var(--ease-out);
+}
+
+
