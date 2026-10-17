@@ -9,7 +9,7 @@ import { CustomerDetailDialog } from "../components/CustomerDetailDialog";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
-import { gradientFor, initialOf } from "../lib/avatar";
+import { ContactAvatar } from "../components/ContactAvatar";
 import { externalUrl, normalisePhone, whatsappUrl } from "../../convex/shared";
 import { useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
@@ -136,7 +136,10 @@ export function CustomersPage() {
           <>
             <ul className="flex flex-col divide-y divide-line">
               {pager.pageRows.map((c) => (
-                <li key={c._id} className="flex items-start gap-3 px-4 py-4 sm:px-5">
+                <li
+                  key={c._id}
+                  className="group flex items-center gap-3.5 px-4 py-3.5 transition-colors hover:bg-surface-2/40 sm:px-5"
+                >
                   {/*
                     The row opens the customer rather than a separate "view"
                     icon: seeing what someone has bought is the reason to be
@@ -145,47 +148,50 @@ export function CustomersPage() {
                   <button
                     type="button"
                     onClick={() => setViewing(c._id)}
-                    className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                    className="flex min-w-0 flex-1 items-center gap-3.5 text-left"
                     aria-label={`${t("customers.theirSales")} — ${c.name}`}
                   >
-                  <span
-                    className="flex size-10 shrink-0 items-center justify-center rounded-2xl text-[14px] font-bold text-white"
-                    style={{ background: gradientFor(c.name) }}
-                    aria-hidden
-                  >
-                    {initialOf(c.name)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[14.5px] font-semibold text-ink">{c.name}</p>
-                    <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12.5px] text-ink-3">
-                      {c.phone && (
-                        <span className="inline-flex items-center gap-1">
-                          <Phone size={12} aria-hidden />
-                          {c.phone}
+                    <ContactAvatar
+                      name={c.name}
+                      photoUrl={c.photoUrl}
+                      size="md"
+                      shape="circle"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate text-[15px] font-bold tracking-tight text-ink transition-colors group-hover:text-accent">
+                          {c.name}
+                        </p>
+                        {c.balance !== 0 && (
+                          <Badge tone={c.balance < 0 ? "critical" : "warning"}>
+                            {c.balance < 0
+                              ? `${t("customers.theyOweYou")} ${fmt(Math.abs(c.balance))}`
+                              : `${t("customers.youOweThem")} ${fmt(c.balance)}`}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2.5 text-[12.5px] text-ink-3">
+                        {c.phone && (
+                          <span className="inline-flex items-center gap-1 font-medium text-ink-2">
+                            <Phone size={12} className="text-ink-3" aria-hidden />
+                            {c.phone}
+                          </span>
+                        )}
+                        {c.address && <span className="truncate text-ink-3">{c.address}</span>}
+                        {!c.phone && !c.address && <span>{t("orders.noDetails")}</span>}
+                      </p>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11.5px] text-ink-3">
+                        <span className="font-medium text-ink-3">
+                          {c.orderCount > 0
+                            ? `${fmtNum(c.orderCount)} ${t("customers.orders")}${
+                                c.lastOrderedAt ? ` · ${t("customers.last")} ${fmtDateFull(c.lastOrderedAt)}` : ""
+                              }`
+                            : t("customers.noOrdersYet")}
                         </span>
-                      )}
-                      {c.address && <span className="truncate">{c.address}</span>}
-                      {!c.phone && !c.address && <span>{t("orders.noDetails")}</span>}
-                    </p>
-                    <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-3">
-                      <span>
-                        {c.orderCount > 0
-                          ? `${fmtNum(c.orderCount)} ${t("customers.orders")}${
-                              c.lastOrderedAt ? ` · ${t("customers.last")} ${fmtDateFull(c.lastOrderedAt)}` : ""
-                            }`
-                          : t("customers.noOrdersYet")}
-                      </span>
-                      {c.balance !== 0 && (
-                        <Badge tone={c.balance < 0 ? "critical" : "warning"}>
-                          {c.balance < 0
-                            ? `${t("customers.theyOweYou")} ${fmt(Math.abs(c.balance))}`
-                            : `${t("customers.youOweThem")} ${fmt(c.balance)}`}
-                        </Badge>
-                      )}
-                    </p>
-                  </div>
+                      </p>
+                    </div>
                   </button>
-                  <div className="flex shrink-0 items-center gap-0.5">
+                  <div className="flex shrink-0 items-center gap-0.5 opacity-90 transition-opacity group-hover:opacity-100">
                     {whatsappUrl(c.whatsapp ?? c.phone) && (
                       <a
                         href={whatsappUrl(c.whatsapp ?? c.phone)!}

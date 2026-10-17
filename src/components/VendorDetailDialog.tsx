@@ -167,6 +167,7 @@ export function VendorDetailDialog({
       icon={
         data?.vendor ? (
           <ContactPhotoAvatar
+            name={data.vendor.name}
             photoUrl={data.vendor.photoUrl}
             onUpload={async (file) => {
               const uploadUrl = await generateUploadUrl({});

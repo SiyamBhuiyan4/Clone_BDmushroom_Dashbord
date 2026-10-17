@@ -28,7 +28,7 @@ import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { useRangeFilter } from "../lib/dateRange";
-import { gradientFor, initialOf } from "../lib/avatar";
+import { ContactAvatar } from "../components/ContactAvatar";
 import { errorMessage, useToast } from "../lib/toast";
 import { useAuthedMutation, useAuthedQuery } from "../lib/session";
 import { CURRENCY_CODE, plural } from "../lib/format";
@@ -457,13 +457,11 @@ export function SalesPage() {
                           customerId && "-m-1 p-1 transition-colors hover:bg-surface-2",
                         )}
                       >
-                        <span
-                          className="flex size-10 shrink-0 items-center justify-center rounded-2xl text-[14px] font-bold text-white"
-                          style={{ background: gradientFor(order.customerName) }}
-                          aria-hidden
-                        >
-                          {initialOf(order.customerName)}
-                        </span>
+                        <ContactAvatar
+                          name={order.customerName}
+                          size="md"
+                          shape="circle"
+                        />
                         <div className="min-w-0">
                           <p className="truncate text-[15px] font-bold tracking-tight text-ink">
                             {order.customerName}

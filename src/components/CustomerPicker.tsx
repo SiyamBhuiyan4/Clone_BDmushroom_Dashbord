@@ -3,7 +3,7 @@ import { Search, UserRound } from "lucide-react";
 import { Input, cx } from "./ui";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
-import { gradientFor, initialOf } from "../lib/avatar";
+import { ContactAvatar } from "./ContactAvatar";
 
 export type SavedCustomer = {
   _id: string;
@@ -131,13 +131,7 @@ export function CustomerPicker({
                   i === active ? "bg-surface-2" : "hover:bg-surface-2",
                 )}
               >
-                <span
-                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-[12px] font-bold text-white"
-                  style={{ background: gradientFor(c.name) }}
-                  aria-hidden
-                >
-                  {initialOf(c.name)}
-                </span>
+                <ContactAvatar name={c.name} size="sm" shape="circle" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13.5px] font-semibold text-ink">
                     {c.name}

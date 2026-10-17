@@ -8,7 +8,7 @@ import { VendorDialog, type EditableVendor } from "../components/VendorDialog";
 import { VendorDetailDialog } from "../components/VendorDetailDialog";
 import { PasscodeConfirmDialog } from "../components/PasscodeConfirmDialog";
 import { useT } from "../lib/i18n";
-import { gradientFor, initialOf } from "../lib/avatar";
+import { ContactAvatar } from "../components/ContactAvatar";
 import { normalisePhone, whatsappUrl } from "../../convex/shared";
 import { useVendorCategories } from "../lib/vendorCategories";
 import { VendorCategoriesDialog } from "../components/VendorCategoriesDialog";
@@ -166,38 +166,56 @@ export function VendorsPage() {
           <>
             <ul className="flex flex-col divide-y divide-line">
               {pager.pageRows.map((v) => (
-                <li key={v._id} className="flex items-start gap-3 px-4 py-4 sm:px-5">
+                <li
+                  key={v._id}
+                  className="group flex items-center gap-3.5 px-4 py-3.5 transition-colors hover:bg-surface-2/40 sm:px-5"
+                >
                   <button
                     type="button"
                     onClick={() => setViewing(v._id)}
-                    className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                    className="flex min-w-0 flex-1 items-center gap-3.5 text-left"
                     aria-label={`${t("vendors.gallery")} — ${v.name}`}
                   >
-                    <span
-                      className="flex size-10 shrink-0 items-center justify-center rounded-2xl text-[14px] font-bold text-white"
-                      style={{ background: gradientFor(v.name) }}
-                      aria-hidden
-                    >
-                      {initialOf(v.name)}
-                    </span>
+                    <ContactAvatar
+                      name={v.name}
+                      photoUrl={v.photoUrl}
+                      size="md"
+                      shape="circle"
+                    />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[14.5px] font-semibold text-ink">{v.name}</p>
-                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12.5px] text-ink-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate text-[15px] font-bold tracking-tight text-ink transition-colors group-hover:text-accent">
+                          {v.name}
+                        </p>
+                        {categoryOf(v) && (
+                          <Badge tone="accent">
+                            {label(categoryOf(v)!)}
+                          </Badge>
+                        )}
+                        {v.due > 0 && (
+                          <Badge tone="critical">
+                            {t("vendors.youOwe")} {fmt(v.due)}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2.5 text-[12.5px] text-ink-3">
                         {v.phone && (
-                          <span className="inline-flex items-center gap-1">
-                            <Phone size={12} aria-hidden />
+                          <span className="inline-flex items-center gap-1 font-medium text-ink-2">
+                            <Phone size={12} className="text-ink-3" aria-hidden />
                             {v.phone}
                           </span>
                         )}
-                        {categoryOf(v) && <Badge tone="accent">{label(categoryOf(v)!)}</Badge>}
-                      </p>
-                      {/* What this vendor has been to the shop lately, at a glance. */}
-                      {v.lastPurchaseAt !== null && (
-                        <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[12px] text-ink-3">
+                        {v.lastPurchaseAt !== null ? (
                           <span>
                             {t("vendors.lastBought")} {relativeTime(v.lastPurchaseAt)}
                           </span>
-                          <span aria-hidden>·</span>
+                        ) : (
+                          <span>{t("vendors.noLotsYet")}</span>
+                        )}
+                      </p>
+                      {/* What this vendor has been to the shop lately, at a glance. */}
+                      {v.lastPurchaseAt !== null && (
+                        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11.5px] text-ink-3">
                           <span>
                             {t("vendors.thisMonth")}{" "}
                             <span className="font-semibold tabular-nums text-ink-2">
@@ -208,19 +226,18 @@ export function VendorsPage() {
                               )}
                             </span>
                           </span>
-                          {v.due > 0 && (
-                            <>
-                              <span aria-hidden>·</span>
-                              <span className="font-semibold tabular-nums text-critical-ink">
-                                {t("vendors.youOwe")} {fmt(v.due)}
-                              </span>
-                            </>
-                          )}
+                          <span aria-hidden>·</span>
+                          <span>
+                            Total:{" "}
+                            <span className="font-semibold tabular-nums text-ink-2">
+                              {fmt(v.purchases.reduce((sum, p) => sum + p.amount, 0))}
+                            </span>
+                          </span>
                         </p>
                       )}
                     </div>
                   </button>
-                  <div className="flex shrink-0 items-center gap-0.5">
+                  <div className="flex shrink-0 items-center gap-0.5 opacity-90 transition-opacity group-hover:opacity-100">
                     {whatsappUrl(v.whatsapp ?? v.phone) && (
                       <a
                         href={whatsappUrl(v.whatsapp ?? v.phone)!}

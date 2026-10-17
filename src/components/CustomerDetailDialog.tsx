@@ -51,6 +51,7 @@ export function CustomerDetailDialog({
       icon={
         data?.customer ? (
           <ContactPhotoAvatar
+            name={name}
             photoUrl={data.customer.photoUrl}
             onUpload={async (file) => {
               const uploadUrl = await generateUploadUrl({});

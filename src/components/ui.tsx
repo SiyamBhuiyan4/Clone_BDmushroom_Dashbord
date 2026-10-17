@@ -580,7 +580,7 @@ export function Modal({
             {icon && (
               <span
                 className={cx(
-                  "flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-white shadow-[var(--shadow-hero)]",
+                  "flex size-11 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full text-white shadow-[var(--shadow-hero)]",
                   iconInteractive && "ring-2 ring-transparent transition-shadow hover:ring-white/40",
                 )}
                 style={{ background: gradient }}
