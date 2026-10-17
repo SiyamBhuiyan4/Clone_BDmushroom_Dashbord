@@ -94,6 +94,8 @@
   --ring: rgba(21, 128, 61, 0.28);
 
   /* Warm-tinted shadows — a cool grey shadow on cream reads as grime. */
+  --shadow-2xs: 0 1px 2px rgba(72, 55, 34, 0.04);
+  --shadow-xs: 0 1px 2px rgba(72, 55, 34, 0.05);
   --shadow-sm: 0 1px 2px rgba(72, 55, 34, 0.06);
   --shadow-card: 0 1px 3px rgba(72, 55, 34, 0.07), 0 8px 24px -12px rgba(72, 55, 34, 0.16);
   --shadow-pop: 0 24px 60px -12px rgba(60, 45, 28, 0.3), 0 4px 12px rgba(60, 45, 28, 0.12);
@@ -142,6 +144,8 @@
 
     --ring: rgba(31, 150, 84, 0.4);
 
+    --shadow-2xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
     --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.6), 0 8px 24px -12px rgba(0, 0, 0, 0.8);
     --shadow-pop: 0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 4px 12px rgba(0, 0, 0, 0.6);
@@ -189,6 +193,8 @@
 
   --ring: rgba(31, 150, 84, 0.4);
 
+  --shadow-2xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.6), 0 8px 24px -12px rgba(0, 0, 0, 0.8);
   --shadow-pop: 0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 4px 12px rgba(0, 0, 0, 0.6);
@@ -262,6 +268,13 @@
   --color-critical-solid: var(--critical-solid);
 
   --radius-card: 20px;
+
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+  --shadow-hero: var(--shadow-hero);
 }
 
 html,
@@ -623,6 +636,13 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   --critical-solid: #dc2626;
   
   --scrim: rgba(5, 22, 13, 0.85);
+
+  --shadow-2xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.6), 0 8px 24px -12px rgba(0, 0, 0, 0.8);
+  --shadow-pop: 0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 4px 12px rgba(0, 0, 0, 0.6);
+  --shadow-hero: 0 12px 32px -8px rgba(34, 197, 94, 0.45);
 }
 
 /* Smooth floating speech bubble animations for Admin Trainee Notes */

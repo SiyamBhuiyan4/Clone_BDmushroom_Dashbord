@@ -5,6 +5,7 @@ import {
   useState,
   type ButtonHTMLAttributes,
   type ComponentProps,
+  type HTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
@@ -272,26 +273,45 @@ export function AmountInput({
 
 /* ----------------------------------------------------------------- Badge */
 
-const BADGE_TONES: Record<string, string> = {
+export const BADGE_TONES = {
   neutral: "bg-surface-2 text-ink-2",
   good: "bg-good-soft text-good-ink",
   warning: "bg-warning-soft text-warning-ink",
   critical: "bg-critical-soft text-critical-ink",
   accent: "bg-accent-soft text-accent",
+} as const;
+
+export type BadgeTone = keyof typeof BADGE_TONES;
+export type BadgeSize = "xs" | "sm" | "md";
+
+const BADGE_SIZES: Record<BadgeSize, string> = {
+  xs: "text-[10px] py-0.5 px-1.5 rounded-md gap-1",
+  sm: "text-[11.5px] py-0.5 px-2 rounded-lg gap-1",
+  md: "text-[12.5px] py-1 px-2.5 rounded-lg gap-1.5",
 };
+
+export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
+  tone?: BadgeTone;
+  size?: BadgeSize;
+  className?: string;
+  children: ReactNode;
+}
 
 export function Badge({
   tone = "neutral",
+  size = "sm",
+  className,
   children,
-}: {
-  tone?: keyof typeof BADGE_TONES;
-  children: ReactNode;
-}) {
+  ...rest
+}: BadgeProps) {
   return (
     <span
+      {...rest}
       className={cx(
-        "inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-[11.5px] font-semibold whitespace-nowrap",
-        BADGE_TONES[tone],
+        "inline-flex shrink-0 items-center font-semibold whitespace-nowrap",
+        BADGE_SIZES[size],
+        BADGE_TONES[tone] ?? BADGE_TONES.neutral,
+        className,
       )}
     >
       {children}
@@ -332,7 +352,7 @@ export function Modal({
   open: boolean;
   onClose: () => void;
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   /** Anchors the header — a dialog with no visual subject reads as a form dump. */
   icon?: ReactNode;
   /** True when `icon` is its own control (e.g. a photo upload button) rather than decoration — keeps it out of the accessibility tree otherwise, same as a background image. */
@@ -592,7 +612,13 @@ export function Modal({
             )}
             <div className="min-w-0 flex-1">
               <h2 className="text-[19px] leading-7 font-bold tracking-tight text-ink">{title}</h2>
-              {subtitle && <p className="mt-1 text-[13px] leading-5 text-ink-3">{subtitle}</p>}
+              {subtitle && (
+                typeof subtitle === "string" ? (
+                  <p className="mt-1 text-[13px] leading-5 text-ink-3">{subtitle}</p>
+                ) : (
+                  <div className="mt-1.5">{subtitle}</div>
+                )
+              )}
             </div>
             {headerActions && <div className="shrink-0 flex items-center gap-2">{headerActions}</div>}
             <button

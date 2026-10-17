@@ -310,7 +310,7 @@ export function ProductDialog({
                     }))
                   }
                 >
-                  <option value="">{t("vendors.noCategory")}</option>
+                  <option value="">{t("products.noCategory")}</option>
                   {productCats.map((c) => (
                     <option key={c._id} value={c._id}>
                       {catLabel(c)}
@@ -320,14 +320,14 @@ export function ProductDialog({
               </div>
 
               {subcats.length > 0 && (
-                <Field label={t("vendors.subCategory")} hint={t("common.optional")}>
+                <Field label={t("products.subCategory")} hint={t("common.optional")}>
                   {(id) => (
                     <Select
                       id={id}
                       value={draft.subCategoryId}
                       onChange={(e) => setDraft((d) => ({ ...d, subCategoryId: e.target.value }))}
                     >
-                      <option value="">{t("vendors.noSubCategory")}</option>
+                      <option value="">{t("products.noSubCategory")}</option>
                       {subcats.map((sc) => (
                         <option key={sc._id} value={sc._id}>
                           {catLabel(sc)}

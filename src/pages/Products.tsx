@@ -153,7 +153,7 @@ export function ProductsPage() {
               aria-label={t("common.category")}
               className="transition-all hover:bg-surface-2/60"
             >
-              <option value="">{t("common.allCategories")}</option>
+              <option value="">{t("products.allCategories")}</option>
               {productCats.map((c) => (
                 <option key={c._id} value={c._id}>
                   {catLabel(c)}

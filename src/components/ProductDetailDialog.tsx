@@ -7,6 +7,7 @@ import { BatchDialog, type BatchInput } from "./BatchDialog";
 import { LotRemoveDialog } from "./LotRemoveDialog";
 import { LotDetailDialog } from "./LotDetailDialog";
 import { VendorDetailDialog } from "./VendorDetailDialog";
+import { CategoryBreadcrumb } from "./CategoryBreadcrumb";
 import { useSettings } from "../lib/settings";
 import { useT } from "../lib/i18n";
 import { gradientFor } from "../lib/avatar";
@@ -143,9 +144,6 @@ export function ProductDetailDialog({
   const [viewingVendor, setViewingVendor] = useState<Id<"vendors"> | null>(null);
 
   const name = data?.product.name ?? "";
-  const categoryLabel = data?.product.category
-    ? `${data.product.category}${data.product.subCategory ? ` › ${data.product.subCategory}` : ""}`
-    : undefined;
 
   return (
     <Modal
@@ -155,7 +153,14 @@ export function ProductDetailDialog({
       iconInteractive={Boolean(data?.product)}
       gradient={name ? gradientFor(name) : undefined}
       title={name || t("detail.title")}
-      subtitle={categoryLabel}
+      subtitle={
+        data?.product.category ? (
+          <CategoryBreadcrumb
+            category={data.product.category}
+            subCategory={data.product.subCategory}
+          />
+        ) : undefined
+      }
       width="sm:max-w-2xl"
     >
       {!data ? (

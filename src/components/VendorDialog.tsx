@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, Globe, Truck } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { Button, Field, Input, Modal, ModalFooter, Select, Textarea } from "./ui";
+import { Button, Field, Input, Modal, ModalFooter, Select, Textarea, cx } from "./ui";
 import { PhoneListField } from "./PhoneListField";
 import { useT } from "../lib/i18n";
 import { errorMessage, useToast } from "../lib/toast";
@@ -28,7 +28,7 @@ export function VendorDialog({
   const update = useAuthedMutation(api.vendors.update);
 
   const [name, setName] = useState("");
-  const { categories, subcategoriesOf, label, categoryOf } = useVendorCategories();
+  const { categories, allCategories, subcategoriesOf, label, categoryOf } = useVendorCategories();
   // A category id, or "" for none.
   const [category, setCategory] = useState("");
   const [subCategory, setSubCategory] = useState("");
@@ -47,7 +47,9 @@ export function VendorDialog({
     setName(vendor?.name ?? "");
     const cat = vendor ? (categoryOf(vendor)?._id ?? "") : (categories[0]?._id ?? "");
     setCategory(cat);
-    setSubCategory(vendor?.subCategoryId ?? "");
+    const currentSubcats = subcategoriesOf(cat);
+    const hasMatchingSubcat = currentSubcats.some((s) => s._id === vendor?.subCategoryId);
+    setSubCategory(hasMatchingSubcat ? (vendor?.subCategoryId ?? "") : "");
     setPhone(vendor?.phone ?? "");
     setExtraPhones(vendor?.extraPhones ?? []);
     setWhatsapp(vendor?.whatsapp ?? "");
@@ -56,7 +58,7 @@ export function VendorDialog({
     setTin(vendor?.tin ?? "");
     setTradeLicenseNo(vendor?.tradeLicenseNo ?? "");
     setNote(vendor?.note ?? "");
-  }, [open, vendor]);
+  }, [open, vendor, allCategories]);
 
   const valid = name.trim() !== "";
 
@@ -65,10 +67,14 @@ export function VendorDialog({
     if (!valid || saving) return;
     setSaving(true);
     try {
+      const validSubcatId =
+        category && subcats.some((s) => s._id === subCategory)
+          ? (subCategory as Id<"vendorCategories">)
+          : undefined;
       const payload = {
         name,
         categoryId: category ? (category as Id<"vendorCategories">) : undefined,
-        subCategoryId: subCategory ? (subCategory as Id<"vendorCategories">) : undefined,
+        subCategoryId: validSubcatId,
         phone,
         extraPhones,
         whatsapp,
@@ -119,15 +125,21 @@ export function VendorDialog({
             )}
           </Field>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className={cx("grid gap-4", subcats.length > 0 && "sm:grid-cols-2")}>
             <Field label={t("vendors.category")}>
               {(id) => (
                 <Select
                   id={id}
                   value={category}
                   onChange={(e) => {
-                    setCategory(e.target.value);
-                    setSubCategory("");
+                    const nextCat = e.target.value;
+                    setCategory(nextCat);
+                    const isUnderSelectedCategory = subcategoriesOf(nextCat).some(
+                      (s) => s._id === subCategory,
+                    );
+                    if (!isUnderSelectedCategory) {
+                      setSubCategory("");
+                    }
                   }}
                 >
                   {categories.map((c) => (

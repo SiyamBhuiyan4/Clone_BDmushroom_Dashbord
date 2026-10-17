@@ -24,9 +24,9 @@ export function CategoryBreadcrumb({
   if (!category) return null;
 
   const sizeClasses = {
-    xs: "text-[10px] py-0.5 px-1.5 rounded-md gap-1",
-    sm: "text-[11px] py-0.5 px-2 rounded-lg gap-1",
-    md: "text-[12px] py-1 px-2.5 rounded-lg gap-1.5",
+    xs: "text-[10px] leading-tight py-0.5 px-1.5 rounded-md gap-1 tracking-normal",
+    sm: "text-[11px] leading-tight py-0.5 px-2 rounded-lg gap-1 tracking-normal",
+    md: "text-[12px] leading-tight py-1 px-2.5 rounded-lg gap-1.5 tracking-normal",
   }[size];
 
   const iconSizes = {
@@ -45,8 +45,9 @@ export function CategoryBreadcrumb({
       <span
         title={`Category: ${category}`}
         className={cx(
-          "inline-flex shrink-0 items-center font-medium transition-colors select-none",
-          "bg-surface-2/80 text-ink-2 border border-line-strong/40 shadow-[var(--shadow-sm)]",
+          "inline-flex shrink-0 items-center font-medium select-none cursor-default transition-all duration-150",
+          "bg-surface-2/80 text-ink-2 border border-line-strong/40 shadow-[var(--shadow-2xs)]",
+          "hover:bg-surface-2 hover:text-ink hover:border-line-strong/60 hover:shadow-xs",
           sizeClasses,
         )}
       >
@@ -59,7 +60,7 @@ export function CategoryBreadcrumb({
       {subCategory && (
         <>
           <span
-            className="text-ink-3/70 text-[10px] select-none shrink-0 font-bold"
+            className="text-ink-3/70 text-[10px] select-none shrink-0 font-bold leading-none"
             aria-hidden="true"
           >
             ›
@@ -67,8 +68,9 @@ export function CategoryBreadcrumb({
           <span
             title={`Subcategory: ${subCategory}`}
             className={cx(
-              "inline-flex shrink-0 items-center font-semibold transition-colors select-none",
-              "bg-accent-soft text-accent-strong border border-accent/25 shadow-[var(--shadow-sm)]",
+              "inline-flex shrink-0 items-center font-semibold select-none cursor-default transition-all duration-150",
+              "bg-accent-soft text-accent-strong border border-accent/25 shadow-[var(--shadow-2xs)]",
+              "hover:bg-accent-soft-strong hover:border-accent/40 hover:shadow-xs",
               sizeClasses,
             )}
           >

@@ -332,6 +332,7 @@ const EN = {
   "products.categoriesTitle": "Product categories",
   "products.categoriesSubtitle": "Add, rename or remove product categories and sub-categories.",
   "products.allSubCategories": "All sub-categories",
+  "products.allCategories": "All categories",
 
   "customers.title": "Customers",
   "customers.subtitle": "The people you sell to — kept once, picked from then on.",
@@ -974,6 +975,7 @@ const BN: Partial<Record<MessageKey, string>> = {
   "products.categoriesTitle": "পণ্যের ক্যাটাগরি",
   "products.categoriesSubtitle": "পণ্যের ক্যাটাগরি ও সাব-ক্যাটাগরি যোগ, সম্পাদনা বা মুছুন।",
   "products.allSubCategories": "সকল সাব-ক্যাটাগরি",
+  "products.allCategories": "সব ক্যাটাগরি",
 
   "customers.title": "ক্রেতা",
   "customers.subtitle": "যাদের কাছে বিক্রি করেন — একবার লিখুন, পরে শুধু খুঁজে নিন।",

@@ -23,6 +23,7 @@ import { PasscodeConfirmDialog } from "./PasscodeConfirmDialog";
 import { VendorPurchaseHistory } from "./VendorPurchaseHistory";
 import { VendorAddLotPanel } from "./VendorAddLotPanel";
 import { SidePanelCard } from "./SidePanelCard";
+import { CategoryBreadcrumb } from "./CategoryBreadcrumb";
 import { useVendorCategories } from "../lib/vendorCategories";
 import { useT } from "../lib/i18n";
 import { avatarGradientFor } from "../lib/avatar";
@@ -45,7 +46,7 @@ export function VendorDetailDialog({
   const t = useT();
   const toast = useToast();
   const data = useAuthedQuery(api.vendors.detail, vendorId ? { id: vendorId } : "skip");
-  const { label, categoryOf } = useVendorCategories();
+  const { label, categoryOf, subCategoryOf, allCategories } = useVendorCategories();
   const createFolder = useAuthedMutation(api.vendors.createFolder);
   const removeFolder = useAuthedMutation(api.vendors.removeFolder);
   const generateUploadUrl = useAuthedMutation(api.vendors.generateUploadUrl);
@@ -77,6 +78,13 @@ export function VendorDetailDialog({
   }, [open, vendorId]);
 
   const name = data?.vendor.name ?? "";
+  const vendorSubCategory = data?.vendor ? subCategoryOf(data.vendor) : null;
+  const vendorCategory = data?.vendor
+    ? categoryOf(data.vendor) ??
+      (vendorSubCategory?.parentId
+        ? allCategories.find((c) => c._id === vendorSubCategory.parentId) ?? null
+        : null)
+    : null;
   const isUnfiledView = openFolderId === "unfiled";
   const openFolder =
     openFolderId && !isUnfiledView ? (data?.folders.find((f) => f._id === openFolderId) ?? null) : null;
@@ -182,7 +190,15 @@ export function VendorDetailDialog({
       iconInteractive={Boolean(data?.vendor)}
       gradient={name ? avatarGradientFor(name) : undefined}
       title={name || t("vendors.title")}
-      subtitle={data ? (categoryOf(data.vendor) ? label(categoryOf(data.vendor)!) : undefined) : undefined}
+      subtitle={
+        vendorCategory ? (
+          <CategoryBreadcrumb
+            category={label(vendorCategory)}
+            subCategory={vendorSubCategory ? label(vendorSubCategory) : null}
+            size="sm"
+          />
+        ) : undefined
+      }
       width="sm:max-w-2xl"
     >
       {!data ? (
